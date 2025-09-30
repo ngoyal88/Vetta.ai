@@ -13,3 +13,6 @@ python-docx==0.8.11
 pydantic==2.6.4
 pydantic-settings==2.2.0
 httpx==0.26.0
+firebase_admin
+aiortc
+python-socketio
