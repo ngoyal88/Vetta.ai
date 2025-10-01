@@ -3,7 +3,7 @@ Redis connection helper (asyncio).
 """
 import redis.asyncio as redis
 from functools import lru_cache
-from backend.config import get_settings
+from config import get_settings
 
 @lru_cache
 def get_redis() -> redis.Redis:

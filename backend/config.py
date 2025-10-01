@@ -1,31 +1,26 @@
-from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
+from dotenv import load_dotenv
 
+load_dotenv()  # Load from .env file
 
-class Settings(BaseSettings):
-    # ---------- LLM / Grok ------------------------------------------------- #
-    xai_api_key: str | None = None
-    grok_model: str = "grok-beta"
-    grok_base_url: str = "https://api.x.ai/v1"
-    grok_temp: float = 0.7
-    grok_max_tokens: int = 1024
+class Settings:
+    # Redis settings
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
+    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
-    # ---------- Redis ------------------------------------------------------ #
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_db: int = 0
+    # LLM provider
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini")
+    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
 
-    # ---------- CORS ------------------------------------------------------- #
-    allowed_origins: str = "http://localhost:3000,http://localhost:5173"
+    # Firebase
+    FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "")
+    FIREBASE_CREDENTIALS: str = os.getenv("FIREBASE_CREDENTIALS", "")
 
-    # ---------- Logging ---------------------------------------------------- #
-    log_level: str = "INFO"
-    log_format: str = "console"           # console | json
+    # API token for authentication
+    api_token: str = os.getenv("API_TOKEN", "")
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    log_format: str = os.getenv("LOG_FORMAT", "console")  # options:
 
-
-@lru_cache
-def get_settings() -> Settings:
-    """Singleton settings accessor."""
-    return Settings()
+settings = Settings()
