@@ -16,7 +16,7 @@ except Exception:
     log.warning("google.generativeai SDK not installed or failed to import.")
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 DEFAULT_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.25"))
 
 if genai and LLM_API_KEY:

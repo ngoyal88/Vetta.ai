@@ -10,3 +10,4 @@ backend/models/__pycache__
 backend/venv
 .vscode/
 .env
+backend/routes/llm.py
