@@ -1,5 +1,6 @@
 import os
 import json
+from fastapi.encoders import jsonable_encoder
 from redis.asyncio import Redis
 from utils.logger import get_logger
 
@@ -34,7 +35,8 @@ async def test_connection():
 async def create_session(session_id: str, data: dict, expire_seconds: int = 3600):
     """Create or overwrite a session (JSON-encoded)."""
     try:
-        await redis.set(session_id, json.dumps(data), ex=expire_seconds)
+        safe = jsonable_encoder(data)
+        await redis.set(session_id, json.dumps(safe), ex=expire_seconds)
         log.info(f"Session {session_id} created/updated.")
     except Exception as e:
         log.error(f"Error creating session {session_id}: {e}", exc_info=True)
@@ -56,7 +58,8 @@ async def get_session(session_id: str):
 async def update_session(session_id: str, data: dict, expire_seconds: int = 3600):
     """Update (replace) session data with fresh JSON."""
     try:
-        await redis.set(session_id, json.dumps(data), ex=expire_seconds)
+        safe = jsonable_encoder(data)
+        await redis.set(session_id, json.dumps(safe), ex=expire_seconds)
         log.info(f"Session {session_id} updated.")
     except Exception as e:
         log.error(f"Error updating session {session_id}: {e}", exc_info=True)
