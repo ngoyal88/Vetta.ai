@@ -1,21 +1,24 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import Response
-from routes import resume, webrtc_offer_answer,test_session,interview
-"""from utils.logger import setup_logging, get_logger"""
-from config import settings  # Importing structured settings
+from routes import resume, interview_session, websocket_interview_test, webrtc_offer_answer
+from config import get_settings
+from utils.logger import setup_logging, get_logger
+from utils.redis_client import test_connection
 
-# Initialize logging before anything else
-"""setup_logging()
-log = get_logger(__name__)"""
+setup_logging()
+log = get_logger(__name__)
+settings = get_settings()
 
-# Create FastAPI instance
-app = FastAPI(title="AI Interviewer API", version="1.0.0")
+app = FastAPI(
+    title="AI Interviewer Platform API",
+    version="2.0.0",
+    description="Complete AI-powered interview platform with live transcription and code execution"
+)
 
-# Configure CORS middleware
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update in production to specific origins
+    allow_origins=settings.allowed_origins.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,76 +26,81 @@ app.add_middleware(
 
 # Include routers
 app.include_router(resume.router)
-app.include_router(test_session.router)
-app.include_router(interview.router)
+app.include_router(interview_session.router)
+app.include_router(websocket_interview_test.router)
 app.include_router(webrtc_offer_answer.router, prefix="/webrtc")
 
-# Future routers (commented for now)
-"""
-app.include_router(llm.router)
-app.include_router(interview.router)
-app.include_router(health.router)
-app.include_router(code_runner.router)
-"""
 
-# Add Content Security Policy headers for WebSocket connections
-@app.middleware("http")
-async def add_csp_headers(request, call_next):
-    response: Response = await call_next(request)
-    response.headers["Content-Security-Policy"] = (
-        "connect-src 'self' ws://localhost:8000 http://localhost:8000"
-    )
-    return response
+@app.on_event("startup")
+async def startup_event():
+    """Startup tasks"""
+    log.info("🚀 Starting AI Interviewer Platform v2.0.0")
+    
+    # Test Redis
+    redis_ok = await test_connection()
+    if redis_ok:
+        log.info("✅ Redis connected")
+    else:
+        log.warning("⚠️ Redis connection failed")
+    
+    # Log configured services
+    services = []
+    if settings.llm_api_key:
+        services.append("✅ Gemini LLM")
+    if settings.judge0_api_key:
+        services.append("✅ Judge0 Code Execution")
+    if settings.google_cloud_api_key:
+        services.append("✅ Google Cloud (STT/TTS)")
+    
+    log.info(f"Configured services: {', '.join(services) if services else 'None'}")
 
-# Health check endpoint
-@app.get("/health")
-async def health_check():
-    """
-    Simple health check endpoint.
-    """
-    return {
-        "status": "healthy",
-        "resume_parser": "OpenResume (Free)",
-        "features": ["PDF parsing", "DOCX parsing", "Skills extraction", "Experience extraction"]
-    }
 
-# Root endpoint with API information
 @app.get("/")
 async def root():
-    """
-    Root endpoint providing basic information about the API.
-    """
     return {
-        "message": "AI Mock Interview Backend is running ✅",
-        "resume_parser": "OpenResume - Free & Open Source",
-        "endpoints": {
-            "upload_resume": "/upload_resume",
-            "health": "/health",
-            "docs": "/docs"
-        },
+        "message": "AI Interviewer Platform v2.0.0",
+        "status": "operational",
         "features": [
-            "Free resume parsing (no API costs)",
-            "AI-powered interviews",
-            "Code execution",
-            "Text-to-speech"
-        ]
+            "📄 Resume parsing",
+            "🎯 Custom role interviews",
+            "💻 DSA with code execution",
+            "🎤 Live transcription/subtitles",
+            "📊 Comprehensive feedback",
+            "⚡ Real-time WebSocket",
+            "🔄 Multi-language support"
+        ],
+        "documentation": "/docs",
+        "websocket": "/ws/interview/{session_id}"
     }
 
-# Example upload endpoint (commented out for now, can be expanded later)
-"""
-@app.post("/upload_resume")
-async def upload_resume(file: UploadFile = File(...)):
-    try:
-        log.info(f"Received resume file: {file.filename}")
-        file_bytes = await file.read()
-        parsed_data = parse_resume(file_bytes, file.filename)
-        return {"parsed_data": parsed_data}
-    except Exception as e:
-        log.error(f"Error in resume upload: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-"""
 
-# Run the app using Uvicorn when executed directly
+@app.get("/health")
+async def health_check():
+    """Enhanced health check"""
+    return {
+        "status": "healthy",
+        "version": "2.0.0",
+        "services": {
+            "gemini_llm": bool(settings.llm_api_key),
+            "judge0": bool(settings.judge0_api_key),
+            "redis": True,
+            "firebase": True
+        },
+        "features": {
+            "dsa_interviews": True,
+            "custom_roles": True,
+            "live_transcription": True,
+            "code_execution": bool(settings.judge0_api_key)
+        }
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
