@@ -308,3 +308,136 @@ async def get_user_sessions(
         
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+@router.post("/submit-response")
+async def submit_response(
+    request: SubmitResponseRequest,
+    auth: None = Depends(verify_api_token)
+):
+    """Submit answer to question"""
+    try:
+        session_data = await get_session(f"interview:{request.session_id}")
+        if not session_data:
+            raise HTTPException(404, "Session not found")
+        
+        session = InterviewSession(**session_data)
+        
+        if request.question_index >= len(session.questions):
+            raise HTTPException(400, "Invalid question index")
+        
+        question = session.questions[request.question_index]
+        
+        # Analyze response using AI
+        analysis = await interview_service.analyze_response(
+            question.get('question', ''),
+            request.response,
+            session.interview_type
+        )
+        
+        # Store response with analysis
+        session.responses.append({
+            'question_index': request.question_index,
+            'question': question,
+            'response': request.response,
+            'response_time': request.response_time_seconds,
+            'analysis': analysis,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+        
+        session.last_updated = datetime.now(timezone.utc)
+        await update_session(f"interview:{request.session_id}", session.dict())
+        
+        logger.info(f"Response submitted for session {request.session_id}, Q{request.question_index}")
+        
+        return {
+            "message": "Response submitted successfully",
+            "analysis": analysis,
+            "question_index": request.question_index
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting response: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@router.post("/submit-code")
+async def submit_code(
+    request: SubmitCodeRequest,
+    auth: None = Depends(verify_api_token)
+):
+    """Execute code against test cases (DSA interviews)"""
+    try:
+        session_data = await get_session(f"interview:{request.session_id}")
+        if not session_data:
+            raise HTTPException(404, "Session not found")
+        
+        session = InterviewSession(**session_data)
+        
+        # Find the question with this question_id
+        question = None
+        for q in session.questions:
+            if q.get('question_id') == request.question_id or q.get('title') == request.question_id:
+                question = q
+                break
+        
+        if not question:
+            raise HTTPException(404, f"Question {request.question_id} not found")
+        
+        # Get test cases from question
+        test_cases_raw = question.get('test_cases', [])
+        
+        # Convert to TestCase objects
+        from models.interview import TestCase
+        test_cases = []
+        for tc in test_cases_raw:
+            test_cases.append(TestCase(
+                input=tc.get('input', ''),
+                expected_output=tc.get('output', ''),
+                is_hidden=tc.get('is_hidden', False)
+            ))
+        
+        if not test_cases:
+            raise HTTPException(400, "No test cases found for this question")
+        
+        # Get language ID for Judge0
+        language_id = code_service.get_language_id(request.language)
+        
+        # Execute code against test cases
+        logger.info(f"Executing {request.language} code for session {request.session_id}")
+        result = await code_service.execute_code(
+            request.code,
+            language_id,
+            test_cases
+        )
+        
+        # Store code submission
+        submission = CodeSubmission(
+            session_id=request.session_id,
+            question_id=request.question_id,
+            language=request.language,
+            code=request.code,
+            timestamp=datetime.now(timezone.utc)
+        )
+        session.code_submissions.append(submission)
+        session.last_updated = datetime.now(timezone.utc)
+        
+        await update_session(f"interview:{request.session_id}", session.dict())
+        
+        logger.info(f"Code executed: {result.passed_tests}/{result.total_tests} tests passed")
+        
+        return {
+            "message": "Code executed successfully",
+            "result": result.dict(),
+            "passed": result.passed,
+            "tests_passed": result.passed_tests,
+            "total_tests": result.total_tests
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing code: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
