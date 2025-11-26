@@ -5,19 +5,24 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import json
 import base64
-from typing import Dict
+from typing import Dict, List
 from utils.logger import get_logger
 from datetime import datetime, timezone
 from utils.redis_client import create_session, get_session, update_session
-from services.interview_service import interview_service  # Import the interview_service
-from routes.interview_session import InterviewSession  # Import InterviewSession
+from services.interview_service import interview_service 
+from services.transcription_service import TranscriptionService
+from services.tts_service import TTSService
+from routes.interview_session import InterviewSession 
 
 router = APIRouter()
 logger = get_logger("WebSocketInterview")
 
+# Initialize AI Services (Global to avoid reloading models per connection)
+stt_service = TranscriptionService()
+tts_service = TTSService()
+
 # Active connections
 active_connections: Dict[str, WebSocket] = {}
-
 
 @router.websocket("/ws/interview/{session_id}")
 async def interview_websocket(websocket: WebSocket, session_id: str):
@@ -25,6 +30,10 @@ async def interview_websocket(websocket: WebSocket, session_id: str):
     await websocket.accept()
     active_connections[session_id] = websocket
     logger.info(f"WebSocket connected: {session_id}")
+    
+    # BUFFER: Store audio chunks here until we have enough to transcribe
+    # This prevents the CPU from being overloaded by transcribing tiny 100ms chunks
+    audio_buffer = bytearray()
     
     try:
         await websocket.send_json({
@@ -36,12 +45,17 @@ async def interview_websocket(websocket: WebSocket, session_id: str):
         while True:
             # Receive message
             data = await websocket.receive_text()
-            message = json.loads(data)
+            
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                continue
             
             msg_type = message.get("type")
             
             if msg_type == "audio_chunk":
-                await handle_audio_chunk(websocket, session_id, message)
+                # Pass the buffer to the handler
+                await handle_audio_chunk(websocket, session_id, message, audio_buffer)
             
             elif msg_type == "request_question":
                 await handle_request_question(websocket, session_id, message)
@@ -69,8 +83,8 @@ async def interview_websocket(websocket: WebSocket, session_id: str):
             del active_connections[session_id]
 
 
-async def handle_audio_chunk(websocket: WebSocket, session_id: str, message: dict):
-    """Handle audio chunk for live transcription"""
+async def handle_audio_chunk(websocket: WebSocket, session_id: str, message: dict, audio_buffer: bytearray):
+    """Handle audio chunk for live transcription with Buffering"""
     try:
         audio_base64 = message.get("audio", "")
         speaker = message.get("speaker", "candidate")
@@ -78,41 +92,52 @@ async def handle_audio_chunk(websocket: WebSocket, session_id: str, message: dic
         if not audio_base64:
             return
         
-        # Decode audio
-        audio_bytes = base64.b64decode(audio_base64)
+        # 1. Decode audio and add to buffer
+        chunk = base64.b64decode(audio_base64)
+        audio_buffer.extend(chunk)
         
-        # Transcribe (placeholder - implement actual transcription)
-        transcription = f"[Audio transcription for {speaker}]"
+        # 2. Transcribe only if we have enough data (approx 2 seconds @ 16kHz)
+        # 64000 bytes ~ 2 seconds of 16kHz Mono 16-bit audio
+        BUFFER_THRESHOLD = 64000
         
-        # Send transcription back
-        await websocket.send_json({
-            "type": "transcription",
-            "speaker": speaker,
-            "text": transcription,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
-        
-        # Store in session
-        session_data = await get_session(f"interview:{session_id}")
-        if session_data:
-            session = InterviewSession(**session_data)
-            session.live_transcription.append({
-                "speaker": speaker,
-                "text": transcription,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            await update_session(f"interview:{session_id}", session.dict())
+        if len(audio_buffer) > BUFFER_THRESHOLD:
+            # Transcribe the accumulated buffer
+            transcription = await stt_service.transcribe_audio_bytes(bytes(audio_buffer))
+            
+            # Clear buffer after processing
+            # We use del[:] to clear it in-place since it's passed by reference
+            del audio_buffer[:] 
+
+            if transcription:
+                # Send transcription back
+                await websocket.send_json({
+                    "type": "transcription",
+                    "speaker": speaker,
+                    "text": transcription,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                
+                # Store in session
+                session_data = await get_session(f"interview:{session_id}")
+                if session_data:
+                    session = InterviewSession(**session_data)
+                    session.live_transcription.append({
+                        "speaker": speaker,
+                        "text": transcription,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    await update_session(f"interview:{session_id}", session.dict())
         
     except Exception as e:
         logger.error(f"Error handling audio chunk: {e}", exc_info=True)
-        await websocket.send_json({
-            "type": "error",
-            "message": "Failed to process audio"
-        })
+        # Don't send error to frontend for every chunk failure to avoid spamming
+        # But ensure buffer is cleared to prevent memory leaks in case of bad data
+        if len(audio_buffer) > 1000000: # Safety cap
+            del audio_buffer[:]
 
 
 async def handle_request_question(websocket: WebSocket, session_id: str, message: dict):
-    """Handle request for next question"""
+    """Handle request for next question with TTS"""
     try:
         session_data = await get_session(f"interview:{session_id}")
         if not session_data:
@@ -123,12 +148,14 @@ async def handle_request_question(websocket: WebSocket, session_id: str, message
             return
         
         session = InterviewSession(**session_data)
+        question_text = ""
         
         # Get current or next question
         if session.current_question_index < len(session.questions):
             question = session.questions[session.current_question_index]
+            question_text = question.get('question', '')
         else:
-            # Generate new question
+            # Generate new question via LLM
             question_text = await interview_service.generate_follow_up(
                 session.responses,
                 session.interview_type
@@ -141,10 +168,14 @@ async def handle_request_question(websocket: WebSocket, session_id: str, message
             session.questions.append(question)
             await update_session(f"interview:{session_id}", session.dict())
         
+        # 🗣️ Generate Audio (TTS) for the question
+        audio_b64 = await tts_service.speak(question_text)
+
         await websocket.send_json({
             "type": "question",
             "question": question,
-            "question_index": session.current_question_index
+            "question_index": session.current_question_index,
+            "audio": audio_b64  # Send audio to frontend
         })
         
     except Exception as e:
