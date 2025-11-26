@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import resume, interview_session, websocket_interview_test, webrtc_offer_answer
+from routes import resume, interview_session, websocket_interview
 from config import get_settings
 from utils.logger import setup_logging, get_logger
 from utils.redis_client import test_connection
@@ -27,8 +27,7 @@ app.add_middleware(
 # Include routers
 app.include_router(resume.router)
 app.include_router(interview_session.router)
-app.include_router(websocket_interview_test.router)
-app.include_router(webrtc_offer_answer.router, prefix="/webrtc")
+app.include_router(websocket_interview.router)
 
 
 @app.on_event("startup")
