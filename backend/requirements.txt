@@ -1,19 +1,29 @@
-requests
-python-multipart
-langchain
-langchain-core
-langchain-community
+# Core Framework
 fastapi==0.109.0
-uvicorn[standard]==0.27.0      
-redis==5.0.2
-python-dotenv==1.0.1
-PyPDF2==3.0.1
-python-docx==0.8.11
+uvicorn[standard]==0.27.0
+python-multipart
+
+# Data Models & Validation
 pydantic==2.6.4
 pydantic-settings==2.2.0
+
+# HTTP Client
 httpx==0.26.0
+requests
+
+# Database & Caching
+redis==5.0.2
 firebase_admin
-python-socketio
-faster-whisper
-edge-tts
+
+# Resume Parsing
+PyPDF2==3.0.1
+python-docx==0.8.11
+
+# AI/ML Services
+google-generativeai      # Gemini LLM
+faster-whisper           # Local Speech-to-Text
+edge-tts                 # Free Text-to-Speech
+
+# Utilities
+python-dotenv==1.0.1
 aiohttp
