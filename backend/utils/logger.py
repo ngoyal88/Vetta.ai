@@ -1,10 +1,3 @@
-"""
-Unified logging utility.
-
-• console (default) → colourised RichHandler  
-• json              → machine-friendly logs for Docker/K8s
-"""
-
 from __future__ import annotations
 
 import logging
@@ -12,7 +5,9 @@ import os
 import sys
 from functools import lru_cache
 
-from config import Settings  # make sure settings is properly loaded
+from config import get_settings
+settings = get_settings()
+log_level = settings.log_level.upper()
 
 # ---------------------------- #
 # Build handlers based on environment settings
@@ -64,11 +59,10 @@ def setup_logging(force: bool = False) -> None:
         root.removeHandler(h)
 
     # Set log level from settings, fallback to INFO if not set
-    log_level = Settings.log_level.upper() if hasattr(Settings, "log_level") else "INFO"
     root.setLevel(log_level)
 
     # Choose handler type based on settings
-    handler = _json_handler() if getattr(Settings, "log_format", "").lower() == "json" else _console_handler()
+    handler = _json_handler() if settings.log_format.lower() == "json" else _console_handler()
     root.addHandler(handler)
 
     # Ensure uvicorn logs use the same handler and level

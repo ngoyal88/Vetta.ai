@@ -59,15 +59,15 @@ class InterviewService:
         return context
     
     async def _generate_dsa_question(
-    self, 
-    difficulty: DifficultyLevel, 
-    context: str
-) -> Dict[str, Any]:
-    """Generate DSA coding question with test cases"""
-    
-    import uuid  # Add this import at top of file
-    
-    prompt = f"""Generate a {difficulty.value} difficulty Data Structures & Algorithms coding problem.
+        self, 
+        difficulty: DifficultyLevel, 
+        context: str
+    ) -> Dict[str, Any]:
+        """Generate DSA coding question with test cases"""
+        
+        import uuid  # Add this import at top of file
+        
+        prompt = f"""Generate a {difficulty.value} difficulty Data Structures & Algorithms coding problem.
 
 Context: {context}
 
@@ -96,25 +96,25 @@ Return a JSON object with this structure:
 Focus on common interview topics like arrays, strings, trees, graphs, dynamic programming.
 Make it realistic and solvable in 30-45 minutes."""
 
-    response = await self.gemini.generate_text(prompt)
-    
-    try:
-        # Extract JSON from response
-        json_start = response.find('{')
-        json_end = response.rfind('}') + 1
-        json_str = response[json_start:json_end]
-        question_data = json.loads(json_str)
+        response = await self.gemini.generate_text(prompt)
         
-        # ADD THESE LINES ↓
-        question_data['question_id'] = str(uuid.uuid4())  # Generate unique ID
-        question_data['type'] = 'coding'
-        question_data['difficulty'] = difficulty.value
-        return question_data
-        
-    except json.JSONDecodeError:
-        logger.error("Failed to parse DSA question JSON")
-        # Return fallback question
-        return self._get_fallback_dsa_question(difficulty)
+        try:
+            # Extract JSON from response
+            json_start = response.find('{')
+            json_end = response.rfind('}') + 1
+            json_str = response[json_start:json_end]
+            question_data = json.loads(json_str)
+            
+            # ADD THESE LINES ↓
+            question_data['question_id'] = str(uuid.uuid4())  # Generate unique ID
+            question_data['type'] = 'coding'
+            question_data['difficulty'] = difficulty.value
+            return question_data
+            
+        except json.JSONDecodeError:
+            logger.error("Failed to parse DSA question JSON")
+            # Return fallback question
+            return self._get_fallback_dsa_question(difficulty)
     
     async def _generate_custom_role_question(
         self,
@@ -326,34 +326,34 @@ NEXT STEPS:
         }
     
     def _get_fallback_dsa_question(self, difficulty: DifficultyLevel) -> Dict[str, Any]:
-    """Fallback DSA question if generation fails"""
-    import uuid
-    
-    fallback_questions = {
-        DifficultyLevel.EASY: {
-            "question_id": str(uuid.uuid4()),  # ADD THIS
-            "title": "Two Sum",
-            "description": "Given an array of integers nums and an integer target, return indices of two numbers that add up to target.",
-            "input_format": "Array of integers and target integer",
-            "output_format": "Array of two indices",
-            "example": {
-                "input": "[2,7,11,15], target=9",
-                "output": "[0,1]",
-                "explanation": "nums[0] + nums[1] = 2 + 7 = 9"
-            },
-            "test_cases": [
-                {"input": "[2,7,11,15]\n9", "output": "[0,1]"},
-                {"input": "[3,2,4]\n6", "output": "[1,2]"},
-                {"input": "[3,3]\n6", "output": "[0,1]"}
-            ],
-            "constraints": ["2 <= nums.length <= 10^4", "-10^9 <= nums[i] <= 10^9"],
-            "hints": ["Use a hash map to store seen numbers"],
-            "type": "coding",
-            "difficulty": "easy"
+        """Fallback DSA question if generation fails"""
+        import uuid
+        
+        fallback_questions = {
+            DifficultyLevel.EASY: {
+                "question_id": str(uuid.uuid4()),  # ADD THIS
+                "title": "Two Sum",
+                "description": "Given an array of integers nums and an integer target, return indices of two numbers that add up to target.",
+                "input_format": "Array of integers and target integer",
+                "output_format": "Array of two indices",
+                "example": {
+                    "input": "[2,7,11,15], target=9",
+                    "output": "[0,1]",
+                    "explanation": "nums[0] + nums[1] = 2 + 7 = 9"
+                },
+                "test_cases": [
+                    {"input": "[2,7,11,15]\n9", "output": "[0,1]"},
+                    {"input": "[3,2,4]\n6", "output": "[1,2]"},
+                    {"input": "[3,3]\n6", "output": "[0,1]"}
+                ],
+                "constraints": ["2 <= nums.length <= 10^4", "-10^9 <= nums[i] <= 10^9"],
+                "hints": ["Use a hash map to store seen numbers"],
+                "type": "coding",
+                "difficulty": "easy"
+            }
         }
-    }
-    
-    return fallback_questions.get(difficulty, fallback_questions[DifficultyLevel.EASY])
+        
+        return fallback_questions.get(difficulty, fallback_questions[DifficultyLevel.EASY])
 
 # Expose a reusable service instance for modules that import `interview_service`
 # This enables `from services.interview_service import interview_service`

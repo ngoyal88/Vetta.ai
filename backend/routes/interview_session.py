@@ -19,6 +19,7 @@ from utils.redis_client import create_session, get_session, update_session
 from utils.auth import verify_api_token
 from utils.logger import get_logger
 from config import get_settings  # Add this import
+from firebase_config import db
 
 router = APIRouter(prefix="/interview", tags=["Interview"])
 logger = get_logger("InterviewRoutes")
