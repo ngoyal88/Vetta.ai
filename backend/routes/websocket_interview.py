@@ -14,6 +14,8 @@ from services.transcription_service import TranscriptionService
 from services.tts_service import TTSService
 from routes.interview_session import InterviewSession 
 
+from config import get_settings
+
 router = APIRouter()
 logger = get_logger("WebSocketInterview")
 
@@ -27,6 +29,14 @@ active_connections: Dict[str, WebSocket] = {}
 @router.websocket("/ws/interview/{session_id}")
 async def interview_websocket(websocket: WebSocket, session_id: str):
     """WebSocket for real-time interview communication"""
+    # Validate API token before accepting the socket
+    settings = get_settings()
+    token = websocket.query_params.get("token") or websocket.headers.get("Authorization")
+    expected = f"Bearer {settings.api_token}" if settings.api_token else None
+    if expected and token != expected:
+        await websocket.close(code=4401)
+        return
+
     await websocket.accept()
     active_connections[session_id] = websocket
     logger.info(f"WebSocket connected: {session_id}")

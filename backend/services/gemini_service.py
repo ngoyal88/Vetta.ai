@@ -36,8 +36,23 @@ class GeminiService:
                     "max_output_tokens": settings.llm_max_tokens,
                 }
             )
-            
-            return response.text if response.text else "No response generated"
+            # Try quick accessor and log finish details when absent
+            try:
+                return response.text if response.text else "No response generated"
+            except Exception:
+                # Log candidates length and known finish reason fields if present
+                finish = None
+                candidates_len = None
+                try:
+                    if hasattr(response, 'candidates') and response.candidates is not None:
+                        candidates_len = len(response.candidates)
+                        # try to read finish_reason from first candidate
+                        first = response.candidates[0] if candidates_len else None
+                        finish = getattr(first, 'finish_reason', None)
+                except Exception:
+                    pass
+                logger.warning(f"Gemini returned no text. candidates={candidates_len} finish_reason={finish}")
+                return "No response generated"
             
         except Exception as e:
             logger.error(f"Gemini generation error: {e}", exc_info=True)

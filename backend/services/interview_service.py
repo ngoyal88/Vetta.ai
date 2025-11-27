@@ -59,14 +59,13 @@ class InterviewService:
         return context
     
     async def _generate_dsa_question(
-        self, 
-        difficulty: DifficultyLevel, 
+        self,
+        difficulty: DifficultyLevel,
         context: str
     ) -> Dict[str, Any]:
         """Generate DSA coding question with test cases"""
-        
-        import uuid  # Add this import at top of file
-        
+        import uuid
+
         prompt = f"""Generate a {difficulty.value} difficulty Data Structures & Algorithms coding problem.
 
 Context: {context}
@@ -99,10 +98,13 @@ Make it realistic and solvable in 30-45 minutes."""
         response = await self.gemini.generate_text(prompt)
         
         try:
-            # Extract JSON from response
-            json_start = response.find('{')
-            json_end = response.rfind('}') + 1
-            json_str = response[json_start:json_end]
+            # Extract JSON from response, stripping code fences or preamble
+            resp = response.strip()
+            if resp.startswith("```"):
+                resp = resp.strip('`')
+            json_start = resp.find('{')
+            json_end = resp.rfind('}') + 1
+            json_str = resp[json_start:json_end]
             question_data = json.loads(json_str)
             
             # ADD THESE LINES ↓
