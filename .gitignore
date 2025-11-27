@@ -11,3 +11,4 @@ backend/venv
 .vscode/
 .env
 backend/routes/llm.py
+frontend/package-lock.json
