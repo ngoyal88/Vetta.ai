@@ -168,9 +168,10 @@ Follow-up Ideas: [2-3 potential follow-up questions]"""
         }
         
         topic = type_prompts.get(interview_type, "software engineering")
-        
+
         prompt = f"""Generate ONE {difficulty.value} difficulty interview question about {topic}.
 
+Context:
 {context}
 
 The question should:
@@ -179,16 +180,34 @@ The question should:
 - Be answerable in 3-5 minutes
 - Have clear evaluation criteria
 
-Format:
-Question: [Your question]
-Key Points to Cover: [What a good answer should include]
-Red Flags: [What indicates gaps in knowledge]"""
+STRICT OUTPUT REQUIREMENT:
+Return ONLY a valid JSON object (no backticks, no extra text) exactly in this format:
+{{
+    "question": "The question text for the candidate",
+    "evaluation_criteria": "Key points and red flags for the interviewer"
+}}"""
 
         response = await self.gemini.generate_text(prompt)
-        
+
+        # Parse JSON response safely (handle possible fences/preamble)
+        try:
+            resp = response.strip()
+            if resp.startswith("```"):
+                resp = resp.strip('`')
+            start = resp.find('{')
+            end = resp.rfind('}') + 1
+            obj = json.loads(resp[start:end])
+            question_text = obj.get('question') or ''
+            criteria = obj.get('evaluation_criteria') or ''
+        except Exception:
+            # If parsing fails, fall back to using raw response as question
+            question_text = response
+            criteria = ''
+
         return {
             'type': interview_type.value,
-            'question': response,
+            'question': question_text,
+            'evaluation_criteria': criteria,
             'difficulty': difficulty.value
         }
     

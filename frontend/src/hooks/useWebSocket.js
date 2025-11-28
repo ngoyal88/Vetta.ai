@@ -10,7 +10,10 @@ export const useWebSocket = (sessionId) => {
   const connect = useCallback(() => {
     if (!sessionId) return;
     
-    const ws = new WebSocket(`${WS_URL}/ws/interview/${sessionId}`);
+    // Include API token if available (adapt env var name as needed)
+    const apiToken = process.env.REACT_APP_API_TOKEN;
+    const tokenParam = apiToken ? `?token=${encodeURIComponent(`Bearer ${apiToken}`)}` : '';
+    const ws = new WebSocket(`${WS_URL}/ws/interview/${sessionId}${tokenParam}`);
     
     ws.onopen = () => {
       console.log('✅ WebSocket connected');
@@ -20,6 +23,13 @@ export const useWebSocket = (sessionId) => {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.type === 'error' && data.code === 401) {
+          console.error('Auth error, stopping reconnect attempts:', data.message);
+          // Prevent infinite reconnect loop on auth failure
+          wsRef.current = null;
+          ws.close();
+          return;
+        }
         setMessages(prev => [...prev, data]);
       } catch (err) {
         console.error('Failed to parse message:', err);
@@ -30,11 +40,14 @@ export const useWebSocket = (sessionId) => {
       console.error('WebSocket error:', error);
     };
     
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
+    ws.onclose = (evt) => {
+      console.log('WebSocket disconnected', evt.code, evt.reason);
       setConnected(false);
-      
-      // Auto-reconnect after 3 seconds
+      // Stop reconnecting if auth failed
+      if (evt.reason === 'auth_failed' || evt.code === 4401) {
+        return;
+      }
+      // Auto-reconnect after 3 seconds (basic backoff could be added)
       setTimeout(() => {
         console.log('Attempting to reconnect...');
         connect();

@@ -5,6 +5,8 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import json
 import base64
+import io
+import wave
 from typing import Dict, List
 from utils.logger import get_logger
 from datetime import datetime, timezone
@@ -28,16 +30,26 @@ active_connections: Dict[str, WebSocket] = {}
 
 @router.websocket("/ws/interview/{session_id}")
 async def interview_websocket(websocket: WebSocket, session_id: str):
-    """WebSocket for real-time interview communication"""
-    # Validate API token before accepting the socket
+    """WebSocket for real-time interview communication.
+
+    Performs auth AFTER accept so client receives a structured error message
+    instead of a silent handshake failure.
+    """
+    await websocket.accept()
+
     settings = get_settings()
     token = websocket.query_params.get("token") or websocket.headers.get("Authorization")
     expected = f"Bearer {settings.api_token}" if settings.api_token else None
     if expected and token != expected:
-        await websocket.close(code=4401)
+        logger.warning(f"WS auth failed for session {session_id}. Provided token: {token!r}")
+        await websocket.send_json({
+            "type": "error",
+            "code": 401,
+            "message": "Unauthorized or missing token. Supply ?token=Bearer%20<API_TOKEN>"
+        })
+        # Close with custom code to allow client to stop reconnecting
+        await websocket.close(code=4401, reason="auth_failed")
         return
-
-    await websocket.accept()
     active_connections[session_id] = websocket
     logger.info(f"WebSocket connected: {session_id}")
     
@@ -59,6 +71,7 @@ async def interview_websocket(websocket: WebSocket, session_id: str):
             try:
                 message = json.loads(data)
             except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON payload"})
                 continue
             
             msg_type = message.get("type")
@@ -94,55 +107,63 @@ async def interview_websocket(websocket: WebSocket, session_id: str):
 
 
 async def handle_audio_chunk(websocket: WebSocket, session_id: str, message: dict, audio_buffer: bytearray):
-    """Handle audio chunk for live transcription with Buffering"""
+    """Handle live audio chunk.
+
+    EXPECTED INPUT (frontend change required): base64 of raw PCM16 mono 16kHz.
+    We accumulate ~2s then wrap as WAV for Whisper.
+    """
     try:
         audio_base64 = message.get("audio", "")
         speaker = message.get("speaker", "candidate")
-        
         if not audio_base64:
             return
-        
-        # 1. Decode audio and add to buffer
-        chunk = base64.b64decode(audio_base64)
-        audio_buffer.extend(chunk)
-        
-        # 2. Transcribe only if we have enough data (approx 2 seconds @ 16kHz)
-        # 64000 bytes ~ 2 seconds of 16kHz Mono 16-bit audio
-        BUFFER_THRESHOLD = 64000
-        
-        if len(audio_buffer) > BUFFER_THRESHOLD:
-            # Transcribe the accumulated buffer
-            transcription = await stt_service.transcribe_audio_bytes(bytes(audio_buffer))
-            
-            # Clear buffer after processing
-            # We use del[:] to clear it in-place since it's passed by reference
-            del audio_buffer[:] 
 
-            if transcription:
-                # Send transcription back
-                await websocket.send_json({
-                    "type": "transcription",
-                    "speaker": speaker,
-                    "text": transcription,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
-                
-                # Store in session
-                session_data = await get_session(f"interview:{session_id}")
-                if session_data:
-                    session = InterviewSession(**session_data)
-                    session.live_transcription.append({
-                        "speaker": speaker,
-                        "text": transcription,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
-                    await update_session(f"interview:{session_id}", session.dict())
-        
+        # Decode raw PCM16 chunk and extend buffer
+        try:
+            chunk = base64.b64decode(audio_base64)
+        except Exception:
+            await websocket.send_json({"type": "error", "message": "Bad audio base64"})
+            return
+        audio_buffer.extend(chunk)
+
+        # Threshold: ~2 seconds (16000 samples/sec * 2 * 2 bytes ≈ 64000)
+        BUFFER_THRESHOLD = 64000
+        if len(audio_buffer) < BUFFER_THRESHOLD:
+            return
+
+        # Wrap raw PCM into a WAV container in memory for Whisper
+        wav_bytes_io = io.BytesIO()
+        with wave.open(wav_bytes_io, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(16000)
+            wf.writeframes(bytes(audio_buffer))
+        wav_bytes = wav_bytes_io.getvalue()
+        del audio_buffer[:]  # clear buffer after packaging
+
+        transcription = await stt_service.transcribe_audio_bytes(wav_bytes)
+        if not transcription:
+            return
+
+        # Send transcription back
+        payload = {
+            "type": "transcription",
+            "speaker": speaker,
+            "text": transcription,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        await websocket.send_json(payload)
+
+        # Persist transcription
+        session_data = await get_session(f"interview:{session_id}")
+        if session_data:
+            session = InterviewSession(**session_data)
+            session.live_transcription.append(payload)
+            await update_session(f"interview:{session_id}", session.dict())
+
     except Exception as e:
         logger.error(f"Error handling audio chunk: {e}", exc_info=True)
-        # Don't send error to frontend for every chunk failure to avoid spamming
-        # But ensure buffer is cleared to prevent memory leaks in case of bad data
-        if len(audio_buffer) > 1000000: # Safety cap
+        if len(audio_buffer) > 1_000_000:  # safety cap
             del audio_buffer[:]
 
 

@@ -1,12 +1,52 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
 
 const AIAvatar = ({ isSpeaking, currentQuestion }) => {
+
+  // Helper: Parses the AI response to show ONLY the question text
+  const processQuestion = (data) => {
+    if (!data) return null;
+
+    // 1. Handle DSA Object (It's already clean JSON)
+    if (typeof data === 'object') {
+      return data.title 
+        ? `**${data.title}**\n\n${data.description}` 
+        : "Coding Challenge Started";
+    }
+
+    // 2. Handle String (Behavioral/Technical Question)
+    if (typeof data === 'string') {
+      // The AI returns: "Question: ... \nKey Points: ... \nRed Flags: ..."
+      // We want to DELETE everything after "Key Points" or "Red Flags"
+      
+      let cleanText = data;
+
+      // Remove "Question:" prefix if it exists
+      cleanText = cleanText.replace(/^Question:\s*/i, '');
+
+      // Cut off at "Key Points" or "Red Flags"
+      const splitMarkers = ["Key Points to Cover:", "Key Points:", "Red Flags:"];
+      
+      for (const marker of splitMarkers) {
+        if (cleanText.includes(marker)) {
+          cleanText = cleanText.split(marker)[0];
+        }
+      }
+
+      return cleanText.trim();
+    }
+
+    return null;
+  };
+
+  const displayContent = processQuestion(currentQuestion);
+
   return (
-    <div className="flex flex-col items-center justify-center h-full">
+    <div className="flex flex-col items-center justify-center h-full w-full max-w-4xl mx-auto px-4">
       {/* Animated Orb */}
       <motion.div
-        className="relative w-48 h-48 mb-8"
+        className="relative w-48 h-48 mb-8 flex-shrink-0"
         animate={isSpeaking ? { scale: [1, 1.1, 1] } : {}}
         transition={{ duration: 1.5, repeat: Infinity }}
       >
@@ -50,7 +90,7 @@ const AIAvatar = ({ isSpeaking, currentQuestion }) => {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="text-center"
+        className="text-center mb-6 flex-shrink-0"
       >
         <h2 className="text-2xl font-bold text-white mb-2">AI Interviewer</h2>
         <p className="text-gray-400">
@@ -58,16 +98,27 @@ const AIAvatar = ({ isSpeaking, currentQuestion }) => {
         </p>
       </motion.div>
       
-      {/* Current Question Display */}
-      {currentQuestion && (
+      {/* Question Display Card */}
+      {displayContent && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mt-8 max-w-2xl bg-black/30 backdrop-blur-md p-6 rounded-2xl border border-white/10"
+          className="w-full bg-black/40 backdrop-blur-md p-6 rounded-2xl border border-white/10 shadow-xl overflow-y-auto max-h-[40vh]"
         >
-          <p className="text-white text-lg leading-relaxed">
-            {currentQuestion}
-          </p>
+          {/* React Markdown renders the bolding and lists correctly */}
+          <div className="prose prose-invert max-w-none text-white leading-relaxed">
+            <ReactMarkdown
+              components={{
+                // Override default styles if needed
+                strong: ({node, ...props}) => <span className="font-bold text-blue-300" {...props} />,
+                ul: ({node, ...props}) => <ul className="list-disc pl-5 my-2 space-y-1" {...props} />,
+                li: ({node, ...props}) => <li className="text-gray-200" {...props} />,
+                p: ({node, ...props}) => <p className="mb-4 last:mb-0" {...props} />
+              }}
+            >
+              {displayContent}
+            </ReactMarkdown>
+          </div>
         </motion.div>
       )}
     </div>
