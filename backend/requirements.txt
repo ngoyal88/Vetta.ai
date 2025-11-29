@@ -21,7 +21,12 @@ python-docx==0.8.11
 
 # AI/ML Services
 google-generativeai      # Gemini LLM
-faster-whisper           # Local Speech-to-Text
+faster-whisper
+kokoro>=0.3.4            # High Quality Local TTS
+soundfile
+numpy
+scipy
+torch        
 edge-tts                 # Free Text-to-Speech
 
 # Utilities

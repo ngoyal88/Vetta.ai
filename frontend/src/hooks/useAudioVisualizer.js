@@ -1,4 +1,3 @@
-// frontend/src/hooks/useAudioVisualizer.js
 import { useEffect, useRef, useState } from 'react';
 
 export const useAudioVisualizer = (stream) => {
@@ -9,30 +8,45 @@ export const useAudioVisualizer = (stream) => {
   const animationRef = useRef(null);
 
   useEffect(() => {
-    if (!stream) return;
+    if (!stream) {
+        setVolume(0);
+        return;
+    }
 
-    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    analyserRef.current = audioContextRef.current.createAnalyser();
-    sourceRef.current = audioContextRef.current.createMediaStreamSource(stream);
+    // Initialize Audio Context (Handle cross-browser)
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    audioContextRef.current = new AudioContext();
     
-    sourceRef.current.connect(analyserRef.current);
+    analyserRef.current = audioContextRef.current.createAnalyser();
     analyserRef.current.fftSize = 256;
+    
+    // Connect stream to analyser
+    sourceRef.current = audioContextRef.current.createMediaStreamSource(stream);
+    sourceRef.current.connect(analyserRef.current);
     
     const bufferLength = analyserRef.current.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
     const updateVolume = () => {
+      if (!analyserRef.current) return;
+      
       analyserRef.current.getByteFrequencyData(dataArray);
+      
       // Calculate average volume
-      const average = dataArray.reduce((a, b) => a + b) / bufferLength;
-      setVolume(average); // 0 to 255
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / bufferLength;
+      
+      setVolume(average); // Range: 0-255
       animationRef.current = requestAnimationFrame(updateVolume);
     };
 
     updateVolume();
 
     return () => {
-      cancelAnimationFrame(animationRef.current);
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
       if (audioContextRef.current) audioContextRef.current.close();
     };
   }, [stream]);

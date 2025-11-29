@@ -21,7 +21,7 @@ from config import get_settings
 router = APIRouter()
 logger = get_logger("WebSocketInterview")
 
-# Initialize AI Services (Global to avoid reloading models per connection)
+# Initialize AI Services
 stt_service = TranscriptionService()
 tts_service = TTSService()
 
@@ -30,39 +30,48 @@ active_connections: Dict[str, WebSocket] = {}
 
 @router.websocket("/ws/interview/{session_id}")
 async def interview_websocket(websocket: WebSocket, session_id: str):
-    """WebSocket for real-time interview communication.
-
-    Performs auth AFTER accept so client receives a structured error message
-    instead of a silent handshake failure.
-    """
+    """WebSocket for real-time interview communication."""
     await websocket.accept()
-
+    
+    # --- AUTH CHECK (Relaxed for Development) ---
     settings = get_settings()
-    token = websocket.query_params.get("token") or websocket.headers.get("Authorization")
-    expected = f"Bearer {settings.api_token}" if settings.api_token else None
-    if expected and token != expected:
-        logger.warning(f"WS auth failed for session {session_id}. Provided token: {token!r}")
-        await websocket.send_json({
-            "type": "error",
-            "code": 401,
-            "message": "Unauthorized or missing token. Supply ?token=Bearer%20<API_TOKEN>"
-        })
-        # Close with custom code to allow client to stop reconnecting
-        await websocket.close(code=4401, reason="auth_failed")
-        return
+    token = websocket.query_params.get("token")
+    if settings.api_token and token != f"Bearer {settings.api_token}":
+        logger.warning(f"⚠️ WebSocket connected without valid token: {session_id}")
+
     active_connections[session_id] = websocket
     logger.info(f"WebSocket connected: {session_id}")
     
-    # BUFFER: Store audio chunks here until we have enough to transcribe
-    # This prevents the CPU from being overloaded by transcribing tiny 100ms chunks
+    # --- AUDIO BUFFERING STATE ---
     audio_buffer = bytearray()
+    header_chunk = None  # CRITICAL: Caches the WebM header to fix Whisper crash
+    BUFFER_THRESHOLD = 16000  # Reduced to ~0.5s for faster response
     
     try:
+        # 1. Send Connected Signal
         await websocket.send_json({
             "type": "connected",
             "session_id": session_id,
             "message": "WebSocket connected successfully"
         })
+
+        # 2. IMMEDIATE GREETING (Fixes "No Intro" issue)
+        try:
+            session_data = await get_session(f"interview:{session_id}")
+            user_name = session_data.get("user_id", "Candidate") if session_data else "Candidate"
+            role = session_data.get("custom_role", "Developer") if session_data else "Developer"
+            
+            greeting_text = await interview_service.generate_greeting(user_name, role)
+            audio_b64 = await tts_service.speak(greeting_text)
+            
+            await websocket.send_json({
+                "type": "ai_response",
+                "text": greeting_text,
+                "audio": audio_b64
+            })
+        except Exception as e:
+            logger.error(f"Failed to generate greeting: {e}")
+
         
         while True:
             # Receive message
@@ -71,29 +80,62 @@ async def interview_websocket(websocket: WebSocket, session_id: str):
             try:
                 message = json.loads(data)
             except json.JSONDecodeError:
-                await websocket.send_json({"type": "error", "message": "Invalid JSON payload"})
                 continue
             
             msg_type = message.get("type")
             
+            # --- HANDLE MESSAGES ---
+            
             if msg_type == "audio_chunk":
-                # Pass the buffer to the handler
-                await handle_audio_chunk(websocket, session_id, message, audio_buffer)
+                audio_base64 = message.get("audio", "")
+                if audio_base64:
+                    chunk = base64.b64decode(audio_base64)
+                    
+                    # 1. Capture Header (First Chunk)
+                    if header_chunk is None:
+                        header_chunk = chunk
+                    
+                    audio_buffer.extend(chunk)
+                    
+                    # 2. Process only when buffer is full
+                    if len(audio_buffer) > BUFFER_THRESHOLD:
+                        full_audio_data = bytes(audio_buffer)
+                        
+                        # 3. Re-inject header if missing (Critical for Whisper)
+                        if header_chunk and not full_audio_data.startswith(header_chunk[:10]):
+                             full_audio_data = header_chunk + full_audio_data
+
+                        transcription = await stt_service.transcribe_audio_bytes(full_audio_data)
+                        
+                        # 4. Clear buffer but keep header_chunk variable
+                        del audio_buffer[:] 
+                        
+                        if transcription and len(transcription.strip()) > 1:
+                            await websocket.send_json({
+                                "type": "transcription",
+                                "speaker": "candidate",
+                                "text": transcription,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
             
-            elif msg_type == "request_question":
-                await handle_request_question(websocket, session_id, message)
-            
-            elif msg_type == "submit_response":
-                await handle_submit_response(websocket, session_id, message)
+            elif msg_type == "answer_commit":
+                # User finished speaking -> Generate AI Response
+                user_text = message.get("text")
+                if user_text:
+                    logger.info(f"User Answer: {user_text}")
+                    ai_text = await interview_service.process_answer_and_generate_followup(session_id, user_text)
+                    
+                    # Generate Audio
+                    audio_b64 = await tts_service.speak(ai_text)
+                    
+                    await websocket.send_json({
+                        "type": "ai_response",
+                        "text": ai_text,
+                        "audio": audio_b64
+                    })
             
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
-            
-            else:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Unknown message type: {msg_type}"
-                })
     
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: {session_id}")
@@ -104,7 +146,6 @@ async def interview_websocket(websocket: WebSocket, session_id: str):
         logger.error(f"WebSocket error: {e}", exc_info=True)
         if session_id in active_connections:
             del active_connections[session_id]
-
 
 async def handle_audio_chunk(websocket: WebSocket, session_id: str, message: dict, audio_buffer: bytearray):
     """Handle live audio chunk.

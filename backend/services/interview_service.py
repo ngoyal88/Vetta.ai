@@ -16,6 +16,17 @@ class InterviewService:
     def __init__(self):
         self.gemini = GeminiService()
     
+    async def generate_greeting(self, candidate_name: str, role: str) -> str:
+        """Generates a warm, professional intro."""
+        prompt = f"""
+        You are a senior technical interviewer for a {role} position. 
+        The candidate's name is {candidate_name}.
+        
+        Generate a short, professional 2-sentence greeting to start the interview. 
+        Do NOT ask a technical question yet. Just welcome them and say you are ready to start.
+        """
+        return await self.gemini.generate_text(prompt)
+    
     async def generate_first_question(
         self, 
         interview_type: InterviewType,
