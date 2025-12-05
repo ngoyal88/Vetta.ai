@@ -1,15 +1,14 @@
 # Core Framework
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
 python-multipart
 
 # Data Models & Validation
-# Align with pipecat-ai which requires pydantic ~= 2.8.2
-pydantic==2.8.2
-pydantic-settings==2.2.0
+pydantic>=2.10.0
+pydantic-settings>=2.2.0
 
 # HTTP Client
-httpx==0.26.0
+httpx>=0.27.0
 requests
 
 # Database & Caching
@@ -21,27 +20,24 @@ PyPDF2==3.0.1
 python-docx==0.8.11
 
 # AI/ML Services
-google-generativeai      # Gemini LLM
-numpy>=1.24              # Required by faster-whisper
+google-generativeai
+numpy<2.0.0           # Pin for Matplotlib compatibility
+opencv-python-headless<4.10.0  # <--- NEW: Pin for Numpy 1.x compatibility
 
 # LiveKit + Pipecat Stack
-livekit==0.15.1
-livekit-agents==0.5.1
-pipecat-ai==0.0.45
+livekit>=0.17.0
+livekit-agents>=0.8.0
+pipecat-ai>=0.0.96
 
-# Speech Services (Choose one STT + one TTS)
-# STT Options:
-deepgram-sdk==3.2.7      # RECOMMENDED (best quality/speed)
-# openai>=1.0.0          # Alternative STT
+# VAD
+onnxruntime
 
-# TTS Options:
-elevenlabs==1.2.2        # RECOMMENDED (most natural)
-# cartesia-ai>=1.0.0     # Alternative (fast)
-# openai>=1.0.0          # Alternative TTS                # Free Text-to-Speech
+# Speech Services
+deepgram-sdk>=3.2.7,<4.0.0
+elevenlabs>=1.2.2,<2.0.0
 
 # Utilities
 python-dotenv==1.0.1
 aiohttp
-
-# VAD (Voice Activity Detection) - REQUIRED for Silero
-onnxruntime
+websockets>=13.0
+tenacity

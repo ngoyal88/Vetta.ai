@@ -27,10 +27,9 @@ class PipelineManager:
         try:
             # Spawn pipeline as subprocess
             process = subprocess.Popen(
-                ["python", "-m", "services.pipecat_pipeline", session_id],
+                ["python", "services/pipecat_pipeline.py", session_id],  # ✅ Fixed
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN)
+                stderr=subprocess.PIPE
             )
             
             self.active_pipelines[session_id] = process
