@@ -4,7 +4,8 @@ uvicorn[standard]==0.27.0
 python-multipart
 
 # Data Models & Validation
-pydantic==2.6.4
+# Align with pipecat-ai which requires pydantic ~= 2.8.2
+pydantic==2.8.2
 pydantic-settings==2.2.0
 
 # HTTP Client
@@ -21,13 +22,22 @@ python-docx==0.8.11
 
 # AI/ML Services
 google-generativeai      # Gemini LLM
-faster-whisper
-kokoro>=0.3.4            # High Quality Local TTS
-soundfile
-numpy
-scipy
-torch        
-edge-tts                 # Free Text-to-Speech
+numpy>=1.24              # Required by faster-whisper
+
+# LiveKit + Pipecat Stack
+livekit==0.15.1
+livekit-agents==0.5.1
+pipecat-ai==0.0.45
+
+# Speech Services (Choose one STT + one TTS)
+# STT Options:
+deepgram-sdk==3.2.7      # RECOMMENDED (best quality/speed)
+# openai>=1.0.0          # Alternative STT
+
+# TTS Options:
+elevenlabs==1.2.2        # RECOMMENDED (most natural)
+# cartesia-ai>=1.0.0     # Alternative (fast)
+# openai>=1.0.0          # Alternative TTS                # Free Text-to-Speech
 
 # Utilities
 python-dotenv==1.0.1

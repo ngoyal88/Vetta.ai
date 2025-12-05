@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@livekit/components-react": "^2.0.0",
+    "livekit-client": "^2.0.0",
     "@met4citizen/talkinghead": "^1.4.0",
     "@monaco-editor/react": "^4.7.0",
     "@react-three/drei": "^10.5.0",
@@ -19,6 +21,7 @@
     "react-dom": "^19.1.0",
     "react-hot-toast": "^2.6.0",
     "react-icons": "^5.5.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.6.2",
     "react-scripts": "5.0.1",
     "three": "^0.178.0",

@@ -14,11 +14,18 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.7
     llm_max_tokens: int = 6000
 
-    # ---------- Speech Services (Free tier options) -------------------- #
-    # For TTS: Can use Google Cloud TTS free tier or pyttsx3 (offline)
-    # For STT: Can use Google Cloud Speech free tier or whisper.cpp (offline)
-    google_cloud_api_key: str = ""
+    # ---------- LiveKit (Voice Infrastructure) ------------------------- #
+    livekit_url: str = "ws://localhost:7880"
+    livekit_api_key: str = "devkey"
+    livekit_api_secret: str = "devsecret"
+
+    # ---------- Speech Services (Pipecat) ------------------------------ #
+    # STT (Choose one)
+    deepgram_api_key: str = ""                     
     
+    # TTS (Choose one)
+    elevenlabs_api_key: str = ""      
+
     # ---------- Code Execution ----------------------------------------- #
     judge0_api_key: str = ""
     judge0_host: str = "judge0-ce.p.rapidapi.com"

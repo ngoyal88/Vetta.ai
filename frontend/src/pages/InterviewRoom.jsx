@@ -1,18 +1,14 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
-import { PhoneOff, Send } from "lucide-react";
+import { PhoneOff, Mic, MicOff } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { api } from "../services/api";
-import { useWebSocket } from "../hooks/useWebSocket";
-import { useAudioRecorder } from "../hooks/useAudioRecorder";
+import { useLiveKitInterview } from "../hooks/useLiveKitInterview";
 import AIAvatar from "../components/AIAvatar";
-import LiveTranscription from "../components/LiveTranscription";
 import CandidateWebcam from "../components/CandidateWebcam";
 import CodeEditor from "../components/CodeEditor";
 import DSAQuestionDisplay from "../components/DSAQuestionDisplay";
-import MicInput from "../components/MicInput"; // ✅ Import the new component
 
 const InterviewRoom = () => {
   const { sessionId } = useParams();
@@ -20,226 +16,257 @@ const InterviewRoom = () => {
   const { currentUser } = useAuth();
   
   // State
-  const [hasStarted, setHasStarted] = useState(false); // ✅ Prevents immediate start
+  const [hasStarted, setHasStarted] = useState(false);
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [phase, setPhase] = useState('behavioral'); // 'behavioral' | 'dsa'
   const [currentQuestion, setCurrentQuestion] = useState(null);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [transcriptions, setTranscriptions] = useState([]);
-  const [currentAnswer, setCurrentAnswer] = useState("");
-  const [phase, setPhase] = useState('behavioral');
   
-  // Audio Playback State (Kokoro Queue)
-  const audioQueueRef = useRef([]);
-  const audioPlayerRef = useRef(new Audio());
-  const isPlayingRef = useRef(false);
+  // LiveKit Connection
+  const {
+    connected,
+    agentSpeaking,
+    userTranscript,
+    agentTranscript,
+    error,
+    disconnect,
+    toggleMicrophone
+  } = useLiveKitInterview(
+    hasStarted ? sessionId : null, 
+    currentUser?.uid, 
+    currentUser?.displayName || "Candidate"
+  );
 
-  // WebSocket Connection
-  const { connected, messages, sendMessage } = useWebSocket(sessionId);
-  
-  // Audio Recorder (Now provides 'stream' for the visualizer)
-  const { isRecording, startRecording, stopRecording, stream } = useAudioRecorder((audioBase64) => {
-    sendMessage({
-      type: 'audio_chunk',
-      audio: audioBase64,
-      speaker: 'candidate'
-    });
-  });
-
-  // --- AUDIO HANDLING (No Lag Playback) ---
-  const playNextAudio = () => {
-    if (audioQueueRef.current.length === 0) {
-      setIsSpeaking(false);
-      isPlayingRef.current = false;
-      return;
-    }
-
-    isPlayingRef.current = true;
-    setIsSpeaking(true);
-
-    const base64Audio = audioQueueRef.current.shift();
-    audioPlayerRef.current.src = `data:audio/wav;base64,${base64Audio}`;
-    
-    audioPlayerRef.current.play().catch(e => {
-        console.error("Audio playback error:", e);
-        setIsSpeaking(false);
-        isPlayingRef.current = false;
-    });
-
-    audioPlayerRef.current.onended = playNextAudio;
-  };
-
-  const queueAudio = (base64Audio) => {
-    audioQueueRef.current.push(base64Audio);
-    if (!isPlayingRef.current) {
-      playNextAudio();
-    }
-  };
-
-  const stopAudioPlayback = () => {
-    // Interruption Logic: Stop AI when user speaks
-    audioPlayerRef.current.pause();
-    audioPlayerRef.current.currentTime = 0;
-    audioQueueRef.current = [];
-    isPlayingRef.current = false;
-    setIsSpeaking(false);
-  };
-
-  // --- WEBSOCKET HANDLERS ---
+  // Update current question from agent transcript
   useEffect(() => {
-    if (messages.length > 0) {
-        const lastMsg = messages[messages.length - 1];
-        
-        switch (lastMsg.type) {
-            case 'transcription':
-                // Update live transcript
-                setTranscriptions(prev => [...prev, {
-                    speaker: lastMsg.speaker,
-                    text: lastMsg.text,
-                    timestamp: lastMsg.timestamp
-                }]);
-                if (lastMsg.speaker === 'candidate') {
-                    setCurrentAnswer(prev => prev + " " + lastMsg.text);
-                }
-                break;
-
-            case 'ai_response':
-            case 'question':
-                // Update Question Text & Play Audio
-                const qText = lastMsg.question?.question || lastMsg.question || lastMsg.text;
-                setCurrentQuestion(qText);
-                
-                if (lastMsg.audio) {
-                    queueAudio(lastMsg.audio);
-                }
-                break;
-            default: break;
-        }
+    if (agentTranscript) {
+      setCurrentQuestion(agentTranscript);
     }
-  }, [messages]);
+  }, [agentTranscript]);
 
-  // --- ACTIONS ---
+  // Handle errors
+  useEffect(() => {
+    if (error) {
+      toast.error(`Connection error: ${error}`);
+    }
+  }, [error]);
+
   const handleStartInterview = () => {
     setHasStarted(true);
-    sendMessage({ type: "start_interview" }); // Tells backend to say "Hello"
-    
-    // Wake up audio engine (mobile/browser safety)
-    const silent = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==");
-    silent.play().catch(() => {});
+    toast.success("🎤 Interview started - Speak naturally!");
   };
 
-  const handleMicToggle = () => {
-    if (isRecording) {
-      // Stop recording -> Commit Answer
-      stopRecording();
-      sendMessage({ type: "answer_commit", text: currentAnswer });
-      setCurrentAnswer(""); 
-    } else {
-      // Start recording -> Interrupt AI
-      stopAudioPlayback();
-      startRecording();
-    }
+  const handleToggleMic = async () => {
+    const newState = !micEnabled;
+    await toggleMicrophone(newState);
+    setMicEnabled(newState);
+    toast.success(newState ? "🎤 Microphone enabled" : "🔇 Microphone muted");
   };
 
   const handleEndInterview = async () => {
-    if (window.confirm("End interview?")) {
-        stopRecording();
-        navigate('/dashboard');
+    if (window.confirm("Are you sure you want to end the interview?")) {
+      await disconnect();
+      toast.success("Interview ended");
+      navigate('/dashboard');
     }
   };
 
-  // --- RENDER ---
-  
-  // 1. START SCREEN (Fixes Immediate Start Issue)
+  // START SCREEN
   if (!hasStarted) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-900 px-4">
-        <div className="text-center space-y-8 max-w-lg bg-gray-800 p-10 rounded-3xl border border-gray-700 shadow-2xl">
-          <div className="w-32 h-32 bg-blue-600/20 rounded-full mx-auto flex items-center justify-center animate-pulse">
-            <span className="text-5xl">🎙️</span>
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold text-white mb-2">Ready?</h1>
-            <p className="text-gray-400">Your AI interviewer is connected.</p>
-          </div>
-          <button 
-            onClick={handleStartInterview}
-            className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-lg shadow-xl transition-transform transform hover:scale-105"
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 px-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center space-y-8 max-w-lg bg-gray-800/50 backdrop-blur-xl p-12 rounded-3xl border border-gray-700/50 shadow-2xl"
+        >
+          {/* Animated Icon */}
+          <motion.div
+            animate={{ scale: [1, 1.1, 1] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="w-32 h-32 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mx-auto flex items-center justify-center shadow-lg"
           >
-            Start Interview
-          </button>
-        </div>
+            <span className="text-6xl">🎙️</span>
+          </motion.div>
+
+          {/* Title */}
+          <div>
+            <h1 className="text-4xl font-bold text-white mb-3">Ready to Begin?</h1>
+            <p className="text-gray-400 text-lg">Your AI interviewer is waiting.</p>
+          </div>
+
+          {/* Connection Status */}
+          <div className="flex items-center justify-center gap-2 text-sm">
+            {connected ? (
+              <>
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="text-green-400">Connected to LiveKit</span>
+              </>
+            ) : (
+              <>
+                <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                <span className="text-yellow-400">Connecting...</span>
+              </>
+            )}
+          </div>
+
+          {/* Start Button */}
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleStartInterview}
+            disabled={!connected}
+            className="w-full py-5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:from-gray-600 disabled:to-gray-700 text-white rounded-2xl font-bold text-xl shadow-2xl transition-all disabled:cursor-not-allowed"
+          >
+            {connected ? "🚀 Start Interview" : "⏳ Connecting..."}
+          </motion.button>
+
+          {/* Tips */}
+          <div className="text-left bg-gray-900/50 p-4 rounded-xl text-sm text-gray-300">
+            <p className="font-semibold mb-2">💡 Tips:</p>
+            <ul className="space-y-1 list-disc list-inside">
+              <li>Speak naturally - AI detects when you're done</li>
+              <li>You can interrupt the AI anytime</li>
+              <li>Microphone access required</li>
+            </ul>
+          </div>
+        </motion.div>
       </div>
     );
   }
 
-  // 2. MAIN INTERFACE
+  // MAIN INTERVIEW SCREEN
   return (
-    <div className="h-screen flex flex-col bg-gray-900 overflow-hidden text-white">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-gray-900 via-gray-800 to-black overflow-hidden text-white">
+      
       {/* Header */}
-      <header className="px-6 py-4 flex justify-between items-center bg-black/20 border-b border-white/5">
-        <div className="flex items-center gap-3">
-            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-red-500'}`} />
-            <span className="font-medium text-sm opacity-80">
-                {connected ? 'LIVE' : 'RECONNECTING...'}
+      <header className="px-6 py-4 flex justify-between items-center bg-black/30 backdrop-blur-md border-b border-white/10">
+        <div className="flex items-center gap-4">
+          {/* Connection Status */}
+          <div className="flex items-center gap-2">
+            <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="font-medium text-sm text-gray-300">
+              {connected ? 'LIVE' : 'RECONNECTING...'}
             </span>
+          </div>
+
+          {/* Session ID */}
+          <span className="text-xs text-gray-500">
+            Session: {sessionId.slice(0, 8)}
+          </span>
         </div>
-        <button onClick={handleEndInterview} className="p-2 hover:bg-red-500/20 rounded-lg text-red-400">
-            <PhoneOff size={20} />
-        </button>
+
+        {/* End Interview Button */}
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={handleEndInterview}
+          className="flex items-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 rounded-lg text-red-400 transition"
+        >
+          <PhoneOff size={18} />
+          <span className="text-sm font-medium">End</span>
+        </motion.button>
       </header>
 
-      {/* Main Area */}
+      {/* Main Content Area */}
       <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
+        
         {phase === 'dsa' ? (
-            <div className="w-full h-full flex gap-4">
-                <DSAQuestionDisplay question={currentQuestion} />
-                <CodeEditor />
+          // DSA Coding Phase
+          <div className="w-full h-full flex gap-4">
+            <div className="flex-1">
+              <DSAQuestionDisplay question={currentQuestion} />
             </div>
+            <div className="flex-1">
+              <CodeEditor sessionId={sessionId} question={currentQuestion} />
+            </div>
+          </div>
         ) : (
-            <div className="w-full max-w-4xl flex-1 flex flex-col items-center justify-center mb-20">
-                <AIAvatar isSpeaking={isSpeaking} currentQuestion={currentQuestion} />
-                
-                {/* Live Subtitles */}
-                <div className="absolute bottom-32 text-center pointer-events-none">
-                    <AnimatePresence>
-                        {currentAnswer && (
-                            <motion.div 
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0 }}
-                                className="inline-block bg-black/60 backdrop-blur-md px-6 py-3 rounded-2xl text-lg font-medium text-blue-100"
-                            >
-                                "{currentAnswer}"
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
+          // Behavioral Interview Phase
+          <div className="w-full max-w-5xl flex-1 flex flex-col items-center justify-center space-y-8">
+            
+            {/* AI Avatar */}
+            <AIAvatar isSpeaking={agentSpeaking} currentQuestion={currentQuestion} />
+
+            {/* Live Transcripts */}
+            <div className="w-full space-y-3">
+              <AnimatePresence mode="wait">
+                {/* User Transcript */}
+                {userTranscript && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="bg-blue-500/10 border border-blue-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xs font-bold text-blue-400 uppercase mt-1">You</span>
+                      <p className="flex-1 text-sm text-blue-100">{userTranscript}</p>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Agent Transcript */}
+                {agentTranscript && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="bg-purple-500/10 border border-purple-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xs font-bold text-purple-400 uppercase mt-1">AI</span>
+                      <p className="flex-1 text-sm text-purple-100">
+                        {agentTranscript.slice(-200)}...
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
+          </div>
         )}
       </div>
 
       {/* Footer Controls */}
-      <div className="h-24 bg-black/30 backdrop-blur-md border-t border-white/5 flex items-center justify-center gap-8 relative z-50">
-        <div className="absolute left-6 bottom-6 w-48 h-36 rounded-xl overflow-hidden border-2 border-white/10 shadow-2xl bg-black">
-            <CandidateWebcam />
+      <div className="h-28 bg-black/40 backdrop-blur-md border-t border-white/10 flex items-center justify-center gap-12 relative">
+        
+        {/* Webcam Preview (Bottom Left) */}
+        <div className="absolute left-6 bottom-6 w-56 h-40 rounded-xl overflow-hidden border-2 border-white/20 shadow-2xl bg-black">
+          <CandidateWebcam />
         </div>
 
-        {/* ✅ NEW MIC INPUT with Visualizer */}
-        <MicInput 
-            isRecording={isRecording}
-            onStart={handleMicToggle}
-            onStop={handleMicToggle}
-            stream={stream}
-            disabled={!connected}
-        />
-
-        <button 
-            onClick={() => sendMessage({ type: "answer_commit", text: currentAnswer })}
-            disabled={!currentAnswer.trim()}
-            className="absolute right-8 px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-semibold flex items-center gap-2 transition-all disabled:opacity-50"
+        {/* Microphone Button (Center) */}
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={handleToggleMic}
+          className={`w-20 h-20 rounded-full flex items-center justify-center shadow-2xl transition-all border-4 ${
+            micEnabled
+              ? 'bg-blue-600 hover:bg-blue-500 border-blue-400/50'
+              : 'bg-red-500 hover:bg-red-600 border-red-400/50'
+          }`}
         >
-            <Send size={18} />
-            <span>Send</span>
-        </button>
+          {micEnabled ? (
+            <Mic className="w-9 h-9 text-white" />
+          ) : (
+            <MicOff className="w-9 h-9 text-white" />
+          )}
+        </motion.button>
+
+        {/* Status Text (Bottom Right) */}
+        <div className="absolute right-8 bottom-8 text-sm">
+          {agentSpeaking ? (
+            <div className="flex items-center gap-2 text-purple-400">
+              <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse" />
+              <span className="font-medium">AI is speaking...</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-green-400">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              <span className="font-medium">Listening...</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

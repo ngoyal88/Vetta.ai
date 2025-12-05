@@ -1,13 +1,14 @@
 # ========================================
-# 4. services/interview_service.py - Core interview logic
+# services/interview_service.py - COMPLETE Implementation
 # ========================================
 
 import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 from services.gemini_service import GeminiService
-from models.interview import InterviewType, DifficultyLevel, CodingQuestion, TestCase
+from models.interview import InterviewType, DifficultyLevel
 from utils.logger import get_logger
+from utils.redis_client import get_session, update_session
 
 logger = get_logger("InterviewService")
 
@@ -23,9 +24,70 @@ class InterviewService:
         The candidate's name is {candidate_name}.
         
         Generate a short, professional 2-sentence greeting to start the interview. 
-        Do NOT ask a technical question yet. Just welcome them and say you are ready to start.
+        Do NOT ask a technical question yet. Just welcome them warmly.
         """
         return await self.gemini.generate_text(prompt)
+    
+    async def process_answer_and_generate_followup(
+        self, 
+        session_id: str, 
+        user_answer: str
+    ) -> str:
+        """
+        ⚠️ MISSING METHOD - This is what websocket_interview.py calls!
+        Processes user's answer and generates the next question.
+        """
+        try:
+            # 1. Retrieve session
+            session_data = await get_session(f"interview:{session_id}")
+            if not session_data:
+                return "I couldn't find your session. Let's restart."
+            
+            # 2. Get current question
+            current_q_index = session_data.get('current_question_index', 0)
+            questions = session_data.get('questions', [])
+            
+            if current_q_index >= len(questions):
+                return "That's all for today. Thank you!"
+            
+            current_question = questions[current_q_index]
+            
+            # 3. Store user's response
+            responses = session_data.get('responses', [])
+            responses.append({
+                'question_index': current_q_index,
+                'question': current_question,
+                'response': user_answer,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+            
+            # 4. Update session
+            session_data['responses'] = responses
+            session_data['current_question_index'] = current_q_index + 1
+            await update_session(f"interview:{session_id}", session_data)
+            
+            # 5. Generate follow-up question
+            next_question = await self.generate_follow_up(
+                responses, 
+                InterviewType(session_data.get('interview_type', 'dsa'))
+            )
+            
+            # 6. Add to session
+            questions.append({
+                'question': next_question,
+                'type': session_data.get('interview_type'),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+            session_data['questions'] = questions
+            await update_session(f"interview:{session_id}", session_data)
+            
+            return next_question
+            
+        except Exception as e:
+            logger.error(f"Error processing answer: {e}", exc_info=True)
+            return "I encountered an error. Could you repeat your answer?"
+    
+    # ... rest of your existing methods ...
     
     async def generate_first_question(
         self, 
@@ -36,7 +98,6 @@ class InterviewService:
     ) -> Dict[str, Any]:
         """Generate contextual first question"""
         
-        # Build context
         context = self._build_context(interview_type, resume_data, custom_role)
         
         if interview_type == InterviewType.DSA:
@@ -77,11 +138,11 @@ class InterviewService:
         """Generate DSA coding question with test cases"""
         import uuid
 
-        prompt = f"""Generate a {difficulty.value} difficulty Data Structures & Algorithms coding problem.
+        prompt = f"""Generate a {difficulty.value} difficulty DSA problem.
 
 Context: {context}
 
-Return a JSON object with this structure:
+Return ONLY valid JSON (no markdown, no backticks):
 {{
     "title": "Problem title",
     "description": "Detailed problem description",
@@ -101,32 +162,26 @@ Return a JSON object with this structure:
     "hints": ["hint1", "hint2"],
     "time_complexity_expected": "O(n)",
     "space_complexity_expected": "O(1)"
-}}
-
-Focus on common interview topics like arrays, strings, trees, graphs, dynamic programming.
-Make it realistic and solvable in 30-45 minutes."""
+}}"""
 
         response = await self.gemini.generate_text(prompt)
         
         try:
-            # Extract JSON from response, stripping code fences or preamble
-            resp = response.strip()
-            if resp.startswith("```"):
-                resp = resp.strip('`')
+            resp = response.strip().strip('`').strip()
+            if resp.startswith('json'):
+                resp = resp[4:]
             json_start = resp.find('{')
             json_end = resp.rfind('}') + 1
             json_str = resp[json_start:json_end]
             question_data = json.loads(json_str)
             
-            # ADD THESE LINES ↓
-            question_data['question_id'] = str(uuid.uuid4())  # Generate unique ID
+            question_data['question_id'] = str(uuid.uuid4())
             question_data['type'] = 'coding'
             question_data['difficulty'] = difficulty.value
             return question_data
             
-        except json.JSONDecodeError:
-            logger.error("Failed to parse DSA question JSON")
-            # Return fallback question
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse DSA question JSON: {e}")
             return self._get_fallback_dsa_question(difficulty)
     
     async def _generate_custom_role_question(
@@ -137,28 +192,38 @@ Make it realistic and solvable in 30-45 minutes."""
     ) -> Dict[str, Any]:
         """Generate question for custom role"""
         
-        prompt = f"""You are interviewing a candidate for the role: {role}
-
+        prompt = f"""You are interviewing for: {role}
 Difficulty: {difficulty.value}
 {context}
 
-Generate ONE highly relevant technical question for this role.
-Focus on:
-- Role-specific technologies and frameworks
-- Real-world scenarios they'll face
-- Technical depth appropriate for the role
+Generate ONE technical question for this role.
 
-Format your response as:
-Question: [Your question here]
-Expected Topics: [Key topics they should cover]
-Follow-up Ideas: [2-3 potential follow-up questions]"""
+Return ONLY valid JSON (no markdown):
+{{
+    "question": "Your question here",
+    "evaluation_criteria": "Key points to look for"
+}}"""
 
         response = await self.gemini.generate_text(prompt)
         
+        try:
+            resp = response.strip().strip('`').strip()
+            if resp.startswith('json'):
+                resp = resp[4:]
+            start = resp.find('{')
+            end = resp.rfind('}') + 1
+            obj = json.loads(resp[start:end])
+            question_text = obj.get('question', response)
+            criteria = obj.get('evaluation_criteria', '')
+        except Exception:
+            question_text = response
+            criteria = ''
+
         return {
             'type': 'custom_role',
             'role': role,
-            'question': response,
+            'question': question_text,
+            'evaluation_criteria': criteria,
             'difficulty': difficulty.value
         }
     
@@ -171,47 +236,36 @@ Follow-up Ideas: [2-3 potential follow-up questions]"""
         """Generate general technical/behavioral question"""
         
         type_prompts = {
-            InterviewType.FRONTEND: "frontend development (React, JavaScript, CSS, performance, accessibility)",
-            InterviewType.BACKEND: "backend development (APIs, databases, scalability, security)",
-            InterviewType.CORE_CS: "computer science fundamentals (OS, Networks, DBMS, OOP)",
-            InterviewType.BEHAVIORAL: "behavioral and situational scenarios (teamwork, problem-solving, leadership)",
-            InterviewType.RESUME_BASED: f"their resume and experience{context}"
+            InterviewType.FRONTEND: "frontend development (React, JavaScript, CSS)",
+            InterviewType.BACKEND: "backend development (APIs, databases, scalability)",
+            InterviewType.CORE_CS: "computer science fundamentals (OS, Networks, DBMS)",
+            InterviewType.BEHAVIORAL: "behavioral scenarios (teamwork, problem-solving)",
+            InterviewType.RESUME_BASED: f"their resume{context}"
         }
         
         topic = type_prompts.get(interview_type, "software engineering")
 
-        prompt = f"""Generate ONE {difficulty.value} difficulty interview question about {topic}.
-
-Context:
+        prompt = f"""Generate a {difficulty.value} question about {topic}.
 {context}
 
-The question should:
-- Be clear and specific
-- Test practical knowledge
-- Be answerable in 3-5 minutes
-- Have clear evaluation criteria
-
-STRICT OUTPUT REQUIREMENT:
-Return ONLY a valid JSON object (no backticks, no extra text) exactly in this format:
+Return ONLY valid JSON:
 {{
-    "question": "The question text for the candidate",
-    "evaluation_criteria": "Key points and red flags for the interviewer"
+    "question": "The question text",
+    "evaluation_criteria": "What to look for"
 }}"""
 
         response = await self.gemini.generate_text(prompt)
 
-        # Parse JSON response safely (handle possible fences/preamble)
         try:
-            resp = response.strip()
-            if resp.startswith("```"):
-                resp = resp.strip('`')
+            resp = response.strip().strip('`').strip()
+            if resp.startswith('json'):
+                resp = resp[4:]
             start = resp.find('{')
             end = resp.rfind('}') + 1
             obj = json.loads(resp[start:end])
-            question_text = obj.get('question') or ''
-            criteria = obj.get('evaluation_criteria') or ''
+            question_text = obj.get('question', response)
+            criteria = obj.get('evaluation_criteria', '')
         except Exception:
-            # If parsing fails, fall back to using raw response as question
             question_text = response
             criteria = ''
 
@@ -232,31 +286,20 @@ Return ONLY a valid JSON object (no backticks, no extra text) exactly in this fo
         
         prompt = f"""Analyze this interview response:
 
-Interview Type: {interview_type.value}
+Type: {interview_type.value}
 Question: {question}
-Candidate's Response: {candidate_response}
+Response: {candidate_response}
 
-Provide analysis in this format:
-
+Format:
 STRENGTHS:
-- [Positive aspect 1]
-- [Positive aspect 2]
+- [point 1]
+- [point 2]
 
 WEAKNESSES:
-- [Gap or issue 1]
-- [Gap or issue 2]
+- [gap 1]
+- [gap 2]
 
-SUGGESTIONS:
-- [Specific improvement advice 1]
-- [Specific improvement advice 2]
-
-SCORE: [0-10]/10
-
-FOLLOW-UP AREAS:
-- [Topic to probe deeper]
-- [Concept to clarify]
-
-Keep it concise and actionable."""
+SCORE: X/10"""
 
         analysis = await self.gemini.generate_text(prompt)
         
@@ -270,24 +313,19 @@ Keep it concise and actionable."""
         previous_qa: List[Dict],
         interview_type: InterviewType
     ) -> str:
-        """Generate follow-up question based on conversation"""
+        """Generate follow-up question"""
         
         conversation = "\n\n".join([
             f"Q: {qa.get('question', '')}\nA: {qa.get('response', '')}"
-            for qa in previous_qa[-3:]  # Last 3 Q&As
+            for qa in previous_qa[-3:]
         ])
         
-        prompt = f"""Based on this interview conversation for {interview_type.value}:
+        prompt = f"""Based on this {interview_type.value} interview:
 
 {conversation}
 
-Generate ONE specific follow-up question that:
-- Builds on their previous answer
-- Explores depth of understanding
-- Tests practical application
-- Is clear and focused
-
-Just provide the question, no explanation."""
+Generate ONE specific follow-up question that probes deeper.
+Just the question, no explanation."""
 
         return await self.gemini.generate_text(prompt)
     
@@ -302,53 +340,21 @@ Just provide the question, no explanation."""
             for i, qa in enumerate(session_data.get('responses', []))
         ])
         
-        prompt = f"""Provide comprehensive interview feedback:
+        prompt = f"""Interview Feedback:
 
-Interview Type: {session_data.get('interview_type', '')}
-Duration: {session_data.get('duration', 0)} minutes
+Type: {session_data.get('interview_type')}
+Duration: {session_data.get('duration', 0)} min
 Questions: {len(session_data.get('responses', []))}
 
-Q&A Summary:
 {qa_summary}
 
-Provide structured feedback:
-
-OVERALL PERFORMANCE:
-[2-3 sentence summary]
-
-TECHNICAL SKILLS (Score: X/10):
-[Assessment]
-
-COMMUNICATION (Score: X/10):
-[Assessment]
-
-PROBLEM-SOLVING (Score: X/10):
-[Assessment]
-
-KEY STRENGTHS:
-1. [Strength with example]
-2. [Strength with example]
-3. [Strength with example]
-
-IMPROVEMENT AREAS:
-1. [Area] - Priority: High/Medium/Low
-   Action: [Specific steps]
-   Resources: [What to study]
-
-2. [Area] - Priority: High/Medium/Low
-   Action: [Specific steps]
-   Resources: [What to study]
-
-READINESS LEVEL:
-[Entry/Mid/Senior Level assessment]
-
-RECOMMENDATION:
-[Hire/Strong Maybe/Not Yet - with reasoning]
-
-NEXT STEPS:
-1. [Action item]
-2. [Action item]
-3. [Action item]"""
+Provide:
+OVERALL PERFORMANCE: [summary]
+TECHNICAL SKILLS (X/10): [assessment]
+COMMUNICATION (X/10): [assessment]
+KEY STRENGTHS: [3 points]
+IMPROVEMENT AREAS: [3 points with actions]
+RECOMMENDATION: [Hire/Maybe/Not Yet]"""
 
         feedback = await self.gemini.generate_text(prompt, temperature=0.3)
         
@@ -358,35 +364,20 @@ NEXT STEPS:
         }
     
     def _get_fallback_dsa_question(self, difficulty: DifficultyLevel) -> Dict[str, Any]:
-        """Fallback DSA question if generation fails"""
+        """Fallback DSA question"""
         import uuid
         
-        fallback_questions = {
-            DifficultyLevel.EASY: {
-                "question_id": str(uuid.uuid4()),  # ADD THIS
-                "title": "Two Sum",
-                "description": "Given an array of integers nums and an integer target, return indices of two numbers that add up to target.",
-                "input_format": "Array of integers and target integer",
-                "output_format": "Array of two indices",
-                "example": {
-                    "input": "[2,7,11,15], target=9",
-                    "output": "[0,1]",
-                    "explanation": "nums[0] + nums[1] = 2 + 7 = 9"
-                },
-                "test_cases": [
-                    {"input": "[2,7,11,15]\n9", "output": "[0,1]"},
-                    {"input": "[3,2,4]\n6", "output": "[1,2]"},
-                    {"input": "[3,3]\n6", "output": "[0,1]"}
-                ],
-                "constraints": ["2 <= nums.length <= 10^4", "-10^9 <= nums[i] <= 10^9"],
-                "hints": ["Use a hash map to store seen numbers"],
-                "type": "coding",
-                "difficulty": "easy"
-            }
+        return {
+            "question_id": str(uuid.uuid4()),
+            "title": "Two Sum",
+            "description": "Given an array of integers and a target, return indices of two numbers that sum to target.",
+            "test_cases": [
+                {"input": "[2,7,11,15]\n9", "output": "[0,1]"},
+                {"input": "[3,2,4]\n6", "output": "[1,2]"}
+            ],
+            "type": "coding",
+            "difficulty": "easy"
         }
-        
-        return fallback_questions.get(difficulty, fallback_questions[DifficultyLevel.EASY])
 
-# Expose a reusable service instance for modules that import `interview_service`
-# This enables `from services.interview_service import interview_service`
+# Global instance
 interview_service = InterviewService()

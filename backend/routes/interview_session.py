@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from services.interview_service import InterviewService
 from services.code_execution_service import CodeExecutionService
-from services.transcription_service import TranscriptionService
+#from services.transcription_service import TranscriptionService
 from models.interview import (
     InterviewType, DifficultyLevel, InterviewSession,
     CodeSubmission, TranscriptionEntry
@@ -26,7 +26,7 @@ logger = get_logger("InterviewRoutes")
 
 interview_service = InterviewService()
 code_service = CodeExecutionService()
-transcription_service = TranscriptionService()
+#transcription_service = TranscriptionService()
 
 
 class StartInterviewRequest(BaseModel):
