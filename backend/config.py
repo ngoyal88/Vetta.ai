@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 6000
 
     # ---------- LiveKit (Voice Infrastructure) ------------------------- #
-    livekit_url: str = "ws://localhost:7880"
-    livekit_api_key: str = "devkey"
-    livekit_api_secret: str = "devsecret"
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
 
     # ---------- Speech Services (Pipecat) ------------------------------ #
     # STT (Choose one)
