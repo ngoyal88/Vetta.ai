@@ -6,6 +6,7 @@ Handles real-time voice conversation flow
 import asyncio
 import os
 import sys
+import json
 
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -44,9 +45,10 @@ settings = get_settings()
 class InterviewProcessor(FrameProcessor):
     """Custom processor that handles interview logic with Gemini"""
     
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, transport: LiveKitTransport):
         super().__init__()
         self.session_id = session_id
+        self.transport = transport  # ✅ ADDED: Store transport reference
         self.gemini = GeminiService()
         self.interview_service = InterviewService()
         self.current_transcript = ""
@@ -66,10 +68,10 @@ class InterviewProcessor(FrameProcessor):
             
         elif isinstance(frame, UserStoppedSpeakingFrame):
             logger.info("🔇 User stopped speaking")
-            await self.push_frame(frame, direction) # Forward event downstream
-            await self._process_user_turn()         # Generate AI response
+            await self.push_frame(frame, direction)
+            await self._process_user_turn()
             
-        # 3. CRITICAL FIX: Delegate system frames (StartFrame, EndFrame, etc.) to base class
+        # 3. Delegate system frames to base class
         else:
             await super().process_frame(frame, direction)
     
@@ -90,19 +92,52 @@ class InterviewProcessor(FrameProcessor):
         try:
             logger.info(f"Processing turn for message: {user_message}")
             
-            # Logic: Use InterviewService to get the next question/response
+            # Get AI response
             ai_response = await self.interview_service.process_answer_and_generate_followup(
                 self.session_id, 
                 user_message
             )
             
-            logger.info(f"AI Response: {ai_response}")
+            logger.info(f"AI Response: {ai_response[:100]}...")
             
-            # Send AI response to TTS pipeline
+            # ✅ FIX #1: Send question to React via LiveKit data channel
+            await self._send_question_to_ui(ai_response)
+            
+            # Send AI response to TTS pipeline (for voice)
             await self.push_frame(TextFrame(ai_response), FrameDirection.DOWNSTREAM)
             
         except Exception as e:
             logger.error(f"Error processing user turn: {e}", exc_info=True)
+    
+    async def _send_question_to_ui(self, question_data):
+        """✅ NEW METHOD: Send question update to React UI"""
+        try:
+            # Prepare data payload
+            if isinstance(question_data, dict):
+                payload = {
+                    "type": "question_update",
+                    "question": question_data,
+                    "phase": "dsa" if question_data.get("type") == "coding" else "behavioral"
+                }
+            else:
+                payload = {
+                    "type": "question_update", 
+                    "question": question_data,
+                    "phase": "behavioral"
+                }
+            
+            # Send via LiveKit data channel if supported in this version
+            if hasattr(self.transport, "send_data"):
+                await self.transport.send_data(
+                    json.dumps(payload).encode('utf-8'),
+                    topic="interview-updates"
+                )
+                logger.info("✅ Question sent to UI via data channel")
+            else:
+                logger.warning("LiveKitTransport.send_data not available; skipping UI data channel update")
+            
+        except Exception as e:
+            logger.error(f"Failed to send question to UI: {e}", exc_info=True)
 
 
 class InterviewPipeline:
@@ -118,19 +153,11 @@ class InterviewPipeline:
         """Start the interview pipeline"""
         
         logger.info(f"🚀 Starting pipeline for session {self.session_id}")
-        
-        # Validation
-        if not settings.deepgram_api_key:
-            logger.error("❌ Deepgram API key missing! STT will fail.")
-            return
-        if not settings.elevenlabs_api_key:
-            logger.error("❌ ElevenLabs API key missing! TTS will fail.")
-            return
 
         try:
             # 1. Generate agent token for LiveKit
             token = self._generate_agent_token()
-            
+
             # 2. Initialize VAD (Voice Activity Detection)
             vad = SileroVADAnalyzer(params=VADParams(
                 start_secs=0.5,
@@ -146,10 +173,32 @@ class InterviewPipeline:
                 params=LiveKitParams(
                     audio_in_enabled=True,
                     audio_out_enabled=True,
-                    vad_analyzer=vad,  # VAD attached here
+                    vad_analyzer=vad,
                     transcription_enabled=False
                 )
             )
+
+            # Early validation of keys AFTER transport so we can notify UI
+            if not settings.deepgram_api_key or not settings.elevenlabs_api_key:
+                missing = []
+                if not settings.deepgram_api_key:
+                    missing.append("Deepgram API key")
+                if not settings.elevenlabs_api_key:
+                    missing.append("ElevenLabs API key")
+                msg = f"Missing configuration: {', '.join(missing)}. Voice features disabled."
+                logger.error(f"❌ {msg}")
+                try:
+                    await transport.send_data(
+                        json.dumps({
+                            "type": "info",
+                            "message": msg,
+                            "phase": "behavioral"
+                        }).encode('utf-8'),
+                        topic="interview-updates"
+                    )
+                except Exception:
+                    pass
+                return
 
             # 4. Speech-to-Text service (Deepgram)
             stt = DeepgramSTTService(
@@ -158,8 +207,8 @@ class InterviewPipeline:
                 language="en-US"
             )
 
-            # 5. Custom interview processor
-            interview_processor = InterviewProcessor(self.session_id)
+            # 5. Custom interview processor (✅ Pass transport reference)
+            interview_processor = InterviewProcessor(self.session_id, transport)
             
             # 6. Text-to-Speech service (ElevenLabs)
             tts = ElevenLabsTTSService(
@@ -170,11 +219,11 @@ class InterviewPipeline:
             
             # 7. Build pipeline
             pipeline = Pipeline([
-                transport.input(),      # User audio (VAD filtered)
-                stt,                    # Transcribe audio to text
-                interview_processor,    # Logic & AI generation
-                tts,                    # Convert AI text to audio
-                transport.output()      # Send audio back to user
+                transport.input(),
+                stt,
+                interview_processor,
+                tts,
+                transport.output()
             ])
             
             # 8. Create task
@@ -186,8 +235,8 @@ class InterviewPipeline:
                 )
             )
             
-            # 9. Send greeting message
-            await self._send_greeting(task)
+            # 9. Send greeting AND first question
+            await self._send_initial_content(task, transport)
             
             # 10. Run pipeline
             runner = PipelineRunner()
@@ -199,28 +248,54 @@ class InterviewPipeline:
             logger.error(f"Pipeline error: {e}", exc_info=True)
             raise
     
-    async def _send_greeting(self, task: PipelineTask):
-        """Send initial greeting to candidate"""
+    async def _send_initial_content(self, task: PipelineTask, transport: LiveKitTransport):
+        """✅ FIXED: Send greeting + first question"""
         try:
             session_data = await get_session(f"interview:{self.session_id}")
             
             if not session_data:
                 greeting = "Hello! I am your AI interviewer. Let's begin."
+                first_question = "Tell me about yourself."
             else:
-                try:
-                    user_name = session_data.get('user_id', 'Candidate')
-                    role = session_data.get('custom_role', 'Developer')
-                    greeting = await self.interview_service.generate_greeting(user_name, role)
-                except Exception:
-                    greeting = "Hello! I am ready to start your interview."
+                # Generate greeting
+                user_name = session_data.get('user_id', 'Candidate')
+                role = session_data.get('custom_role') or session_data.get('interview_type', 'Developer')
+                greeting = await self.interview_service.generate_greeting(user_name, role)
+                
+                # Get first question from session
+                questions = session_data.get('questions', [])
+                if questions:
+                    first_question = questions[0]
+                else:
+                    first_question = "Tell me about yourself and your experience."
 
+            # Send greeting as voice
             await task.queue_frames([TextFrame(greeting)])
             logger.info(f"Greeting queued: {greeting}")
             
+            # ✅ Send first question to UI via data channel
+            await asyncio.sleep(1)  # Small delay after greeting
+            
+            payload = {
+                "type": "question_update",
+                "question": first_question,
+                "phase": "dsa" if isinstance(first_question, dict) and first_question.get("type") == "coding" else "behavioral"
+            }
+            
+            if hasattr(transport, "send_data"):
+                await transport.send_data(
+                    json.dumps(payload).encode('utf-8'),
+                    topic="interview-updates"
+                )
+                logger.info(f"✅ First question sent to UI")
+            else:
+                logger.warning("LiveKitTransport.send_data not available; skipping initial UI data channel update")
+            
         except Exception as e:
-            logger.error(f"Failed to send greeting: {e}")
+            logger.error(f"Failed to send initial content: {e}", exc_info=True)
     
     def _generate_agent_token(self) -> str:
+        """✅ FIXED: Added can_publish_data permission"""
         token = api.AccessToken(
             api_key=settings.livekit_api_key,
             api_secret=settings.livekit_api_secret
@@ -231,7 +306,8 @@ class InterviewPipeline:
             room_join=True,
             room=self.room_name,
             can_publish=True,
-            can_subscribe=True
+            can_subscribe=True,
+            can_publish_data=True  # ✅ ADDED: Required for sending data to React
         ))
         return token.to_jwt()
 

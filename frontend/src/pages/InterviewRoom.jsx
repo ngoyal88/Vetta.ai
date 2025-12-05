@@ -18,16 +18,15 @@ const InterviewRoom = () => {
   // State
   const [hasStarted, setHasStarted] = useState(false);
   const [micEnabled, setMicEnabled] = useState(true);
-  const [phase, setPhase] = useState('behavioral'); // 'behavioral' | 'dsa'
-  const [currentQuestion, setCurrentQuestion] = useState(null);
   
-  // LiveKit Connection
-  // FIX: Passed sessionId directly so connection starts immediately on load
+  // ✅ FIX #3: Use currentQuestion and phase from hook
   const {
     connected,
     agentSpeaking,
     userTranscript,
     agentTranscript,
+    currentQuestion, // ✅ Now comes from hook
+    phase,           // ✅ Now comes from hook
     error,
     disconnect,
     toggleMicrophone
@@ -37,19 +36,30 @@ const InterviewRoom = () => {
     currentUser?.displayName || "Candidate"
   );
 
-  // Update current question from agent transcript
-  useEffect(() => {
-    if (agentTranscript) {
-      setCurrentQuestion(agentTranscript);
-    }
-  }, [agentTranscript]);
-
   // Handle errors
   useEffect(() => {
     if (error) {
       toast.error(`Connection error: ${error}`);
     }
   }, [error]);
+
+  // ✅ Show notification when question updates
+  useEffect(() => {
+    if (currentQuestion && hasStarted) {
+      console.log('📬 New question received:', currentQuestion);
+      toast.success('New question received!', { duration: 2000 });
+    }
+  }, [currentQuestion, hasStarted]);
+
+  // ✅ Show notification when phase changes
+  useEffect(() => {
+    if (phase && hasStarted) {
+      console.log('🔄 Phase changed to:', phase);
+      if (phase === 'dsa') {
+        toast.success('🖥️ Switching to coding challenge!', { duration: 3000 });
+      }
+    }
+  }, [phase, hasStarted]);
 
   const handleStartInterview = () => {
     setHasStarted(true);
@@ -150,6 +160,11 @@ const InterviewRoom = () => {
             </span>
           </div>
 
+          {/* Phase Badge */}
+          <div className="px-3 py-1 bg-purple-500/20 border border-purple-500/50 rounded-full text-xs font-medium text-purple-300">
+            {phase === 'dsa' ? '💻 Coding Phase' : '🗣️ Behavioral Phase'}
+          </div>
+
           {/* Session ID */}
           <span className="text-xs text-gray-500">
             Session: {sessionId.slice(0, 8)}
@@ -169,12 +184,12 @@ const InterviewRoom = () => {
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 relative">
+      <div className="flex-1 flex flex-col items-center justify-center p-6 relative overflow-hidden">
         
         {phase === 'dsa' ? (
           // DSA Coding Phase
           <div className="w-full h-full flex gap-4">
-            <div className="flex-1">
+            <div className="flex-1 overflow-y-auto">
               <DSAQuestionDisplay question={currentQuestion} />
             </div>
             <div className="flex-1">
@@ -189,7 +204,7 @@ const InterviewRoom = () => {
             <AIAvatar isSpeaking={agentSpeaking} currentQuestion={currentQuestion} />
 
             {/* Live Transcripts */}
-            <div className="w-full space-y-3">
+            <div className="w-full space-y-3 max-h-64 overflow-y-auto">
               <AnimatePresence mode="wait">
                 {/* User Transcript */}
                 {userTranscript && (
@@ -206,7 +221,7 @@ const InterviewRoom = () => {
                   </motion.div>
                 )}
 
-                {/* Agent Transcript */}
+                {/* Agent Transcript (Recent snippet) */}
                 {agentTranscript && (
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}

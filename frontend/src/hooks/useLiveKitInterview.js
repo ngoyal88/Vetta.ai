@@ -13,6 +13,8 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
   const [agentSpeaking, setAgentSpeaking] = useState(false);
   const [userTranscript, setUserTranscript] = useState('');
   const [agentTranscript, setAgentTranscript] = useState('');
+  const [currentQuestion, setCurrentQuestion] = useState(null); // ✅ ADDED: Store current question
+  const [phase, setPhase] = useState('behavioral'); // ✅ ADDED: Track interview phase
   const [error, setError] = useState(null);
   
   // Refs to track instances without triggering re-renders
@@ -124,14 +126,33 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
           }
         });
 
+        // ✅ FIX #2: Handle question updates from AI agent
         newRoom.on(RoomEvent.DataReceived, (payload, participant) => {
           try {
             const data = JSON.parse(new TextDecoder().decode(payload));
-            if (isMounted && data.type === 'transcript') {
-              if (participant?.identity.includes('agent')) {
-                setAgentTranscript(data.text);
-              } else {
-                setUserTranscript(data.text);
+            
+            console.log('📩 Data received from agent:', data);
+            
+            // Handle different data types
+            if (data.type === 'question_update') {
+              if (isMounted) {
+                setCurrentQuestion(data.question);
+                
+                // ✅ Update phase if provided
+                if (data.phase) {
+                  setPhase(data.phase);
+                  console.log(`✅ Phase changed to: ${data.phase}`);
+                }
+              }
+            }
+            // Handle transcript updates (legacy support)
+            else if (data.type === 'transcript') {
+              if (isMounted) {
+                if (participant?.identity.includes('agent')) {
+                  setAgentTranscript(data.text);
+                } else {
+                  setUserTranscript(data.text);
+                }
               }
             }
           } catch (err) {
@@ -176,7 +197,6 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
       }
 
       if (roomRef.current) {
-        // Disconnect synchronously to stop all tracks immediately
         roomRef.current.disconnect(); 
         roomRef.current = null;
       }
@@ -223,6 +243,8 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
     agentSpeaking,
     userTranscript,
     agentTranscript,
+    currentQuestion, // ✅ ADDED: Return current question
+    phase,           // ✅ ADDED: Return current phase
     error,
     disconnect,
     toggleMicrophone
