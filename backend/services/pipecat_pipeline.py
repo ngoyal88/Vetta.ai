@@ -83,39 +83,12 @@ class InterviewProcessor(FrameProcessor):
         self.current_transcript = ""
         
         try:
-            # Get session data
-            session_data = await get_session(f"interview:{self.session_id}")
-            if not session_data:
-                logger.error("Session not found")
-                return
-            
-            # Build context
-            context = self._build_context(session_data, user_message)
-            
-            # Generate AI response via Gemini
-            prompt = f"""You are conducting a {session_data.get('interview_type', 'technical')} interview.
-
-{context}
-
-Candidate just said: "{user_message}"
-
-As the interviewer:
-1. Acknowledge their answer briefly (1 sentence)
-2. Either ask a follow-up question OR move to next topic
-3. Be conversational, encouraging, and professional
-4. Keep response under 60 words
-
-Your response:"""
-            
-            ai_response = await self.gemini.generate_text(prompt, temperature=0.8)
-            
-            # Store in session
-            session_data.setdefault('responses', []).append({
-                'user': user_message,
-                'ai': ai_response,
-                'timestamp': asyncio.get_event_loop().time()
-            })
-            await update_session(f"interview:{self.session_id}", session_data)
+            # FIX: Use the specific interview service method instead of generic chat
+            # This ensures questions are saved and follow-ups are specific
+            ai_response = await self.interview_service.process_answer_and_generate_followup(
+                self.session_id, 
+                user_message
+            )
             
             logger.info(f"AI Response: {ai_response}")
             
@@ -124,35 +97,6 @@ Your response:"""
             
         except Exception as e:
             logger.error(f"Error processing user turn: {e}", exc_info=True)
-    
-    def _build_context(self, session_data: dict, user_message: str) -> str:
-        """Build context for LLM"""
-        
-        context_parts = []
-        
-        # Interview type
-        interview_type = session_data.get('interview_type', 'general')
-        context_parts.append(f"Interview Type: {interview_type}")
-        
-        # Custom role if applicable
-        if session_data.get('custom_role'):
-            context_parts.append(f"Target Role: {session_data['custom_role']}")
-        
-        # Recent conversation history
-        responses = session_data.get('responses', [])
-        if responses:
-            context_parts.append("\nRecent conversation:")
-            for resp in responses[-3:]:  # Last 3 exchanges
-                context_parts.append(f"AI: {resp.get('ai', '')}")
-                context_parts.append(f"Candidate: {resp.get('user', '')}")
-        
-        # Current question if exists
-        questions = session_data.get('questions', [])
-        if questions:
-            current_q = questions[-1]
-            context_parts.append(f"\nCurrent Question: {current_q.get('question', '')}")
-        
-        return "\n".join(context_parts)
 
 
 class InterviewPipeline:

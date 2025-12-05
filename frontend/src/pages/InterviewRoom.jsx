@@ -22,6 +22,7 @@ const InterviewRoom = () => {
   const [currentQuestion, setCurrentQuestion] = useState(null);
   
   // LiveKit Connection
+  // FIX: Passed sessionId directly so connection starts immediately on load
   const {
     connected,
     agentSpeaking,
@@ -31,7 +32,7 @@ const InterviewRoom = () => {
     disconnect,
     toggleMicrophone
   } = useLiveKitInterview(
-    hasStarted ? sessionId : null, 
+    sessionId, 
     currentUser?.uid, 
     currentUser?.displayName || "Candidate"
   );

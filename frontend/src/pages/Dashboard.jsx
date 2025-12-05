@@ -71,7 +71,7 @@ const Dashboard = () => {
     }
   };
 
-  const handleStartInterview = () => {
+  const handleStartInterview = async () => {
     // Validate resume for resume-based interview
     if (interviewType === 'resume' && !parsedResume) {
       toast.error('Please upload your resume first for resume-based interview');
@@ -83,19 +83,34 @@ const Dashboard = () => {
       return;
     }
 
-    const sessionId = crypto.randomUUID();
+    try {
+      // FIX: Call the backend API to start the session properly
+      const response = await api.startInterview(
+        currentUser.uid,
+        interviewType,
+        difficulty,
+        parsedResume, // resumeData
+        interviewType === 'custom' ? customRole : null
+      );
 
-    // Store config in localStorage
-    localStorage.setItem('interviewConfig', JSON.stringify({
-      sessionId,
-      userId: currentUser.uid,
-      interviewType,
-      difficulty,
-      customRole: interviewType === 'custom' ? customRole : null,
-      resumeData: parsedResume
-    }));
+      const sessionId = response.session_id;
 
-    navigate(`/interview/${sessionId}`);
+      // Store config in localStorage
+      localStorage.setItem('interviewConfig', JSON.stringify({
+        sessionId,
+        userId: currentUser.uid,
+        interviewType,
+        difficulty,
+        customRole: interviewType === 'custom' ? customRole : null,
+        resumeData: parsedResume
+      }));
+
+      navigate(`/interview/${sessionId}`);
+    
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to start interview: ' + err.message);
+    }
   };
 
   if (loading) {

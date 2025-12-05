@@ -42,3 +42,6 @@ elevenlabs==1.2.2        # RECOMMENDED (most natural)
 # Utilities
 python-dotenv==1.0.1
 aiohttp
+
+# VAD (Voice Activity Detection) - REQUIRED for Silero
+onnxruntime
