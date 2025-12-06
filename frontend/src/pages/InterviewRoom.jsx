@@ -1,3 +1,5 @@
+// frontend/src/pages/InterviewRoom.jsx - WITH AUDIO CONTEXT FIX
+
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -15,18 +17,17 @@ const InterviewRoom = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   
-  // State
   const [hasStarted, setHasStarted] = useState(false);
   const [micEnabled, setMicEnabled] = useState(true);
+  const [audioContextResumed, setAudioContextResumed] = useState(false);
   
-  // ✅ FIX #3: Use currentQuestion and phase from hook
   const {
     connected,
     agentSpeaking,
     userTranscript,
     agentTranscript,
-    currentQuestion, // ✅ Now comes from hook
-    phase,           // ✅ Now comes from hook
+    currentQuestion,
+    phase,
     error,
     disconnect,
     toggleMicrophone
@@ -36,6 +37,48 @@ const InterviewRoom = () => {
     currentUser?.displayName || "Candidate"
   );
 
+  // 🔥 FIX: Resume AudioContext on user interaction
+  useEffect(() => {
+    const resumeAudioContext = async () => {
+      if (audioContextResumed) return;
+      
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioContext = new AudioContext();
+        
+        console.log('🔊 Audio Context State:', audioContext.state);
+        
+        if (audioContext.state === 'suspended') {
+          console.log('🔄 Resuming audio context...');
+          await audioContext.resume();
+          console.log('✅ Audio context resumed');
+          setAudioContextResumed(true);
+        } else {
+          console.log('✅ Audio context already running');
+          setAudioContextResumed(true);
+        }
+      } catch (err) {
+        console.error('❌ Audio context error:', err);
+      }
+    };
+
+    // Resume on any user interaction
+    const handleInteraction = () => {
+      resumeAudioContext();
+      // Only need to do this once
+      document.removeEventListener('click', handleInteraction);
+      document.removeEventListener('keydown', handleInteraction);
+    };
+
+    document.addEventListener('click', handleInteraction);
+    document.addEventListener('keydown', handleInteraction);
+
+    return () => {
+      document.removeEventListener('click', handleInteraction);
+      document.removeEventListener('keydown', handleInteraction);
+    };
+  }, [audioContextResumed]);
+
   // Handle errors
   useEffect(() => {
     if (error) {
@@ -43,7 +86,7 @@ const InterviewRoom = () => {
     }
   }, [error]);
 
-  // ✅ Show notification when question updates
+  // Show notification when question updates
   useEffect(() => {
     if (currentQuestion && hasStarted) {
       console.log('📬 New question received:', currentQuestion);
@@ -51,7 +94,7 @@ const InterviewRoom = () => {
     }
   }, [currentQuestion, hasStarted]);
 
-  // ✅ Show notification when phase changes
+  // Show notification when phase changes
   useEffect(() => {
     if (phase && hasStarted) {
       console.log('🔄 Phase changed to:', phase);
@@ -62,6 +105,7 @@ const InterviewRoom = () => {
   }, [phase, hasStarted]);
 
   const handleStartInterview = () => {
+    console.log('🚀 Starting interview...');
     setHasStarted(true);
     toast.success("🎤 Interview started - Speak naturally!");
   };
@@ -90,7 +134,6 @@ const InterviewRoom = () => {
           animate={{ opacity: 1, scale: 1 }}
           className="text-center space-y-8 max-w-lg bg-gray-800/50 backdrop-blur-xl p-12 rounded-3xl border border-gray-700/50 shadow-2xl"
         >
-          {/* Animated Icon */}
           <motion.div
             animate={{ scale: [1, 1.1, 1] }}
             transition={{ duration: 2, repeat: Infinity }}
@@ -99,13 +142,11 @@ const InterviewRoom = () => {
             <span className="text-6xl">🎙️</span>
           </motion.div>
 
-          {/* Title */}
           <div>
             <h1 className="text-4xl font-bold text-white mb-3">Ready to Begin?</h1>
             <p className="text-gray-400 text-lg">Your AI interviewer is waiting.</p>
           </div>
 
-          {/* Connection Status */}
           <div className="flex items-center justify-center gap-2 text-sm">
             {connected ? (
               <>
@@ -120,7 +161,6 @@ const InterviewRoom = () => {
             )}
           </div>
 
-          {/* Start Button */}
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -131,13 +171,12 @@ const InterviewRoom = () => {
             {connected ? "🚀 Start Interview" : "⏳ Connecting..."}
           </motion.button>
 
-          {/* Tips */}
           <div className="text-left bg-gray-900/50 p-4 rounded-xl text-sm text-gray-300">
             <p className="font-semibold mb-2">💡 Tips:</p>
             <ul className="space-y-1 list-disc list-inside">
+              <li>Click anywhere to enable audio</li>
               <li>Speak naturally - AI detects when you're done</li>
               <li>You can interrupt the AI anytime</li>
-              <li>Microphone access required</li>
             </ul>
           </div>
         </motion.div>
@@ -152,7 +191,6 @@ const InterviewRoom = () => {
       {/* Header */}
       <header className="px-6 py-4 flex justify-between items-center bg-black/30 backdrop-blur-md border-b border-white/10">
         <div className="flex items-center gap-4">
-          {/* Connection Status */}
           <div className="flex items-center gap-2">
             <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
             <span className="font-medium text-sm text-gray-300">
@@ -160,18 +198,15 @@ const InterviewRoom = () => {
             </span>
           </div>
 
-          {/* Phase Badge */}
           <div className="px-3 py-1 bg-purple-500/20 border border-purple-500/50 rounded-full text-xs font-medium text-purple-300">
             {phase === 'dsa' ? '💻 Coding Phase' : '🗣️ Behavioral Phase'}
           </div>
 
-          {/* Session ID */}
           <span className="text-xs text-gray-500">
             Session: {sessionId.slice(0, 8)}
           </span>
         </div>
 
-        {/* End Interview Button */}
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
@@ -187,7 +222,6 @@ const InterviewRoom = () => {
       <div className="flex-1 flex flex-col items-center justify-center p-6 relative overflow-hidden">
         
         {phase === 'dsa' ? (
-          // DSA Coding Phase
           <div className="w-full h-full flex gap-4">
             <div className="flex-1 overflow-y-auto">
               <DSAQuestionDisplay question={currentQuestion} />
@@ -197,16 +231,12 @@ const InterviewRoom = () => {
             </div>
           </div>
         ) : (
-          // Behavioral Interview Phase
           <div className="w-full max-w-5xl flex-1 flex flex-col items-center justify-center space-y-8">
             
-            {/* AI Avatar */}
             <AIAvatar isSpeaking={agentSpeaking} currentQuestion={currentQuestion} />
 
-            {/* Live Transcripts */}
             <div className="w-full space-y-3 max-h-64 overflow-y-auto">
               <AnimatePresence mode="wait">
-                {/* User Transcript */}
                 {userTranscript && (
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -221,7 +251,6 @@ const InterviewRoom = () => {
                   </motion.div>
                 )}
 
-                {/* Agent Transcript (Recent snippet) */}
                 {agentTranscript && (
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -246,12 +275,10 @@ const InterviewRoom = () => {
       {/* Footer Controls */}
       <div className="h-28 bg-black/40 backdrop-blur-md border-t border-white/10 flex items-center justify-center gap-12 relative">
         
-        {/* Webcam Preview (Bottom Left) */}
         <div className="absolute left-6 bottom-6 w-56 h-40 rounded-xl overflow-hidden border-2 border-white/20 shadow-2xl bg-black">
           <CandidateWebcam />
         </div>
 
-        {/* Microphone Button (Center) */}
         <motion.button
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
@@ -269,7 +296,6 @@ const InterviewRoom = () => {
           )}
         </motion.button>
 
-        {/* Status Text (Bottom Right) */}
         <div className="absolute right-8 bottom-8 text-sm">
           {agentSpeaking ? (
             <div className="flex items-center gap-2 text-purple-400">

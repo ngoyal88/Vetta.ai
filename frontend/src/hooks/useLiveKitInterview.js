@@ -1,3 +1,5 @@
+// frontend/src/hooks/useLiveKitInterview.js - WITH DEBUG LOGGING
+
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Room, RoomEvent, Track, createLocalAudioTrack } from 'livekit-client';
 
@@ -13,17 +15,14 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
   const [agentSpeaking, setAgentSpeaking] = useState(false);
   const [userTranscript, setUserTranscript] = useState('');
   const [agentTranscript, setAgentTranscript] = useState('');
-  const [currentQuestion, setCurrentQuestion] = useState(null); // ✅ ADDED: Store current question
-  const [phase, setPhase] = useState('behavioral'); // ✅ ADDED: Track interview phase
+  const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [phase, setPhase] = useState('behavioral');
   const [error, setError] = useState(null);
   
-  // Refs to track instances without triggering re-renders
   const roomRef = useRef(null);
   const audioPlayerRef = useRef(null);
   
-  // ----------------------------------------------------------------
-  // 1. Fetch Token (Only if sessionId changes)
-  // ----------------------------------------------------------------
+  // ✅ Fetch Token
   useEffect(() => {
     if (!sessionId || !userId) return;
 
@@ -31,6 +30,7 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
 
     const fetchToken = async () => {
       try {
+        console.log('🎟️ Fetching token for session:', sessionId);
         const response = await fetch(`${API_URL}/livekit/token`, {
           method: 'POST',
           headers: {
@@ -51,11 +51,12 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
         const data = await response.json();
         
         if (!ignore) {
+          console.log('✅ Token received');
           setToken(data.token);
           setUrl(data.url);
         }
       } catch (err) {
-        console.error('Token fetch error:', err);
+        console.error('❌ Token fetch error:', err);
         if (!ignore) setError(err.message);
       }
     };
@@ -66,15 +67,12 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
   }, [sessionId, userId, userName]);
 
 
-  // ----------------------------------------------------------------
-  // 2. Connect to Room (Only when Token is available)
-  // ----------------------------------------------------------------
+  // ✅ Connect to Room
   useEffect(() => {
     if (!token || !url) return;
 
     let isMounted = true;
     
-    // Create Room instance
     const newRoom = new Room({
       adaptiveStream: true,
       dynacast: true,
@@ -91,10 +89,14 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
       try {
         if (!isMounted) return;
 
+        console.log('🔌 Connecting to LiveKit...');
+
         // --- Event Listeners ---
         newRoom.on(RoomEvent.Connected, () => {
           if (isMounted) {
             console.log('✅ Connected to LiveKit room');
+            console.log('Room name:', newRoom.name);
+            console.log('Local participant:', newRoom.localParticipant.identity);
             setConnected(true);
             setRoom(newRoom);
           }
@@ -108,64 +110,104 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
           }
         });
 
+        // 🔥 CRITICAL: Track when agent publishes audio
+        newRoom.on(RoomEvent.TrackPublished, (publication, participant) => {
+          console.log('📢 Track published:', {
+            kind: publication.kind,
+            participant: participant.identity,
+            trackName: publication.trackName
+          });
+        });
+
+        // 🔥 CRITICAL: Subscribe to agent's audio track
         newRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-          if (track.kind === Track.Kind.Audio && participant.identity.includes('agent')) {
-            if (!audioPlayerRef.current) {
-              audioPlayerRef.current = track.attach();
-              document.body.appendChild(audioPlayerRef.current);
-            } else {
-              track.attach(audioPlayerRef.current);
+          console.log('🎧 Track subscribed:', {
+            kind: track.kind,
+            participant: participant.identity,
+            trackSid: track.sid
+          });
+          
+          if (track.kind === Track.Kind.Audio) {
+            console.log('🔊 Audio track detected!');
+            
+            // Check if it's from agent
+            if (participant.identity.includes('agent')) {
+              console.log('✅ Agent audio track!');
+              
+              // Attach audio element
+              if (!audioPlayerRef.current) {
+                console.log('📻 Creating new audio element...');
+                audioPlayerRef.current = track.attach();
+                audioPlayerRef.current.autoplay = true;
+                audioPlayerRef.current.volume = 1.0;
+                document.body.appendChild(audioPlayerRef.current);
+                console.log('✅ Audio element attached to DOM');
+              } else {
+                console.log('📻 Reusing existing audio element...');
+                track.attach(audioPlayerRef.current);
+              }
+              
+              if (isMounted) setAgentSpeaking(true);
+              
+              // Log audio element state
+              console.log('🔊 Audio element state:', {
+                paused: audioPlayerRef.current.paused,
+                volume: audioPlayerRef.current.volume,
+                muted: audioPlayerRef.current.muted,
+                readyState: audioPlayerRef.current.readyState
+              });
             }
-            if (isMounted) setAgentSpeaking(true);
           }
         });
 
         newRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+          console.log('🔇 Track unsubscribed:', participant.identity);
           if (track.kind === Track.Kind.Audio && participant.identity.includes('agent')) {
             if (isMounted) setAgentSpeaking(false);
           }
         });
 
-        // ✅ FIX #2: Handle question updates from AI agent
+        // 🔥 Handle question updates from agent
         newRoom.on(RoomEvent.DataReceived, (payload, participant) => {
           try {
             const data = JSON.parse(new TextDecoder().decode(payload));
             
-            console.log('📩 Data received from agent:', data);
+            console.log('📩 Data received:', data);
             
-            // Handle different data types
             if (data.type === 'question_update') {
               if (isMounted) {
+                console.log('❓ Question update:', data.question);
                 setCurrentQuestion(data.question);
                 
-                // ✅ Update phase if provided
                 if (data.phase) {
                   setPhase(data.phase);
-                  console.log(`✅ Phase changed to: ${data.phase}`);
-                }
-              }
-            }
-            // Handle transcript updates (legacy support)
-            else if (data.type === 'transcript') {
-              if (isMounted) {
-                if (participant?.identity.includes('agent')) {
-                  setAgentTranscript(data.text);
-                } else {
-                  setUserTranscript(data.text);
+                  console.log('🔄 Phase:', data.phase);
                 }
               }
             }
           } catch (err) {
-            console.error('Failed to parse data:', err);
+            console.error('❌ Data parse error:', err);
           }
         });
 
+        // Log participant changes
+        newRoom.on(RoomEvent.ParticipantConnected, (participant) => {
+          console.log('👤 Participant joined:', participant.identity);
+        });
+
+        newRoom.on(RoomEvent.ParticipantDisconnected, (participant) => {
+          console.log('👋 Participant left:', participant.identity);
+        });
+
         // --- Connect ---
+        console.log('🔗 Calling room.connect()...');
         await newRoom.connect(url, token);
+        console.log('✅ room.connect() completed');
 
         // --- Publish Mic ---
         if (isMounted && newRoom.state === 'connected') {
           try {
+            console.log('🎤 Publishing microphone...');
             const audioTrack = await createLocalAudioTrack({
               autoGainControl: true,
               echoCancellation: true,
@@ -174,22 +216,31 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
             await newRoom.localParticipant.publishTrack(audioTrack);
             console.log('✅ Microphone published');
           } catch (micErr) {
-            console.warn('Microphone failed (can retry manually):', micErr);
+            console.warn('⚠️ Microphone failed:', micErr);
           }
         }
 
+        // Log initial room state
+        setTimeout(() => {
+          console.log('📊 Room State Check:');
+          console.log('  - State:', newRoom.state);
+          console.log('  - Participants:', newRoom.participants.size);
+          console.log('  - Remote participants:', Array.from(newRoom.participants.values()).map(p => p.identity));
+          console.log('  - Local tracks:', Array.from(newRoom.localParticipant.tracks.values()).map(t => t.kind));
+        }, 2000);
+
       } catch (err) {
-        console.error('Connection failed:', err);
+        console.error('❌ Connection failed:', err);
         if (isMounted) setError(err.message);
       }
     };
 
     connectToRoom();
 
-    // Cleanup function
+    // Cleanup
     return () => {
       isMounted = false;
-      console.log('🧹 Cleaning up room connection...');
+      console.log('🧹 Cleaning up connection...');
       
       if (audioPlayerRef.current) {
         audioPlayerRef.current.remove();
@@ -204,19 +255,17 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
   }, [token, url]);
 
 
-  // ----------------------------------------------------------------
-  // 3. Helper Actions
-  // ----------------------------------------------------------------
+  // --- Helper Functions ---
   
   const disconnect = useCallback(async () => {
-    // 1. Local cleanup
+    console.log('📴 Disconnecting...');
+    
     if (roomRef.current) {
       roomRef.current.disconnect();
     }
     setConnected(false);
     setRoom(null);
 
-    // 2. Notify backend to kill pipeline
     if (sessionId) {
       try {
         await fetch(`${API_URL}/livekit/room/${sessionId}/end`, {
@@ -225,8 +274,9 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
             'Authorization': `Bearer ${API_TOKEN}`
           }
         });
+        console.log('✅ Backend notified of disconnect');
       } catch (err) {
-        console.error('Backend disconnect notify failed:', err);
+        console.error('⚠️ Backend disconnect notification failed:', err);
       }
     }
   }, [sessionId]);
@@ -234,6 +284,7 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
   const toggleMicrophone = useCallback(async (enabled) => {
     if (roomRef.current?.localParticipant) {
       await roomRef.current.localParticipant.setMicrophoneEnabled(enabled);
+      console.log(`🎤 Microphone ${enabled ? 'enabled' : 'disabled'}`);
     }
   }, []);
 
@@ -243,8 +294,8 @@ export const useLiveKitInterview = (sessionId, userId, userName) => {
     agentSpeaking,
     userTranscript,
     agentTranscript,
-    currentQuestion, // ✅ ADDED: Return current question
-    phase,           // ✅ ADDED: Return current phase
+    currentQuestion,
+    phase,
     error,
     disconnect,
     toggleMicrophone
