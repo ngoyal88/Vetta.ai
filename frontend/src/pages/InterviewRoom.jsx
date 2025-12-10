@@ -30,6 +30,7 @@ const InterviewRoom = () => {
     feedback,
     isRecording,
     micEnabled,
+    startInterview,
     startRecording,
     stopRecording,
     toggleMicrophone,
@@ -120,7 +121,10 @@ const InterviewRoom = () => {
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setHasStarted(true)}
+            onClick={() => {
+              setHasStarted(true);
+              startInterview();
+            }}
             disabled={!connected}
             className="w-full py-5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:from-gray-600 disabled:to-gray-700 text-white rounded-2xl font-bold text-xl shadow-2xl transition-all disabled:cursor-not-allowed"
           >

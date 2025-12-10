@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # ---------- LLM Configuration (Gemini) ----------------------------- #
     llm_api_key: str = ""
-    llm_model: str = "gemini-1.5-flash"
+    llm_model: str = "gemini-2.0-flash-live"
     llm_temperature: float = 0.7
     llm_max_tokens: int = 6000
 

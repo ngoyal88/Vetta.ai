@@ -604,6 +604,8 @@ export const useInterviewWebSocket = (sessionId) => {
     interruptAI,
     skipQuestion,
     endInterview,
-    disconnect
+    disconnect,
+    sendMessage,  // Expose for manual message sending
+    startInterview: () => sendMessage({ type: 'start' }) 
   };
 };

@@ -97,9 +97,6 @@ class InterviewWebSocketHandler:
             self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             self.timeout_task = asyncio.create_task(self._timeout_monitor())
             
-            # Send greeting
-            await self._start_greeting(session_data)
-            
             # Listen for client messages
             await self._message_loop()
             
@@ -115,6 +112,9 @@ class InterviewWebSocketHandler:
         """Listen for and process client messages with error handling"""
         while True:
             try:
+                if self.websocket.client_state.name == "DISCONNECTED":
+                    break
+
                 # Receive message with timeout
                 data = await asyncio.wait_for(
                     self.websocket.receive(),
@@ -157,6 +157,13 @@ class InterviewWebSocketHandler:
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle text messages from client"""
         msg_type = message.get("type")
+
+        if msg_type == "start":
+        # Send greeting when user clicks "Start Interview"
+            session_data = await get_session(self.session_key)
+            if session_data:
+                await self._start_greeting(session_data)
+            return
         
         if msg_type == "start_recording":
             if self.is_ai_speaking:
@@ -230,6 +237,16 @@ class InterviewWebSocketHandler:
                 await self.send_status("thinking")
                 
                 try:
+
+                    if self.current_phase == InterviewPhase.GREETING:
+                        session_data = await get_session(self.session_key)
+                        questions = session_data.get("questions", [])
+                        if questions:
+                            first_question = questions[0]
+                            self.current_phase = InterviewPhase.BEHAVIORAL
+                            await self._speak_response(first_question)
+                        return
+                    
                     # Process with timeout
                     response = await asyncio.wait_for(
                         self.interview_service.process_answer_and_generate_followup(
@@ -296,11 +313,11 @@ class InterviewWebSocketHandler:
             await self._speak_response({"question": greeting, "type": "greeting"})
             
             # Brief pause
-            await asyncio.sleep(1.5)
+            #await asyncio.sleep(1.5)
             
             # Send first question
             self.current_phase = InterviewPhase.BEHAVIORAL
-            await self._speak_response(first_question)
+            #await self._speak_response(first_question)
             
         except Exception as e:
             logger.error(f"Greeting error: {e}", exc_info=True)
