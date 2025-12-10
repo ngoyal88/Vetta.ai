@@ -1,10 +1,10 @@
+# backend/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import resume, interview_session, livekit_routes
+from routes import resume, interview_session, websocket_routes
 from config import get_settings
 from utils.logger import setup_logging, get_logger
 from utils.redis_client import test_connection
-from services.pipeline_manager import pipeline_manager
 
 setup_logging()
 log = get_logger(__name__)
@@ -12,8 +12,8 @@ settings = get_settings()
 
 app = FastAPI(
     title="AI Interviewer Platform API",
-    version="3.0.0",
-    description="AI-powered interview platform with LiveKit + Pipecat real-time voice"
+    version="4.0.0",
+    description="AI-powered interview platform with WebSocket + Deepgram + ElevenLabs"
 )
 
 # CORS
@@ -28,13 +28,13 @@ app.add_middleware(
 # Include routers
 app.include_router(resume.router)
 app.include_router(interview_session.router)
-app.include_router(livekit_routes.router)
+app.include_router(websocket_routes.router)  # NEW: WebSocket routes
 
 
 @app.on_event("startup")
 async def startup_event():
     """Startup tasks"""
-    log.info("🚀 Starting AI Interviewer Platform v3.0.0 (LiveKit + Pipecat)")
+    log.info("🚀 Starting AI Interviewer Platform v4.0.0 (WebSocket + Deepgram + ElevenLabs)")
     
     # Test Redis
     redis_ok = await test_connection()
@@ -49,8 +49,6 @@ async def startup_event():
         services.append("✅ Gemini LLM")
     if settings.judge0_api_key:
         services.append("✅ Judge0 Code Execution")
-    if settings.livekit_api_key:
-        services.append("✅ LiveKit Voice")
     if settings.deepgram_api_key:
         services.append("✅ Deepgram STT")
     if settings.elevenlabs_api_key:
@@ -63,22 +61,20 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown"""
     log.info("🛑 Shutting down...")
-    pipeline_manager.cleanup_all()
-    log.info("✅ All pipelines stopped")
+    log.info("✅ Shutdown complete")
 
 
 @app.get("/")
 async def root():
     return {
-        "message": "AI Interviewer Platform v3.0.0",
+        "message": "AI Interviewer Platform v4.0.0",
         "status": "operational",
-        "architecture": "LiveKit + Pipecat + Gemini",
+        "architecture": "WebSocket + Deepgram STT + ElevenLabs TTS + Gemini AI",
         "features": [
             "📄 Resume parsing",
             "🎯 Custom role interviews",
             "💻 DSA with code execution",
-            "🎤 Real-time voice (LiveKit)",
-            "🗣️ Professional STT/TTS (Deepgram/ElevenLabs)",
+            "🎤 Real-time voice (Deepgram + ElevenLabs)",
             "🤖 AI interviewer (Gemini)",
             "📊 Comprehensive feedback"
         ],
@@ -91,10 +87,9 @@ async def health_check():
     """Health check"""
     return {
         "status": "healthy",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "services": {
             "gemini": bool(settings.llm_api_key),
-            "livekit": bool(settings.livekit_api_key),
             "deepgram": bool(settings.deepgram_api_key),
             "elevenlabs": bool(settings.elevenlabs_api_key),
             "judge0": bool(settings.judge0_api_key),
