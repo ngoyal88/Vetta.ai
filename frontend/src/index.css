@@ -8,5 +8,5 @@ body,
   height: 100%;
   margin: 0;
   padding: 0;
-  overflow: hidden; /* prevent global scroll */
+  overflow: auto; /* allow global scroll */
 }
