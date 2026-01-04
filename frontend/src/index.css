@@ -1,6 +1,13 @@
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Use Crimson Text (closest to Bookman Old Style) as fallback */
+* {
+  font-family: 'Bookman Old Style', 'Crimson Text', 'Book Antiqua', Georgia, serif;
+}
 
 html,
 body,
@@ -8,5 +15,79 @@ body,
   height: 100%;
   margin: 0;
   padding: 0;
-  overflow: auto; /* allow global scroll */
+  overflow: auto;
+  background-color: #0a0a0a;
+  color: #ffffff;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #06b6d4;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #0891b2;
+}
+
+/* Custom utility classes */
+.bg-dark {
+  background-color: #0a0a0a;
+}
+
+.bg-darker {
+  background-color: #050505;
+}
+
+.text-cyan {
+  color: #06b6d4;
+}
+
+.border-cyan {
+  border-color: #06b6d4;
+}
+
+.hover-cyan:hover {
+  color: #06b6d4;
+  transition: color 0.3s ease;
+}
+
+/* Button styles */
+.btn-cyan {
+  background-color: #06b6d4;
+  color: #0a0a0a;
+  font-weight: 600;
+  padding: 0.75rem 2rem;
+  border-radius: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.btn-cyan:hover {
+  background-color: #0891b2;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(6, 182, 212, 0.3);
+}
+
+.btn-outline-cyan {
+  background-color: transparent;
+  color: #06b6d4;
+  border: 2px solid #06b6d4;
+  font-weight: 600;
+  padding: 0.75rem 2rem;
+  border-radius: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.btn-outline-cyan:hover {
+  background-color: #06b6d4;
+  color: #0a0a0a;
+  transform: translateY(-2px);
 }

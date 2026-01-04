@@ -20,26 +20,27 @@ function App() {
         toastOptions={{
           duration: 3000,
           style: {
-            background: '#1F2937',
-            color: '#F9FAFB',
-            border: '1px solid #374151'
+            background: '#1a1a1a',
+            color: '#ffffff',
+            border: '1px solid rgba(6, 182, 212, 0.2)'
           },
           success: {
             iconTheme: {
-              primary: '#10B981',
-              secondary: '#F9FAFB',
+              primary: '#06b6d4',
+              secondary: '#ffffff',
             },
           },
           error: {
             iconTheme: {
-              primary: '#EF4444',
-              secondary: '#F9FAFB',
+              primary: '#ef4444',
+              secondary: '#ffffff',
             },
           },
         }}
       />
       
-      {!location.pathname.includes('/interview') && <Navbar />}
+      {/* Navbar only shows on certain routes */}
+      <Navbar />
       
       <Routes>
         <Route path="/" element={<Home />} />
