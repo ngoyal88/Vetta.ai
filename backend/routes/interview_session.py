@@ -26,6 +26,7 @@ settings = get_settings()
 
 class StartInterviewRequest(BaseModel):
     user_id: str
+    candidate_name: Optional[str] = None
     interview_type: InterviewType
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
     custom_role: Optional[str] = None
@@ -59,11 +60,17 @@ async def start_interview(
             request.resume_data,
             request.custom_role
         )
+
+        # Prefer an explicit candidate name, else derive from resume if present
+        candidate_name = request.candidate_name or (
+            (request.resume_data or {}).get("name", {}).get("raw") if isinstance(request.resume_data, dict) else None
+        ) or request.user_id
         
         # Create session
         session = InterviewSession(
             session_id=session_id,
             user_id=request.user_id,
+            candidate_name=candidate_name,
             interview_type=request.interview_type,
             custom_role=request.custom_role,
             difficulty=request.difficulty,

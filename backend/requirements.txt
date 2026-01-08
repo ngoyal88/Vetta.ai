@@ -11,9 +11,6 @@ pydantic-settings>=2.2.0
 httpx>=0.27.0
 requests
 
-# WebSocket
-websockets>=12.0
-
 # Database & Caching
 redis==5.0.2
 firebase_admin
@@ -25,10 +22,17 @@ python-docx==0.8.11
 # AI/ML Services
 google-generativeai
 numpy<2.0.0
+groq
 
-# Speech Services
-deepgram-sdk>=3.2.7,<4.0.0
-elevenlabs>=1.2.2,<2.0.0
+# LiveKit
+livekit>=0.11.0
+livekit-agents>=0.8.0
+livekit-plugins-deepgram>=0.6.0
+livekit-plugins-openai>=0.7.0
+livekit-plugins-elevenlabs>=0.1.0
+deepgram-sdk 
+elevenlabs
+edge-tts>=6.1.12
 
 # Code Execution
 # (Judge0 via HTTP API)

@@ -16,12 +16,17 @@ from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from services.deepgram_service import DeepgramSTTService
-from services.elevenlabs_service import ElevenLabsTTSService, TTSCache
+from services.edge_tts_service import EdgeTTSService
+# If you want to switch back to ElevenLabs later:
+# from services.elevenlabs_service import ElevenLabsTTSService
+from services.elevenlabs_service import TTSCache
 from services.interview_service import InterviewService
 from utils.redis_client import get_session, update_session
 from utils.logger import get_logger
+from config import get_settings
 
 logger = get_logger("InterviewWebSocket")
+settings = get_settings()
 
 
 class InterviewPhase(str, Enum):
@@ -44,7 +49,24 @@ class InterviewWebSocketHandler:
         
         # Services
         self.stt_service: Optional[DeepgramSTTService] = None
-        self.tts_service = ElevenLabsTTSService()
+        # TTS provider: Edge TTS by default (free-ish).
+        # Switch back to ElevenLabs later by setting `tts_provider` to "elevenlabs"
+        # and replacing the below with: `self.tts_service = ElevenLabsTTSService()`
+        tts_provider = (getattr(settings, "tts_provider", "edge") or "edge").strip().lower()
+        if tts_provider == "elevenlabs":
+            # self.tts_service = ElevenLabsTTSService()  # requires ELEVENLABS_API_KEY
+            # Keeping Edge as runtime default for now.
+            self.tts_service = EdgeTTSService(
+                voice=getattr(settings, "edge_tts_voice", "en-US-JennyNeural"),
+                rate=getattr(settings, "edge_tts_rate", "+0%"),
+                pitch=getattr(settings, "edge_tts_pitch", "+0Hz"),
+            )
+        else:
+            self.tts_service = EdgeTTSService(
+                voice=getattr(settings, "edge_tts_voice", "en-US-JennyNeural"),
+                rate=getattr(settings, "edge_tts_rate", "+0%"),
+                pitch=getattr(settings, "edge_tts_pitch", "+0Hz"),
+            )
         self.interview_service = InterviewService()
         self.tts_cache = TTSCache()
         
@@ -56,6 +78,9 @@ class InterviewWebSocketHandler:
         self.current_answer_parts = []
         self.latest_interim_transcript: str = ""
         self.awaiting_response = False
+
+        # Greeting flow
+        self._first_question: Optional[Dict[str, Any]] = None
         
         # Locks
         self.processing_lock = asyncio.Lock()
@@ -130,13 +155,21 @@ class InterviewWebSocketHandler:
                 
                 self.last_activity = datetime.now(timezone.utc)
                 
-                if "text" in data:
-                    message = json.loads(data["text"])
+                text_payload = data.get("text")
+                bytes_payload = data.get("bytes")
+
+                # Starlette includes both keys; one is None.
+                if text_payload is not None:
+                    try:
+                        message = json.loads(text_payload)
+                    except Exception:
+                        logger.warning("⚠️ Received non-JSON text payload")
+                        continue
                     await self._handle_message(message)
-                
-                elif "bytes" in data:
+
+                elif bytes_payload is not None:
                     # CRITICAL: Process audio immediately
-                    await self._handle_audio(data["bytes"])
+                    await self._handle_audio(bytes_payload)
                 
             except asyncio.TimeoutError:
                 logger.warning(f"⏰ Receive timeout for {self.session_id}")
@@ -167,6 +200,13 @@ class InterviewWebSocketHandler:
             await self.send_status("processing")
             logger.info("🛑 Client stopped recording")
 
+        elif msg_type == "ai_playback_ended":
+            # Frontend finished playing the latest AI audio.
+            async with self.speech_lock:
+                self.is_ai_speaking = False
+            await self.send_status("listening")
+            logger.info("🔇 Client reported AI playback ended; resuming mic")
+
         elif msg_type == "answer_complete":
             logger.info("✅ Client marked answer complete")
             await self._finalize_current_answer()
@@ -191,7 +231,10 @@ class InterviewWebSocketHandler:
         
         # Log every 10th chunk
         if self.audio_chunks_received % 10 == 0:
-            logger.info(f"🎵 Received {self.audio_chunks_received} audio chunks ({len(audio_bytes)} bytes)")
+            logger.info(
+                f"🎵 Received {self.audio_chunks_received} audio chunks ({len(audio_bytes)} bytes) "
+                f"ai_speaking={self.is_ai_speaking}"
+            )
         
         # CRITICAL FIX: Don't block on is_processing!
         # Only check if AI is speaking (echo prevention)
@@ -262,8 +305,35 @@ class InterviewWebSocketHandler:
 
         async with self.processing_lock:
             self.is_processing = True
-            await self.send_status("thinking")
             try:
+                # Special-case: greeting phase expects a short intro from the candidate.
+                # Do NOT advance question index here; just store intro and ask the first real question.
+                if self.current_phase == InterviewPhase.GREETING:
+                    await self.send_status("thinking")
+                    session_data = await get_session(self.session_key)
+                    if session_data is not None:
+                        session_data["candidate_intro"] = complete_text
+                        await update_session(self.session_key, session_data)
+
+                    first_question = None
+                    if self._first_question is not None:
+                        first_question = self._first_question
+                    else:
+                        # Fallback: read from session questions[0]
+                        if session_data:
+                            questions = session_data.get("questions", []) or []
+                            if questions:
+                                first_question = questions[0]
+
+                    if not first_question:
+                        await self.send_error("No questions available")
+                        return
+
+                    self.current_phase = InterviewPhase.BEHAVIORAL
+                    await self._speak_response(first_question)
+                    return
+
+                await self.send_status("thinking")
                 logger.info(f"🤔 Processing submitted answer ({len(complete_text)} chars)...")
                 response = await asyncio.wait_for(
                     self.interview_service.process_answer_and_generate_followup(
@@ -304,7 +374,10 @@ class InterviewWebSocketHandler:
             
             self.current_phase = InterviewPhase.GREETING
             
-            user_name = session_data.get("user_id", "Candidate")
+            user_name = session_data.get("candidate_name") or (
+                (session_data.get("resume_data", {}) or {}).get("name", {}).get("raw")
+                if isinstance(session_data.get("resume_data"), dict) else None
+            ) or session_data.get("user_id", "Candidate")
             interview_type = session_data.get("interview_type", "technical")
             custom_role = session_data.get("custom_role")
             role = custom_role or interview_type
@@ -320,20 +393,15 @@ class InterviewWebSocketHandler:
             if not first_question:
                 await self.send_error("No questions available")
                 return
+
+            # Save for after the candidate intro.
+            self._first_question = first_question
             
             logger.info(f"✅ First question ready: {first_question}")
             
-            # Send greeting
-            await self._speak_response({"question": greeting, "type": "greeting"})
-            
-            # Brief pause
-            await asyncio.sleep(2.0)
-            
-            # Send first question
-            self.current_phase = InterviewPhase.BEHAVIORAL
-            await self._speak_response(first_question)
-            
-            logger.info("✅ Greeting complete, interview started")
+            # Send greeting only; wait for candidate intro before sending Q1.
+            await self._speak_response(greeting)
+            logger.info("✅ Greeting sent; awaiting candidate intro")
             
         except Exception as e:
             logger.error(f"❌ Greeting error: {e}", exc_info=True)
@@ -446,6 +514,7 @@ class InterviewWebSocketHandler:
             "phase": self.current_phase.value,
             "spoken_text": spoken_text,
             "audio": base64.b64encode(audio).decode("utf-8"),
+            "audio_content_type": "audio/mpeg",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         await self.send_message(message)
@@ -484,6 +553,9 @@ class InterviewWebSocketHandler:
     async def send_message(self, message: Dict[str, Any]):
         """Send message"""
         try:
+            if self.websocket.client_state == WebSocketState.DISCONNECTED or \
+               self.websocket.application_state == WebSocketState.DISCONNECTED:
+                return
             await self.websocket.send_json(message)
         except Exception as e:
             logger.error(f"❌ Failed to send message: {e}")

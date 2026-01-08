@@ -27,9 +27,20 @@ class Settings(BaseSettings):
     # ---------- Speech Services (Pipecat) ------------------------------ #
     # STT (Choose one)
     deepgram_api_key: str = ""                     
+    deepgram_model: str = "nova-2"  # e.g. nova-2 (recommended), nova-2-general
     
     # TTS (Choose one)
     elevenlabs_api_key: str = ""      
+
+    # ---------- TTS Provider (WebSocket MVP) -------------------------- #
+    # For now we default to Edge TTS because ElevenLabs quota may be hit.
+    # Switch back later by setting: TTS_PROVIDER=elevenlabs
+    tts_provider: str = "edge"  # edge | elevenlabs
+
+    # Edge TTS settings (no API key required)
+    edge_tts_voice: str = "en-US-JennyNeural"
+    edge_tts_rate: str = "+0%"
+    edge_tts_pitch: str = "+0Hz"
 
     # ---------- Code Execution ----------------------------------------- #
     judge0_api_key: str = ""
