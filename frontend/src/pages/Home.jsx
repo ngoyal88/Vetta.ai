@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
-  Mic, Code, Brain, Zap, CheckCircle, Star, ArrowRight, 
-  Users, Award, TrendingUp, Shield, Menu, X
+  Mic, Code, Brain, Zap, Star, ArrowRight,
+  Award, Shield, Menu, X
 } from 'lucide-react';
 
 // Navbar Component
@@ -409,8 +409,8 @@ const Footer = () => (
           <h4 className="font-bold text-white mb-4">Product</h4>
           <ul className="space-y-2">
             <li><a href="#features" className="text-gray-400 hover:text-cyan-400 transition text-sm">Features</a></li>
-            <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition text-sm">Pricing</a></li>
-            <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition text-sm">Documentation</a></li>
+            <li><button type="button" className="text-gray-400 hover:text-cyan-400 transition text-sm">Pricing</button></li>
+            <li><button type="button" className="text-gray-400 hover:text-cyan-400 transition text-sm">Documentation</button></li>
           </ul>
         </div>
 
@@ -418,9 +418,9 @@ const Footer = () => (
         <div>
           <h4 className="font-bold text-white mb-4">Company</h4>
           <ul className="space-y-2">
-            <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition text-sm">About</a></li>
-            <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition text-sm">Blog</a></li>
-            <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition text-sm">Contact</a></li>
+            <li><button type="button" className="text-gray-400 hover:text-cyan-400 transition text-sm">About</button></li>
+            <li><button type="button" className="text-gray-400 hover:text-cyan-400 transition text-sm">Blog</button></li>
+            <li><button type="button" className="text-gray-400 hover:text-cyan-400 transition text-sm">Contact</button></li>
           </ul>
         </div>
 
@@ -428,9 +428,9 @@ const Footer = () => (
         <div>
           <h4 className="font-bold text-white mb-4">Legal</h4>
           <ul className="space-y-2">
-            <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition text-sm">Privacy</a></li>
-            <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition text-sm">Terms</a></li>
-            <li><a href="#" className="text-gray-400 hover:text-cyan-400 transition text-sm">Security</a></li>
+            <li><button type="button" className="text-gray-400 hover:text-cyan-400 transition text-sm">Privacy</button></li>
+            <li><button type="button" className="text-gray-400 hover:text-cyan-400 transition text-sm">Terms</button></li>
+            <li><button type="button" className="text-gray-400 hover:text-cyan-400 transition text-sm">Security</button></li>
           </ul>
         </div>
       </div>

@@ -1,11 +1,17 @@
 # backend/services/deepgram_service.py
 """
-Deepgram Speech-to-Text Service
-Handles real-time audio transcription via WebSocket
+Deepgram Speech-to-Text Service (SDK v5 style)
+Changes:
+1. Use AsyncDeepgramClient + EventType (v5)
+2. Align connect/send/close with v2 WebSocket API
+3. Robust event parsing for transcript + error
+4. Detailed logging and safe fallbacks
 """
 import asyncio
+import contextlib
 from typing import Optional, Callable
-from deepgram import DeepgramClient, DeepgramClientOptions, LiveTranscriptionEvents, LiveOptions
+from deepgram import AsyncDeepgramClient
+from deepgram.core.events import EventType
 from utils.logger import get_logger
 from config import get_settings
 
@@ -25,54 +31,47 @@ class DeepgramSTTService:
         """
         self.on_transcript = on_transcript
         self.connection = None
+        self._conn_ctx = None
+        self._listen_task: Optional[asyncio.Task] = None
         self.is_connected = False
         
         if not settings.deepgram_api_key:
             raise ValueError("Deepgram API key not configured")
         
-        # Initialize Deepgram client
-        config = DeepgramClientOptions(
-            options={"keepalive": "true"}
-        )
-        self.client = DeepgramClient(settings.deepgram_api_key, config)
+        # Initialize Deepgram async client
+        self.client = AsyncDeepgramClient(api_key=settings.deepgram_api_key)
+        logger.info("🎤 Deepgram client initialized")
     
     async def connect(self):
         """Establish WebSocket connection to Deepgram"""
         try:
-            # Configure transcription options
-            options = LiveOptions(
-                model="nova-2",
-                language="en",
-                smart_format=True,
-                interim_results=True,
-                utterance_end_ms=1000,
-                vad_events=True,
-                endpointing=300,
-                punctuate=True,
-                diarize=False
+            logger.info("🔌 Connecting to Deepgram...")
+            
+            # Create connection (Listen v2) as async context manager and enter it
+            self._conn_ctx = self.client.listen.v2.connect(
+                model="flux-general-en",
+                encoding="linear16",
+                # Deepgram SDK signature expects Optional[str]
+                sample_rate="16000",
             )
-            
-            # Create connection
-            self.connection = self.client.listen.websocket.v("1")
-            
+            self.connection = await self._conn_ctx.__aenter__()
+
             # Register event handlers
-            self.connection.on(LiveTranscriptionEvents.Open, self._on_open)
-            self.connection.on(LiveTranscriptionEvents.Transcript, self._on_transcript)
-            self.connection.on(LiveTranscriptionEvents.Error, self._on_error)
-            self.connection.on(LiveTranscriptionEvents.Close, self._on_close)
-            self.connection.on(LiveTranscriptionEvents.UtteranceEnd, self._on_utterance_end)
-            
-            # Start connection
-            if self.connection.start(options):
-                logger.info("✅ Deepgram connection established")
-                self.is_connected = True
-                return True
-            else:
-                logger.error("Failed to start Deepgram connection")
-                return False
+            self.connection.on(EventType.OPEN, lambda *_: self._on_open())
+            self.connection.on(EventType.CLOSE, lambda *_: self._on_close())
+            self.connection.on(EventType.ERROR, self._on_error)
+            self.connection.on(EventType.MESSAGE, self._on_message)
+
+            # Start listening in the background; awaiting this blocks until closed.
+            self._listen_task = asyncio.create_task(self.connection.start_listening())
+
+            logger.info("✅ Deepgram connection established")
+            self.is_connected = True
+            await asyncio.sleep(0.2)
+            return True
                 
         except Exception as e:
-            logger.error(f"Deepgram connection error: {e}", exc_info=True)
+            logger.error(f"❌ Deepgram connection error: {e}", exc_info=True)
             return False
     
     async def send_audio(self, audio_data: bytes):
@@ -83,92 +82,111 @@ class DeepgramSTTService:
             audio_data: Raw audio bytes (16kHz, 16-bit PCM, mono)
         """
         if not self.is_connected or not self.connection:
-            logger.warning("Cannot send audio: not connected")
+            logger.warning("⚠️ Cannot send audio: not connected")
             return
         
         try:
-            self.connection.send(audio_data)
+            # Log first audio chunk for debugging
+            if not hasattr(self, '_first_audio_logged'):
+                logger.info(f"📤 Sending first audio chunk: {len(audio_data)} bytes")
+                self._first_audio_logged = True
+            
+            # Deepgram Listen v2 uses send_media(), which ultimately sends raw bytes.
+            await self.connection.send_media(audio_data)
+            
         except Exception as e:
-            logger.error(f"Error sending audio: {e}")
+            logger.error(f"❌ Error sending audio: {e}", exc_info=True)
     
     async def close(self):
         """Close Deepgram connection"""
         if self.connection:
             try:
-                self.connection.finish()
-                logger.info("Deepgram connection closed")
+                if self._listen_task is not None:
+                    self._listen_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await self._listen_task
+
+                # Attempt graceful finish if available
+                try:
+                    await self.connection.finish()
+                except Exception:
+                    pass
+                # Exit context manager
+                if self._conn_ctx is not None:
+                    try:
+                        await self._conn_ctx.__aexit__(None, None, None)
+                    except Exception:
+                        pass
+                logger.info("🔌 Deepgram connection closed")
             except Exception as e:
                 logger.error(f"Error closing connection: {e}")
             finally:
                 self.is_connected = False
                 self.connection = None
+                self._conn_ctx = None
+                self._listen_task = None
     
     # Event Handlers
     
     def _on_open(self, *args, **kwargs):
         """Called when connection opens"""
-        logger.info("🎤 Deepgram WebSocket opened")
+        logger.info("✅ Deepgram WebSocket opened")
+        self.is_connected = True
     
-    def _on_transcript(self, *args, **kwargs):
-        """Called when transcript is received"""
+    def _on_message(self, *args, **kwargs):
+        """Handle generic message events; extract transcript when present."""
         try:
-            result = kwargs.get("result")
-            if not result:
+            msg = args[0] if args else kwargs.get("message")
+            if msg is None:
+                logger.debug("⚠️ Received empty message")
                 return
-            
-            transcript_text = result.channel.alternatives[0].transcript
-            is_final = result.is_final
-            
-            if transcript_text.strip():
-                logger.debug(f"Transcript ({'final' if is_final else 'interim'}): {transcript_text}")
-                
-                # Call callback
+
+            # Try to access dict-like payload
+            payload = None
+            if hasattr(msg, "model_dump"):
+                payload = msg.model_dump()
+            elif isinstance(msg, dict):
+                payload = msg
+            else:
+                # Fallback: try attr access
+                payload = getattr(msg, "data", None) or {}
+
+            # Attempt to extract transcript text
+            text = None
+            is_final = False
+
+            # Common shapes
+            # v1-like: { "channel": { "alternatives": [ { "transcript": "..." } ] }, "is_final": bool }
+            channel = (payload or {}).get("channel") if isinstance(payload, dict) else None
+            if channel and isinstance(channel, dict):
+                alts = channel.get("alternatives") or []
+                if alts and isinstance(alts[0], dict):
+                    text = (alts[0].get("transcript") or "").strip()
+                is_final = bool(payload.get("is_final", False))
+
+            if text:
+                logger.info(f"📝 Transcript ({'FINAL' if is_final else 'interim'}): '{text}'")
                 if self.on_transcript:
-                    self.on_transcript(transcript_text, is_final)
-                    
+                    self.on_transcript(text, is_final)
+            else:
+                # Not a transcript event; ignore silently
+                pass
+
         except Exception as e:
-            logger.error(f"Transcript processing error: {e}", exc_info=True)
+            logger.error(f"❌ Message processing error: {e}", exc_info=True)
     
     def _on_error(self, *args, **kwargs):
         """Called on error"""
-        error = kwargs.get("error")
-        logger.error(f"Deepgram error: {error}")
+        error = None
+        if args and args[0] is not None:
+            error = args[0]
+        elif "error" in kwargs:
+            error = kwargs.get("error")
+        logger.error(f"❌ Deepgram error: {error}")
     
     def _on_close(self, *args, **kwargs):
         """Called when connection closes"""
-        logger.info("Deepgram connection closed")
+        logger.info("🔌 Deepgram connection closed")
         self.is_connected = False
     
-    def _on_utterance_end(self, *args, **kwargs):
-        """Called when user stops speaking"""
-        logger.debug("Utterance ended (user stopped speaking)")
-
-
-class AudioBuffer:
-    """Buffer for managing audio chunks"""
-    
-    def __init__(self, chunk_size: int = 4096):
-        self.chunk_size = chunk_size
-        self.buffer = bytearray()
-        self.lock = asyncio.Lock()
-    
-    async def add(self, data: bytes):
-        """Add audio data to buffer"""
-        async with self.lock:
-            self.buffer.extend(data)
-    
-    async def get_chunk(self) -> Optional[bytes]:
-        """Get next chunk if available"""
-        async with self.lock:
-            if len(self.buffer) >= self.chunk_size:
-                chunk = bytes(self.buffer[:self.chunk_size])
-                self.buffer = self.buffer[self.chunk_size:]
-                return chunk
-        return None
-    
-    async def flush(self) -> bytes:
-        """Get all remaining data"""
-        async with self.lock:
-            data = bytes(self.buffer)
-            self.buffer.clear()
-            return data
+    # v2 consolidates utterance-related events; optional to implement separately

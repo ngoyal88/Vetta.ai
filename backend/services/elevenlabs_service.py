@@ -65,23 +65,19 @@ class ElevenLabsTTSService:
         
         try:
             logger.info(f"🗣️ Generating speech: {text[:50]}...")
-            
-            # Generate speech
-            audio_generator = self.client.generate(
-                text=text,
-                voice=self.voice_id,
-                model="eleven_turbo_v2",  # Fast, high-quality model
-                voice_settings=self.voice_settings,
-                output_format="mp3_44100_128"  # Good quality, reasonable size
-            )
-            
-            # Collect audio chunks
-            audio_chunks = []
-            for chunk in audio_generator:
-                if chunk:
-                    audio_chunks.append(chunk)
-            
-            audio_data = b"".join(audio_chunks)
+
+            # ElevenLabs SDK v2.x: text_to_speech.convert returns an Iterator[bytes]
+            def _convert_sync() -> bytes:
+                audio_iter = self.client.text_to_speech.convert(
+                    self.voice_id,
+                    text=text,
+                    model_id="eleven_turbo_v2",
+                    voice_settings=self.voice_settings,
+                    output_format="mp3_44100_128",
+                )
+                return b"".join([chunk for chunk in audio_iter if chunk])
+
+            audio_data = await asyncio.to_thread(_convert_sync)
             logger.info(f"✅ Generated {len(audio_data)} bytes of audio")
             
             return audio_data
@@ -105,19 +101,19 @@ class ElevenLabsTTSService:
         
         try:
             logger.info(f"🗣️ Streaming speech: {text[:50]}...")
-            
-            # Generate speech with streaming
-            audio_generator = self.client.generate(
-                text=text,
-                voice=self.voice_id,
-                model="eleven_turbo_v2",
-                voice_settings=self.voice_settings,
-                output_format="mp3_44100_128",
-                stream=True
+
+            # text_to_speech.stream returns Iterator[bytes]
+            audio_iter = await asyncio.to_thread(
+                lambda: self.client.text_to_speech.stream(
+                    self.voice_id,
+                    text=text,
+                    model_id="eleven_turbo_v2",
+                    voice_settings=self.voice_settings,
+                    output_format="mp3_44100_128",
+                )
             )
-            
-            # Yield chunks as they arrive
-            for chunk in audio_generator:
+
+            for chunk in audio_iter:
                 if chunk:
                     yield chunk
             

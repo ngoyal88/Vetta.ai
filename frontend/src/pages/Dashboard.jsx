@@ -3,11 +3,10 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Upload, Rocket, FileText, Clock, TrendingUp, CheckCircle, Edit2, Trash2 } from 'lucide-react';
+import { Upload, Rocket, FileText, Clock, TrendingUp, CheckCircle, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import useUserProfile from '../hooks/useUserProfile';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
+// History fetching deferred; skipping Firestore/backend history for now
 
 const Dashboard = () => {
   const { currentUser, logout } = useAuth();
@@ -20,7 +19,7 @@ const Dashboard = () => {
   const [difficulty, setDifficulty] = useState('medium');
   const [customRole, setCustomRole] = useState('');
   const [file, setFile] = useState(null);
-  const [previousInterviews, setPreviousInterviews] = useState([]);
+  const [previousInterviews] = useState([]);
   const [loadingInterviews, setLoadingInterviews] = useState(true);
   const [activeTab, setActiveTab] = useState('start'); // 'start' or 'history'
 
@@ -36,31 +35,8 @@ const Dashboard = () => {
 
   // Load previous interviews
   useEffect(() => {
-    const fetchInterviews = async () => {
-      if (!currentUser) return;
-      
-      try {
-        const q = query(
-          collection(db, 'interviews'),
-          where('user_id', '==', currentUser.uid),
-          orderBy('created_at', 'desc')
-        );
-        
-        const querySnapshot = await getDocs(q);
-        const interviews = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        
-        setPreviousInterviews(interviews);
-      } catch (err) {
-        console.error('Error fetching interviews:', err);
-      } finally {
-        setLoadingInterviews(false);
-      }
-    };
-
-    fetchInterviews();
+    // History fetch deferred; mark as loaded with empty list
+    setLoadingInterviews(false);
   }, [currentUser]);
 
   // Check if resume already exists in localStorage

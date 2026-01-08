@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import Editor from "@monaco-editor/react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { Play, Send } from "lucide-react";
+import { Play } from "lucide-react";
 import { api } from "../services/api";
 
 const languageMap = {
@@ -28,7 +28,6 @@ const CodeEditor = ({ sessionId, question }) => {
   const [code, setCode] = useState(defaultCode.python);
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [testResults, setTestResults] = useState(null);
 
   const handleLanguageChange = (newLang) => {
     setLanguage(newLang);
@@ -56,8 +55,6 @@ const CodeEditor = ({ sessionId, question }) => {
         language,
         code
       );
-
-      setTestResults(result.result);
       
       if (result.passed) {
         toast.success(`✅ All tests passed! (${result.tests_passed}/${result.total_tests})`);

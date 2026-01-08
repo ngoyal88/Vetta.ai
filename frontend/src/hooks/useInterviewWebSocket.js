@@ -17,7 +17,9 @@ export const useInterviewWebSocket = (sessionId) => {
   // Interview state
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [phase, setPhase] = useState('behavioral');
-  const [transcript, setTranscript] = useState('');
+  const [transcriptInterim, setTranscriptInterim] = useState('');
+  const [transcriptFinal, setTranscriptFinal] = useState('');
+  const [aiText, setAiText] = useState('');
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [error, setError] = useState(null);
@@ -195,6 +197,30 @@ export const useInterviewWebSocket = (sessionId) => {
         setCurrentQuestion(message.question);
         setPhase(message.phase);
 
+        // Reset user transcript for the new turn
+        setTranscriptInterim('');
+        setTranscriptFinal('');
+
+        // Text that the AI is speaking (sent by backend)
+        if (typeof message.spoken_text === 'string') {
+          setAiText(message.spoken_text);
+        } else {
+          // Fallback: attempt best-effort extraction
+          const q = message.question;
+          if (typeof q === 'string') setAiText(q);
+          else if (q && typeof q === 'object') {
+            const nested = q.question;
+            if (typeof nested === 'string') setAiText(nested);
+            else if (nested && typeof nested === 'object' && typeof nested.question === 'string') {
+              setAiText(nested.question);
+            } else {
+              setAiText('');
+            }
+          } else {
+            setAiText('');
+          }
+        }
+
         // Play audio
         if (message.audio && playerRef.current) {
           setAiSpeaking(true);
@@ -227,11 +253,14 @@ export const useInterviewWebSocket = (sessionId) => {
         break;
 
       case 'transcript':
-        setTranscript(message.text);
-
-        // Clear transcript after final
         if (message.is_final) {
-          setTimeout(() => setTranscript(''), 3000);
+          setTranscriptFinal((prev) => {
+            const next = `${prev} ${message.text}`.trim();
+            return next;
+          });
+          setTranscriptInterim('');
+        } else {
+          setTranscriptInterim(message.text);
         }
         break;
 
@@ -394,6 +423,24 @@ export const useInterviewWebSocket = (sessionId) => {
       console.error('Failed to stop recording:', error);
     }
   }, [isRecording, sendMessage]);
+
+  /**
+   * Submit the current answer (manual turn-taking)
+   */
+  const submitAnswer = useCallback(async () => {
+    if (!connected) return;
+    if (aiSpeaking) {
+      toast.error('Please wait for AI to finish speaking');
+      return;
+    }
+
+    // Stop the mic if currently recording; backend will use buffered transcript
+    if (isRecording) {
+      await stopRecording();
+    }
+
+    sendMessage({ type: 'answer_complete' });
+  }, [connected, aiSpeaking, isRecording, stopRecording, sendMessage]);
 
   /**
    * Start audio level monitoring for visualization
@@ -588,7 +635,9 @@ export const useInterviewWebSocket = (sessionId) => {
     // Interview state
     currentQuestion,
     phase,
-    transcript,
+    transcriptInterim,
+    transcriptFinal,
+    aiText,
     aiSpeaking,
     feedback,
 
@@ -600,6 +649,7 @@ export const useInterviewWebSocket = (sessionId) => {
     // Actions
     startRecording,
     stopRecording,
+    submitAnswer,
     toggleMicrophone,
     interruptAI,
     skipQuestion,

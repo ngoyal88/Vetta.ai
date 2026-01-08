@@ -3,6 +3,8 @@ import json
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timezone
 from services.gemini_service import GeminiService
+from services.groq_service import GroqService
+from config import get_settings
 from models.interview import InterviewType, DifficultyLevel
 from utils.logger import get_logger
 from utils.redis_client import get_session, update_session
@@ -81,7 +83,37 @@ def _extract_question_text(q_entry: Union[str, Dict]) -> str:
 
 class InterviewService:
     def __init__(self):
-        self.gemini = GeminiService()
+        settings = get_settings()
+        provider = (settings.llm_provider or "").lower()
+        logger.info(
+            f"LLM config: provider={provider or '<unset>'} groq_key={'yes' if settings.groq_api_key else 'no'} gemini_key={'yes' if settings.llm_api_key else 'no'}"
+        )
+
+        if provider == "groq":
+            if settings.groq_api_key:
+                logger.info("Using Groq LLM provider")
+                self.llm = GroqService()
+            else:
+                logger.warning("groq selected but GROQ_API_KEY missing; falling back to Gemini")
+                self.llm = GeminiService()
+        elif provider == "gemini":
+            # If Gemini is selected but its key is missing, auto-fallback to Groq when available
+            if settings.llm_api_key:
+                self.llm = GeminiService()
+            elif settings.groq_api_key:
+                logger.info("Gemini selected but key missing; auto-falling back to Groq")
+                self.llm = GroqService()
+            else:
+                logger.warning("No LLM keys configured; Gemini client will be unconfigured")
+                self.llm = GeminiService()
+        else:
+            # Provider unset or unknown: prefer Groq if available, else Gemini
+            if settings.groq_api_key:
+                logger.info("LLM provider unset/unknown; preferring Groq (key present)")
+                self.llm = GroqService()
+            else:
+                logger.info("LLM provider unset/unknown; using Gemini")
+                self.llm = GeminiService()
 
     async def generate_greeting(self, candidate_name: str, role: str) -> str:
         """Generates a warm, professional intro"""
@@ -93,7 +125,7 @@ Keep it friendly and encouraging. Do NOT ask a technical question yet.
 
 Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited to learn more about your experience today."
 """
-        return await self.gemini.generate_text(prompt, temperature=0.7)
+        return await self.llm.generate_text(prompt, temperature=0.7)
 
     async def process_answer_and_generate_followup(
         self,
@@ -244,7 +276,7 @@ Return ONLY valid JSON (no markdown, no backticks, no explanation):
     "space_complexity_expected": "O(1)"
 }}"""
 
-        response = await self.gemini.generate_text(prompt, temperature=0.7)
+        response = await self.llm.generate_text(prompt, temperature=0.7)
 
         try:
             resp = response.strip().strip('`').strip()
@@ -285,7 +317,7 @@ Return ONLY valid JSON:
     "evaluation_criteria": "Key points to look for in the answer"
 }}"""
 
-        response = await self.gemini.generate_text(prompt, temperature=0.7)
+        response = await self.llm.generate_text(prompt, temperature=0.7)
 
         try:
             resp = response.strip().strip('`').strip()
@@ -337,7 +369,7 @@ Make it conversational and specific. Return ONLY valid JSON:
     "evaluation_criteria": "What to look for in a good answer"
 }}"""
 
-        response = await self.gemini.generate_text(prompt, temperature=0.7)
+        response = await self.llm.generate_text(prompt, temperature=0.7)
 
         try:
             resp = response.strip().strip('`').strip()
@@ -385,7 +417,7 @@ AREAS TO IMPROVE:
 
 SCORE: X/10"""
 
-        analysis = await self.gemini.generate_text(prompt, temperature=0.3)
+        analysis = await self.llm.generate_text(prompt, temperature=0.3)
 
         return {
             'analysis': analysis,
@@ -421,7 +453,7 @@ Generate ONE specific follow-up question that:
 
 Just the question, no preamble."""
 
-        question = await self.gemini.generate_text(prompt, temperature=0.8)
+        question = await self.llm.generate_text(prompt, temperature=0.8)
         return question.strip()
 
     async def generate_final_feedback(
@@ -470,7 +502,7 @@ AREAS FOR IMPROVEMENT:
 RECOMMENDATION: [Hire / Strong Maybe / Needs Improvement]
 [One sentence rationale]"""
 
-        feedback = await self.gemini.generate_text(prompt, temperature=0.3)
+        feedback = await self.llm.generate_text(prompt, temperature=0.3)
 
         return {
             'feedback': feedback,

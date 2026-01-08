@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import Navbar from './components/Navbar';
@@ -11,8 +11,6 @@ import PrivateRoute from './components/PrivateRoute';
 import InterviewRoom from './pages/InterviewRoom';
 
 function App() {
-  const location = useLocation();
-  
   return (
     <AuthProvider>
       <Toaster
