@@ -9,10 +9,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # ---------- LLM Configuration (Gemini) ----------------------------- #
+    llm_provider: str = "groq"  # gemini | groq
     llm_api_key: str = ""
-    llm_model: str = "gemini-2.0-flash-live"
+    llm_model: str = "gemini-2.5-flash"
     llm_temperature: float = 0.7
     llm_max_tokens: int = 6000
+
+    # ---------- LLM Configuration (Groq) ------------------------------- #
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
 
     # ---------- LiveKit (Voice Infrastructure) ------------------------- #
     livekit_url: str = ""

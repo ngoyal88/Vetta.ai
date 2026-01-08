@@ -5,10 +5,6 @@ router = APIRouter(prefix="/resume", tags=["Resume"])
 
 @router.post("/upload")
 async def upload_resume(file: UploadFile = File(...)):
-    """
-    Upload a PDF/DOCX/TXT file and return structured JSON
-    parsed by the local OpenResume-style parser.
-    """
     blob = await file.read()
     if not blob:
         raise HTTPException(400, "empty file")
