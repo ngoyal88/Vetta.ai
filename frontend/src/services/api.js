@@ -23,7 +23,7 @@ export const api = {
   },
 
   // Start Interview
-  startInterview: async (userId, interviewType, difficulty, resumeData, customRole = null) => {
+  startInterview: async (userId, interviewType, difficulty, resumeData, customRole = null, candidateName = null) => {
     const response = await fetch(`${API_URL}/interview/start`, {
       method: 'POST',
       headers,
@@ -32,7 +32,8 @@ export const api = {
         interview_type: interviewType,
         difficulty,
         custom_role: customRole,
-        resume_data: resumeData
+        resume_data: resumeData,
+        candidate_name: candidateName
       })
     });
     

@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 
 import { useInterviewWebSocket } from "../hooks/useInterviewWebSocket";
 import AIAvatar from "../components/AIAvatar";
+import Subtitles from "../components/Subtitles";
 import CodeEditor from "../components/CodeEditor";
 import DSAQuestionDisplay from "../components/DSAQuestionDisplay";
 
@@ -31,6 +32,8 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
     transcriptInterim,
     transcriptFinal,
     aiText,
+    aiFullText,
+    aiSpeechWpm,
     aiSpeaking,
     feedback,
     isRecording,
@@ -40,7 +43,8 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
     submitAnswer,
     toggleMicrophone,
     skipQuestion,
-    endInterview
+    endInterview,
+    audioLevel
   } = useInterviewWebSocket(sessionId);
 
   useEffect(() => {
@@ -72,63 +76,54 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col items-center justify-center p-6">
+      <div className="flex-1 flex flex-col p-6 overflow-hidden">
         {phase === 'dsa' ? (
-          <div className="w-full max-w-6xl flex-1 flex gap-4">
-            <div className="flex-1 overflow-y-auto">
+          <div className="w-full max-w-6xl flex-1 flex gap-4 overflow-hidden mx-auto">
+            <div className="flex-1 overflow-y-auto pr-1">
               <DSAQuestionDisplay question={currentQuestion} />
             </div>
-            <div className="flex-1 min-h-[520px]">
+            <div className="flex-1 min-h-[520px] overflow-hidden">
               <CodeEditor sessionId={sessionId} question={currentQuestion} />
             </div>
           </div>
         ) : (
-          <div className="w-full max-w-5xl flex-1 flex flex-col items-center justify-center space-y-8">
-            <AIAvatar isSpeaking={aiSpeaking} currentQuestion={currentQuestion} />
+          <div className="w-full max-w-5xl flex-1 mx-auto flex flex-col gap-6 overflow-hidden">
+            <AIAvatar isSpeaking={aiSpeaking} currentQuestion={currentQuestion} showQuestionCard={false} />
 
-            {aiText && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="w-full max-w-2xl bg-white/5 border border-white/10 backdrop-blur-md px-6 py-4 rounded-2xl"
-              >
-                <div className="flex items-start gap-3">
-                  <span className="text-xs font-bold text-purple-300 uppercase mt-1">AI</span>
-                  <p className="flex-1 text-sm text-gray-100">{aiText}</p>
-                </div>
-              </motion.div>
-            )}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              <Subtitles text={aiFullText || aiText} isSpeaking={aiSpeaking} wpm={aiSpeechWpm || 180} />
 
-            {(transcriptFinal || transcriptInterim) && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="w-full max-w-2xl bg-blue-500/10 border border-blue-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
-              >
-                <div className="flex items-start gap-3">
-                  <span className="text-xs font-bold text-blue-400 uppercase mt-1">You</span>
-                  <p className="flex-1 text-sm text-blue-100">
-                    {transcriptFinal}
-                    {transcriptInterim ? <span className="opacity-80"> {transcriptInterim}</span> : null}
-                  </p>
-                </div>
-              </motion.div>
-            )}
+              {(transcriptFinal || transcriptInterim) && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="w-full bg-blue-500/10 border border-blue-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-xs font-bold text-blue-400 uppercase mt-1">You</span>
+                    <p className="flex-1 text-sm text-blue-100 leading-relaxed whitespace-pre-wrap">
+                      {transcriptFinal}
+                      {transcriptInterim ? <span className="opacity-80"> {transcriptInterim}</span> : null}
+                    </p>
+                  </div>
+                </motion.div>
+              )}
 
-            {feedback && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="w-full max-w-2xl bg-green-500/10 border border-green-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
-              >
-                <div className="flex items-start gap-3">
-                  <span className="text-xs font-bold text-green-400 uppercase mt-1">Feedback</span>
-                  <p className="flex-1 text-sm text-green-100 whitespace-pre-wrap">{feedback}</p>
-                </div>
-              </motion.div>
-            )}
+              {feedback && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="w-full bg-green-500/10 border border-green-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-xs font-bold text-green-400 uppercase mt-1">Feedback</span>
+                    <p className="flex-1 text-sm text-green-100 whitespace-pre-wrap">{feedback}</p>
+                  </div>
+                </motion.div>
+              )}
+            </div>
 
-            <div className="flex items-center gap-3">
+            <div className="sticky bottom-0 left-0 right-0 mt-2 py-3 bg-black/40 backdrop-blur-md border-t border-white/10 flex items-center gap-3 flex-wrap justify-center">
               {!isRecording ? (
                 <button onClick={startRecording} className="px-6 py-3 bg-cyan-600 rounded-xl">Start Talking</button>
               ) : (

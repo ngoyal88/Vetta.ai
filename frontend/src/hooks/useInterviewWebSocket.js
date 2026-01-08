@@ -19,7 +19,9 @@ export const useInterviewWebSocket = (sessionId) => {
   const [phase, setPhase] = useState('behavioral');
   const [transcriptInterim, setTranscriptInterim] = useState('');
   const [transcriptFinal, setTranscriptFinal] = useState('');
-  const [aiText, setAiText] = useState('');
+  const [aiText, setAiText] = useState(''); // displayed text (progressively revealed)
+  const [aiFullText, setAiFullText] = useState('');
+  const [aiSpeechWpm, setAiSpeechWpm] = useState(180);
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [error, setError] = useState(null);
@@ -37,6 +39,8 @@ export const useInterviewWebSocket = (sessionId) => {
   const wsRef = useRef(null);
   const recorderRef = useRef(null);
   const playerRef = useRef(null);
+  const aiTextFullRef = useRef('');
+  const aiRevealTimerRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
   const audioLevelIntervalRef = useRef(null);
@@ -201,25 +205,32 @@ export const useInterviewWebSocket = (sessionId) => {
         setTranscriptInterim('');
         setTranscriptFinal('');
 
-        // Text that the AI is speaking (sent by backend)
+        // Determine full text that the AI will speak.
+        let fullText = '';
         if (typeof message.spoken_text === 'string') {
-          setAiText(message.spoken_text);
+          fullText = message.spoken_text;
         } else {
           // Fallback: attempt best-effort extraction
           const q = message.question;
-          if (typeof q === 'string') setAiText(q);
+          if (typeof q === 'string') fullText = q;
           else if (q && typeof q === 'object') {
             const nested = q.question;
-            if (typeof nested === 'string') setAiText(nested);
+            if (typeof nested === 'string') fullText = nested;
             else if (nested && typeof nested === 'object' && typeof nested.question === 'string') {
-              setAiText(nested.question);
-            } else {
-              setAiText('');
+              fullText = nested.question;
             }
-          } else {
-            setAiText('');
           }
         }
+
+        aiTextFullRef.current = fullText || '';
+        setAiFullText(fullText || '');
+
+        // Reset displayed text; we will reveal progressively once audio starts.
+        if (aiRevealTimerRef.current) {
+          clearInterval(aiRevealTimerRef.current);
+          aiRevealTimerRef.current = null;
+        }
+        setAiText('');
 
         // Play audio
         if (message.audio && playerRef.current) {
@@ -232,13 +243,66 @@ export const useInterviewWebSocket = (sessionId) => {
           }
 
           playerRef.current.play(message.audio, {
-            onStart: () => {
+            onStart: ({ durationSeconds } = {}) => {
               setAiSpeaking(true);
               console.log('🔊 AI started speaking');
+
+              // Progressive reveal (word-by-word) based on audio duration.
+              // This is approximate timing (no phoneme alignment), but feels natural.
+              const text = (aiTextFullRef.current || '').trim();
+              if (!text) return;
+
+              const words = text.split(/\s+/).filter(Boolean);
+              if (words.length <= 1) {
+                setAiText(text);
+                return;
+              }
+
+              // If duration isn't available yet, fall back to an estimate (~2.5 words/sec).
+              const durSec = (Number.isFinite(durationSeconds) && durationSeconds > 0)
+                ? durationSeconds
+                : Math.max(1.0, words.length / 2.5);
+
+              const durationMs = durSec * 1000;
+              if (durSec) {
+                const wpm = Math.max(80, Math.min(260, Math.round((words.length * 60) / durSec)));
+                setAiSpeechWpm(wpm);
+              }
+              const start = performance.now();
+
+              // Start with first word quickly.
+              setAiText(words[0]);
+
+              aiRevealTimerRef.current = setInterval(() => {
+                const elapsed = performance.now() - start;
+                const frac = Math.max(0, Math.min(1, elapsed / durationMs));
+                const targetCount = Math.max(1, Math.ceil(frac * words.length));
+                setAiText(words.slice(0, targetCount).join(' '));
+                if (frac >= 1) {
+                  clearInterval(aiRevealTimerRef.current);
+                  aiRevealTimerRef.current = null;
+                }
+              }, 50);
             },
             onEnd: () => {
               setAiSpeaking(false);
               console.log('🔇 AI finished speaking');
+
+              // Tell backend it can accept mic audio again (echo prevention gate).
+              try {
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(JSON.stringify({ type: 'ai_playback_ended' }));
+                }
+              } catch (e) {
+                console.warn('Failed to send ai_playback_ended:', e);
+              }
+
+              if (aiRevealTimerRef.current) {
+                clearInterval(aiRevealTimerRef.current);
+                aiRevealTimerRef.current = null;
+              }
+              // Ensure full text is visible at the end.
+              if (aiTextFullRef.current) setAiText(aiTextFullRef.current);
 
               // Resume recording if was recording
               if (micEnabled && recorderRef.current) {
@@ -247,6 +311,10 @@ export const useInterviewWebSocket = (sessionId) => {
               }
             }
           });
+        } else {
+          // No audio: show full text immediately.
+          if (aiTextFullRef.current) setAiText(aiTextFullRef.current);
+          setAiSpeechWpm(180);
         }
 
         toast.success('New question received');
@@ -369,19 +437,9 @@ export const useInterviewWebSocket = (sessionId) => {
           }
         },
         {
-          enableVAD: true,
-          silenceThreshold: 0.01,
-          silenceDuration: AUTO_STOP_SILENCE,
-          onSilenceDetected: () => {
-            console.log('🤫 Auto-stopping due to silence');
-            stopRecording();
-          },
-          onSpeechStart: () => {
-            console.log('🗣️ Speech started');
-          },
-          onSpeechEnd: () => {
-            console.log('🤐 Speech ended');
-          }
+          // IMPORTANT: disable auto-stop VAD.
+          // We use manual turn-taking via the "I'm done" button (`answer_complete`).
+          enableVAD: false
         }
       );
 
@@ -638,6 +696,8 @@ export const useInterviewWebSocket = (sessionId) => {
     transcriptInterim,
     transcriptFinal,
     aiText,
+    aiFullText,
+    aiSpeechWpm,
     aiSpeaking,
     feedback,
 

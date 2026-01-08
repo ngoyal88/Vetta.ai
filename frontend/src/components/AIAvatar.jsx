@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 
-const AIAvatar = ({ isSpeaking, currentQuestion }) => {
+const AIAvatar = ({ isSpeaking, currentQuestion, showQuestionCard = true }) => {
 
   // Helper: Parses the AI response to show ONLY the question text
   const processQuestion = (data) => {
@@ -98,8 +98,8 @@ const AIAvatar = ({ isSpeaking, currentQuestion }) => {
         </p>
       </motion.div>
       
-      {/* Question Display Card */}
-      {displayContent && (
+      {/* Question Display Card (optional) */}
+      {showQuestionCard && displayContent && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

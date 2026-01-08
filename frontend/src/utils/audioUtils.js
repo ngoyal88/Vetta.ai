@@ -1,11 +1,14 @@
 // frontend/src/utils/audioUtils.js
 /**
- * Enhanced Audio recording and playback utilities
- * Handles: Echo cancellation, VAD, interruptions, silence detection
+ * FIXED: Audio recording with proper PCM encoding for Deepgram
+ * Changes:
+ * 1. Convert WebM/Opus to PCM 16-bit
+ * 2. Add detailed logging
+ * 3. Fix audio chunk sending
  */
 
 /**
- * AudioRecorder - Records audio with VAD and echo prevention
+ * AudioRecorder - Records audio and converts to PCM for Deepgram
  */
 export class AudioRecorder {
   constructor() {
@@ -17,13 +20,12 @@ export class AudioRecorder {
     this.silenceCheckInterval = null;
     this.isActive = false;
     this.lastSpeechTime = null;
-    this.vadCallback = null;
+    this.audioWorkletNode = null;
+    this.scriptProcessor = null;
   }
 
   /**
-   * Start recording with enhanced settings
-   * @param {Function} onDataAvailable - Callback for audio chunks
-   * @param {Object} options - Recording options
+   * Start recording with PCM encoding
    */
   async start(onDataAvailable, options = {}) {
     const {
@@ -36,25 +38,34 @@ export class AudioRecorder {
     } = options;
 
     try {
-      // Get microphone with enhanced constraints
+      console.log('🎤 Starting audio recording...');
+      
+      // Get microphone with Deepgram-compatible settings
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          // Additional constraints for better quality
-          latency: 0,
-          volume: 1.0
+          // Let the browser pick the native sample rate; we'll resample via AudioContext.
+          // These DSP features can sometimes over-suppress and effectively produce near-zero PCM.
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
         }
       });
 
-      // Create audio context
+      console.log('✅ Microphone access granted');
+
+      // Create audio context at 16kHz
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,
-        latencyHint: 'interactive'
+        sampleRate: 16000
       });
+
+      console.log(`✅ AudioContext created (sample rate: ${this.audioContext.sampleRate}Hz)`);
+
+      // Some browsers start in "suspended" state until explicitly resumed by a user gesture.
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+        console.log('✅ AudioContext resumed');
+      }
 
       // Create analyser for VAD
       this.analyser = this.audioContext.createAnalyser();
@@ -64,25 +75,48 @@ export class AudioRecorder {
       const source = this.audioContext.createMediaStreamSource(this.stream);
       source.connect(this.analyser);
 
-      // Create media recorder
-      const mimeType = this.getSupportedMimeType();
-      this.mediaRecorder = new MediaRecorder(this.stream, {
-        mimeType,
-        audioBitsPerSecond: 16000
-      });
+      // ============================================
+      // CRITICAL FIX: Use ScriptProcessor for PCM
+      // ============================================
+      const bufferSize = 4096;
+      this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
+      
+      source.connect(this.scriptProcessor);
+      // Keep the processor alive without playing mic audio to speakers.
+      const zeroGain = this.audioContext.createGain();
+      zeroGain.gain.value = 0;
+      this.scriptProcessor.connect(zeroGain);
+      zeroGain.connect(this.audioContext.destination);
 
-      // Handle data available
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && this.isActive) {
-          this.audioChunks.push(event.data);
-          if (onDataAvailable) {
-            onDataAvailable(event.data);
+      // Process audio data and convert to PCM
+      this.scriptProcessor.onaudioprocess = (event) => {
+        if (!this.isActive) return;
+
+        const inputData = event.inputBuffer.getChannelData(0);
+        
+        // Convert Float32Array to Int16Array (PCM 16-bit)
+        const pcmData = this.floatToPCM16(inputData);
+
+        // Debug: occasionally log peak level so we can detect "all zeros" capture.
+        if (!this._debugFrameCount) this._debugFrameCount = 0;
+        this._debugFrameCount++;
+        if (this._debugFrameCount % 50 === 0) {
+          let peak = 0;
+          for (let i = 0; i < inputData.length; i++) {
+            const a = Math.abs(inputData[i]);
+            if (a > peak) peak = a;
           }
+          console.log('🎚️ Mic peak (Float32):', peak.toFixed(4));
+        }
+        
+        // Send PCM data
+        // NOTE: pcmData is an ArrayBuffer; use byteLength (not length)
+        if (onDataAvailable && pcmData && pcmData.byteLength > 0) {
+          const blob = new Blob([pcmData], { type: 'application/octet-stream' });
+          onDataAvailable(blob);
         }
       };
 
-      // Start recording
-      this.mediaRecorder.start(250); // Send chunks every 250ms
       this.isActive = true;
 
       // Start VAD if enabled
@@ -96,13 +130,12 @@ export class AudioRecorder {
         });
       }
       
-      console.log('🎤 Recording started with VAD');
+      console.log('✅ Recording started with PCM encoding');
       return true;
 
     } catch (error) {
-      console.error('Failed to start recording:', error);
+      console.error('❌ Failed to start recording:', error);
       
-      // User-friendly error messages
       if (error.name === 'NotAllowedError') {
         throw new Error('Microphone permission denied. Please allow microphone access.');
       } else if (error.name === 'NotFoundError') {
@@ -113,6 +146,22 @@ export class AudioRecorder {
       
       throw error;
     }
+  }
+
+  /**
+   * Convert Float32Array to PCM 16-bit Int16Array
+   */
+  floatToPCM16(float32Array) {
+    const int16Array = new Int16Array(float32Array.length);
+    
+    for (let i = 0; i < float32Array.length; i++) {
+      // Clamp to [-1, 1]
+      let s = Math.max(-1, Math.min(1, float32Array[i]));
+      // Convert to 16-bit PCM
+      int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    
+    return int16Array.buffer;
   }
 
   /**
@@ -142,7 +191,7 @@ export class AudioRecorder {
         silenceStart = null;
         this.lastSpeechTime = Date.now();
         if (onSpeechStart) onSpeechStart();
-        console.log('🗣️ Speech detected');
+        console.log('🗣️ Speech detected (level:', level.toFixed(3), ')');
       }
 
       // Speech continuing
@@ -155,15 +204,16 @@ export class AudioRecorder {
       if (!isSpeaking && wasSpeaking) {
         if (!silenceStart) {
           silenceStart = Date.now();
+          console.log('🤫 Silence started');
         }
 
         // Silence duration exceeded
         const silenceDur = Date.now() - silenceStart;
         if (silenceDur >= silenceDuration) {
           wasSpeaking = false;
+          console.log(`🛑 Silence detected for ${silenceDur}ms, stopping`);
           if (onSpeechEnd) onSpeechEnd();
           if (onSilenceDetected) onSilenceDetected();
-          console.log('🤫 Silence detected, stopping recording');
         }
       }
     };
@@ -186,37 +236,24 @@ export class AudioRecorder {
    */
   stop() {
     return new Promise((resolve) => {
-      if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
-        resolve(null);
-        return;
-      }
-
+      console.log('🛑 Stopping recording...');
+      
       this.isActive = false;
       this.stopVAD();
-
-      this.mediaRecorder.onstop = () => {
-        // Create blob from chunks
-        const audioBlob = new Blob(this.audioChunks, { 
-          type: this.mediaRecorder.mimeType 
-        });
-        
-        // Cleanup
-        this.cleanup();
-        
-        console.log('🛑 Recording stopped');
-        resolve(audioBlob);
-      };
-
-      this.mediaRecorder.stop();
+      
+      // Cleanup
+      this.cleanup();
+      
+      console.log('✅ Recording stopped');
+      resolve(null);
     });
   }
 
   /**
-   * Pause recording (keep stream active)
+   * Pause recording
    */
   pause() {
-    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-      this.mediaRecorder.pause();
+    if (this.isActive) {
       this.isActive = false;
       this.stopVAD();
       console.log('⏸️ Recording paused');
@@ -227,8 +264,7 @@ export class AudioRecorder {
    * Resume recording
    */
   resume() {
-    if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
-      this.mediaRecorder.resume();
+    if (!this.isActive) {
       this.isActive = true;
       console.log('▶️ Recording resumed');
     }
@@ -240,8 +276,16 @@ export class AudioRecorder {
   cleanup() {
     this.stopVAD();
     
+    if (this.scriptProcessor) {
+      this.scriptProcessor.disconnect();
+      this.scriptProcessor = null;
+    }
+    
     if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
+      this.stream.getTracks().forEach(track => {
+        track.stop();
+        console.log('🔇 Audio track stopped');
+      });
       this.stream = null;
     }
     
@@ -276,7 +320,7 @@ export class AudioRecorder {
    * Check if currently recording
    */
   isRecording() {
-    return this.mediaRecorder?.state === 'recording' && this.isActive;
+    return this.isActive;
   }
 
   /**
@@ -286,31 +330,12 @@ export class AudioRecorder {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioInputs = devices.filter(d => d.kind === 'audioinput');
+      console.log(`🎤 Found ${audioInputs.length} audio input device(s)`);
       return audioInputs.length > 0;
     } catch (error) {
       console.error('Error checking microphone:', error);
       return false;
     }
-  }
-
-  /**
-   * Get supported mime type
-   */
-  getSupportedMimeType() {
-    const types = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/mp4'
-    ];
-
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        return type;
-      }
-    }
-
-    return 'audio/webm'; // Fallback
   }
 }
 
@@ -329,11 +354,11 @@ export class AudioPlayer {
 
   /**
    * Add audio to queue and play
-   * @param {string} base64Audio - Base64 encoded audio
-   * @param {Object} options - Playback options
    */
   async play(base64Audio, options = {}) {
     const { priority = false, onStart = null, onEnd = null } = options;
+
+    console.log('🔊 Adding audio to queue (priority:', priority, ')');
 
     // Convert base64 to blob
     const audioBlob = this.base64ToBlob(base64Audio, 'audio/mpeg');
@@ -343,9 +368,9 @@ export class AudioPlayer {
 
     // Add to queue
     if (priority) {
-      this.queue.unshift(audioItem); // Add to front
+      this.queue.unshift(audioItem);
     } else {
-      this.queue.push(audioItem); // Add to back
+      this.queue.push(audioItem);
     }
 
     // Start playing if not already
@@ -361,41 +386,51 @@ export class AudioPlayer {
     if (this.queue.length === 0) {
       this.isPlaying = false;
       if (this.onPlaybackEnd) this.onPlaybackEnd();
+      console.log('🔇 Playback queue empty');
       return;
     }
 
     this.isPlaying = true;
     const { url, onStart, onEnd } = this.queue.shift();
 
+    console.log('▶️ Playing audio...');
+
     return new Promise((resolve) => {
       this.currentAudio = new Audio(url);
       this.currentAudio.volume = this.volume;
+
+      let durationSeconds = null;
+      this.currentAudio.onloadedmetadata = () => {
+        const d = this.currentAudio?.duration;
+        if (Number.isFinite(d) && d > 0) durationSeconds = d;
+      };
       
-      // Playback started
       this.currentAudio.onplay = () => {
+        console.log('✅ Audio playback started');
         if (this.onPlaybackStart) this.onPlaybackStart();
-        if (onStart) onStart();
+        const d = Number.isFinite(this.currentAudio?.duration) && this.currentAudio.duration > 0
+          ? this.currentAudio.duration
+          : durationSeconds;
+        if (onStart) onStart({ durationSeconds: d });
       };
 
-      // Playback ended
       this.currentAudio.onended = () => {
+        console.log('✅ Audio playback ended');
         URL.revokeObjectURL(url);
         if (onEnd) onEnd();
         this.currentAudio = null;
         this.playNext().then(resolve);
       };
 
-      // Error handling
       this.currentAudio.onerror = (error) => {
-        console.error('Audio playback error:', error);
+        console.error('❌ Audio playback error:', error);
         URL.revokeObjectURL(url);
         this.currentAudio = null;
         this.playNext().then(resolve);
       };
 
-      // Start playback
       this.currentAudio.play().catch((error) => {
-        console.error('Failed to play audio:', error);
+        console.error('❌ Failed to play audio:', error);
         URL.revokeObjectURL(url);
         this.currentAudio = null;
         this.playNext().then(resolve);
@@ -413,56 +448,11 @@ export class AudioPlayer {
       this.currentAudio = null;
     }
     
-    // Clear queue and revoke URLs
     this.queue.forEach(item => URL.revokeObjectURL(item.url));
     this.queue = [];
     
     this.isPlaying = false;
     console.log('🛑 Audio playback stopped');
-  }
-
-  /**
-   * Pause current audio
-   */
-  pause() {
-    if (this.currentAudio) {
-      this.currentAudio.pause();
-      console.log('⏸️ Audio paused');
-    }
-  }
-
-  /**
-   * Resume current audio
-   */
-  resume() {
-    if (this.currentAudio) {
-      this.currentAudio.play();
-      console.log('▶️ Audio resumed');
-    }
-  }
-
-  /**
-   * Set volume (0-1)
-   */
-  setVolume(volume) {
-    this.volume = Math.max(0, Math.min(1, volume));
-    if (this.currentAudio) {
-      this.currentAudio.volume = this.volume;
-    }
-  }
-
-  /**
-   * Check if currently playing
-   */
-  getIsPlaying() {
-    return this.isPlaying && this.currentAudio && !this.currentAudio.paused;
-  }
-
-  /**
-   * Get queue length
-   */
-  getQueueLength() {
-    return this.queue.length;
   }
 
   /**
@@ -487,32 +477,18 @@ export class AudioPlayer {
 }
 
 /**
- * Convert blob to base64
- */
-export function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-/**
  * Check if browser supports required features
  */
 export function checkBrowserSupport() {
   const features = {
     mediaDevices: !!navigator.mediaDevices?.getUserMedia,
-    mediaRecorder: !!window.MediaRecorder,
     audioContext: !!(window.AudioContext || window.webkitAudioContext),
     webSocket: !!window.WebSocket
   };
 
   const allSupported = Object.values(features).every(v => v);
+
+  console.log('🔍 Browser support check:', features);
 
   return {
     supported: allSupported,

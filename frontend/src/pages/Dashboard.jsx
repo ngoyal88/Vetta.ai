@@ -118,12 +118,14 @@ const Dashboard = () => {
     }
 
     try {
+      const candidateName = parsedResume?.name?.raw || profile?.name || currentUser?.displayName || 'Candidate';
       const response = await api.startInterview(
         currentUser.uid,
         interviewType,
         difficulty,
         parsedResume,
-        interviewType === 'custom' ? customRole : null
+        interviewType === 'custom' ? customRole : null,
+        candidateName
       );
 
       const sessionId = response.session_id;
@@ -134,7 +136,8 @@ const Dashboard = () => {
         interviewType,
         difficulty,
         customRole: interviewType === 'custom' ? customRole : null,
-        resumeData: parsedResume
+        resumeData: parsedResume,
+        candidateName
       }));
 
       navigate(`/interview/${sessionId}`);
@@ -171,12 +174,7 @@ const Dashboard = () => {
             </h1>
             <p className="text-gray-400">Ready to ace your next interview?</p>
           </div>
-          <button
-            onClick={logout}
-            className="px-4 py-2 bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg hover:bg-red-600/30 transition"
-          >
-            Logout
-          </button>
+          {/* Navbar already has logout; keep header clean */}
         </motion.div>
 
         {/* Tabs */}
