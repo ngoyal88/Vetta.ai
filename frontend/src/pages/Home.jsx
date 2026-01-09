@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 import { 
   Mic, Code, Brain, Zap, Star, ArrowRight,
@@ -9,6 +10,13 @@ import {
 // Navbar Component
 const HomeNavbar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { currentUser, logout } = useAuth();
+  const displayName = currentUser?.displayName || currentUser?.email?.split('@')[0] || 'User';
+
+  const handleLogout = async () => {
+    await logout();
+    setMobileMenuOpen(false);
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-b border-cyan-600/20">
@@ -32,18 +40,35 @@ const HomeNavbar = () => {
 
           {/* CTA Buttons */}
           <div className="hidden md:flex items-center gap-4">
-            <Link to="/signin" className="text-gray-300 hover:text-cyan-400 transition">
-              Sign In
-            </Link>
-            <Link to="/signup">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="btn-cyan"
-              >
-                Get Started
-              </motion.button>
-            </Link>
+            {!currentUser ? (
+              <>
+                <Link to="/signin" className="text-gray-300 hover:text-cyan-400 transition">
+                  Sign In
+                </Link>
+                <Link to="/signup">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="btn-cyan"
+                  >
+                    Get Started
+                  </motion.button>
+                </Link>
+              </>
+            ) : (
+              <div className="flex items-center gap-3 text-gray-200">
+                <span className="text-sm text-gray-400">Hi, {displayName}</span>
+                <Link to="/dashboard" className="text-gray-300 hover:text-cyan-400 transition">
+                  Dashboard
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="text-gray-300 hover:text-red-400 transition"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Mobile Menu Button */}
@@ -65,10 +90,31 @@ const HomeNavbar = () => {
             <a href="#features" className="block text-gray-300 hover:text-cyan-400 transition">Features</a>
             <a href="#how-it-works" className="block text-gray-300 hover:text-cyan-400 transition">How It Works</a>
             <a href="#testimonials" className="block text-gray-300 hover:text-cyan-400 transition">Testimonials</a>
-            <Link to="/signin" className="block text-gray-300 hover:text-cyan-400 transition">Sign In</Link>
-            <Link to="/signup" className="block">
-              <button className="w-full btn-cyan">Get Started</button>
-            </Link>
+            {!currentUser ? (
+              <>
+                <Link to="/signin" className="block text-gray-300 hover:text-cyan-400 transition">Sign In</Link>
+                <Link to="/signup" className="block">
+                  <button className="w-full btn-cyan">Get Started</button>
+                </Link>
+              </>
+            ) : (
+              <>
+                <div className="text-gray-300">Hi, {displayName}</div>
+                <Link
+                  to="/dashboard"
+                  className="block text-gray-300 hover:text-cyan-400 transition"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Dashboard
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left text-gray-300 hover:text-red-400 transition"
+                >
+                  Logout
+                </button>
+              </>
+            )}
           </motion.div>
         )}
       </div>

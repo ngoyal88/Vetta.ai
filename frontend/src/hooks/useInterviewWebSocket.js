@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AudioRecorder, AudioPlayer, checkBrowserSupport } from '../utils/audioUtils';
 import { api } from '../services/api';
+import { auth } from '../firebase';
 import toast from 'react-hot-toast';
 
 const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
@@ -73,15 +74,24 @@ export const useInterviewWebSocket = (sessionId) => {
   /**
    * Connect to WebSocket with error handling
    */
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       console.log('⚠️ Already connected');
       return;
     }
 
     try {
+      const user = auth.currentUser;
+      const token = user ? await user.getIdToken() : null;
+
+      if (!token) {
+        setError('Not authenticated');
+        toast.error('Please sign in to join the interview');
+        return;
+      }
+
       console.log('🔌 Connecting to WebSocket...');
-      const ws = new WebSocket(`${WS_URL}/interview/${sessionId}`);
+      const ws = new WebSocket(`${WS_URL}/interview/${sessionId}?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
       // Connection opened

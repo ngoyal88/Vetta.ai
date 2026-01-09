@@ -4,14 +4,13 @@ import { useNavigate, Link } from "react-router-dom";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { motion } from "framer-motion";
-import { User, Mail, Phone, Lock, ArrowRight } from "lucide-react";
+import { User, Mail, Lock, ArrowRight, LogIn } from "lucide-react";
 
 const SignUp = () => {
-  const { signup, sendVerification } = useAuth();
+  const { signup, signInWithGoogle, sendVerification } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -29,14 +28,9 @@ const SignUp = () => {
       return;
     }
 
-    if (!/^\d{10}$/.test(phone)) {
-      setError("Phone number must be 10 digits");
-      setLoading(false);
-      return;
-    }
-
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+    const strong = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':",.<>/?]).{8,}$/;
+    if (!strong.test(password)) {
+      setError("Password must be 8+ chars with upper, lower, number, and symbol");
       setLoading(false);
       return;
     }
@@ -49,7 +43,6 @@ const SignUp = () => {
       await setDoc(doc(db, "users", user.uid), {
         name,
         email,
-        phone,
         createdAt: serverTimestamp(),
       });
 
@@ -125,23 +118,6 @@ const SignUp = () => {
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
-              Phone Number
-            </label>
-            <div className="relative">
-              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5" />
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 bg-black/50 border border-cyan-600/20 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition"
-                placeholder="1234567890"
-                required
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
               Email Address
             </label>
             <div className="relative">
@@ -208,6 +184,40 @@ const SignUp = () => {
           <div className="flex-1 border-t border-cyan-600/20"></div>
           <span className="px-4 text-gray-500 text-sm">or</span>
           <div className="flex-1 border-t border-cyan-600/20"></div>
+        </div>
+
+        {/* Social Sign Up */}
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={async () => {
+              setError("");
+              setLoading(true);
+              try {
+                const result = await signInWithGoogle();
+                const user = result.user;
+                await setDoc(
+                  doc(db, "users", user.uid),
+                  {
+                    name: user.displayName || "New User",
+                    email: user.email,
+                    createdAt: serverTimestamp(),
+                  },
+                  { merge: true }
+                );
+                navigate("/dashboard");
+              } catch (err) {
+                console.error("Google sign-in error", err);
+                setError("Failed to sign in with Google");
+              } finally {
+                setLoading(false);
+              }
+            }}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white text-black rounded-lg font-medium hover:bg-gray-100 transition border border-gray-200"
+          >
+            <LogIn size={18} />
+            Continue with Google
+          </button>
         </div>
 
         {/* Sign In Link */}

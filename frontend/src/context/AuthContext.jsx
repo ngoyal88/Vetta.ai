@@ -3,12 +3,14 @@ import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   sendEmailVerification,
   sendPasswordResetEmail,
   updateProfile,
   deleteUser,
-  reload
+  reload,
+  GoogleAuthProvider
 } from 'firebase/auth';
 import { auth } from '../firebase';
 
@@ -35,6 +37,12 @@ export const AuthProvider = ({ children }) => {
 
   const signin = (email, password) =>
     signInWithEmailAndPassword(auth, email, password);
+
+  const signInWithGoogle = () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    return signInWithPopup(auth, provider);
+  };
 
   const logout = () => signOut(auth);
 
@@ -64,7 +72,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ currentUser, signup, signin, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount }}>
+    <AuthContext.Provider value={{ currentUser, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount }}>
       {!loading && children}
     </AuthContext.Provider>
   );
