@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { Mail, Lock, ArrowRight } from "lucide-react";
 
 const SignIn = () => {
-  const { signin } = useAuth();
+  const { signin, resetPassword } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState(""); 
@@ -37,7 +37,7 @@ const SignIn = () => {
     }
     
     try {
-      await sendPasswordResetEmail(auth, email);
+      await resetPassword(email);
       alert("Password reset email sent! Check your inbox.");
     } catch (err) {
       setError("Failed to send reset email");

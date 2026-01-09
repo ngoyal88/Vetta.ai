@@ -3,12 +3,12 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Upload, Rocket, FileText, Clock, TrendingUp, CheckCircle, Trash2 } from 'lucide-react';
+import { Upload, Rocket, FileText, Clock, TrendingUp, CheckCircle, Trash2, ShieldCheck, RefreshCw, User2, Image, AlertTriangle } from 'lucide-react';
 import { api } from '../services/api';
 import useUserProfile from '../hooks/useUserProfile';
 
 const Dashboard = () => {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, sendVerification, resetPassword, updateProfileInfo, deleteAccount, refreshUser } = useAuth();
   const { profile, loading: profileLoading } = useUserProfile();
   const navigate = useNavigate();
   
@@ -24,6 +24,10 @@ const Dashboard = () => {
   const [expandedInterviewId, setExpandedInterviewId] = useState(null);
   const [deletingInterviewId, setDeletingInterviewId] = useState(null);
   const [activeTab, setActiveTab] = useState('start'); // 'start' or 'history'
+  const [profileName, setProfileName] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const interviewTypes = [
     { value: 'dsa', label: 'DSA (Coding)', icon: '💻', desc: 'Data Structures & Algorithms' },
@@ -59,7 +63,7 @@ const Dashboard = () => {
 
     try {
       setDeletingInterviewId(id);
-      await api.deleteInterview(id, currentUser.uid);
+      await api.deleteInterview(id);
       toast.success('Interview deleted');
       await fetchHistory();
     } catch (err) {
@@ -74,7 +78,7 @@ const Dashboard = () => {
     if (!currentUser) return;
     try {
       setLoadingInterviews(true);
-      const data = await api.getInterviewHistory(currentUser.uid);
+      const data = await api.getInterviewHistory();
       setPreviousInterviews(data.history || []);
     } catch (err) {
       console.error(err);
@@ -88,6 +92,11 @@ const Dashboard = () => {
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory]);
+
+  useEffect(() => {
+    setProfileName(currentUser?.displayName || '');
+    setProfilePhoto(currentUser?.photoURL || '');
+  }, [currentUser]);
 
   useEffect(() => {
     if (activeTab === 'history') {
@@ -170,6 +179,17 @@ const Dashboard = () => {
 
     if (interviewType === 'custom' && !customRole.trim()) {
       toast.error('Please specify a custom role');
+      return;
+    }
+
+    if (!currentUser?.emailVerified) {
+      toast.error('Please verify your email before starting an interview');
+      try {
+        await sendVerification();
+        toast.success('Verification email sent');
+      } catch (err) {
+        console.error(err);
+      }
       return;
     }
 
@@ -612,6 +632,139 @@ const Dashboard = () => {
                 ))}
               </div>
             )}
+          </motion.div>
+        )}
+
+        {/* Account & Profile Tab */}
+        {activeTab === 'history' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-gray-900/50 border border-cyan-600/20 rounded-2xl p-8 mt-6"
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <ShieldCheck className="w-6 h-6 text-cyan-400" />
+              <h2 className="text-2xl font-bold text-white">Account & Profile</h2>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Display Name</label>
+                  <div className="relative">
+                    <User2 className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5" />
+                    <input
+                      type="text"
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
+                      className="w-full pl-12 pr-4 py-3 bg-black/50 border border-cyan-600/20 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition"
+                      placeholder="Your name"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Photo URL</label>
+                  <div className="relative">
+                    <Image className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5" />
+                    <input
+                      type="url"
+                      value={profilePhoto}
+                      onChange={(e) => setProfilePhoto(e.target.value)}
+                      className="w-full pl-12 pr-4 py-3 bg-black/50 border border-cyan-600/20 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition"
+                      placeholder="https://..."
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    try {
+                      setSavingProfile(true);
+                      await updateProfileInfo({ displayName: profileName || undefined, photoURL: profilePhoto || undefined });
+                      await refreshUser();
+                      toast.success('Profile updated');
+                    } catch (err) {
+                      console.error(err);
+                      toast.error('Failed to update profile');
+                    } finally {
+                      setSavingProfile(false);
+                    }
+                  }}
+                  disabled={savingProfile}
+                  className="btn-cyan w-full"
+                >
+                  {savingProfile ? 'Saving...' : 'Save Profile'}
+                </button>
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={async () => {
+                      try {
+                        await sendVerification();
+                        toast.success('Verification email sent');
+                      } catch (err) {
+                        console.error(err);
+                        toast.error('Failed to send verification');
+                      }
+                    }}
+                    className="px-4 py-2 border border-cyan-500/40 text-cyan-300 rounded-lg hover:bg-cyan-500/10"
+                  >
+                    Send Verification
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (!currentUser?.email) {
+                        toast.error('No email on account');
+                        return;
+                      }
+                      try {
+                        await resetPassword(currentUser.email);
+                        toast.success('Password reset email sent');
+                      } catch (err) {
+                        console.error(err);
+                        toast.error('Failed to send reset email');
+                      }
+                    }}
+                    className="px-4 py-2 border border-cyan-500/40 text-cyan-300 rounded-lg hover:bg-cyan-500/10"
+                  >
+                    Reset Password
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+                  <div className="flex items-center gap-2 text-red-300 mb-2">
+                    <AlertTriangle className="w-5 h-5" />
+                    <span className="font-semibold">Danger Zone</span>
+                  </div>
+                  <p className="text-sm text-gray-300 mb-3">Delete your account and all interview history. This action cannot be undone.</p>
+                  <button
+                    onClick={async () => {
+                      const confirmDelete = window.confirm('Delete your account and all interview data? This cannot be undone.');
+                      if (!confirmDelete) return;
+                      try {
+                        setDeletingAccount(true);
+                        await api.deleteAccountData();
+                        await deleteAccount();
+                        await logout();
+                        toast.success('Account deleted');
+                      } catch (err) {
+                        console.error(err);
+                        toast.error('Failed to delete account');
+                      } finally {
+                        setDeletingAccount(false);
+                      }
+                    }}
+                    disabled={deletingAccount}
+                    className="w-full px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-500 disabled:opacity-60"
+                  >
+                    {deletingAccount ? 'Deleting...' : 'Delete Account'}
+                  </button>
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
       </div>

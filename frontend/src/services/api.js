@@ -1,9 +1,15 @@
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-const API_TOKEN = process.env.REACT_APP_API_TOKEN || 'dev-token-change-in-production';
+import { auth } from '../firebase';
 
-const headers = {
-  'Content-Type': 'application/json',
-  'Authorization': `Bearer ${API_TOKEN}`
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
+const getAuthHeaders = async (isForm = false) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Not authenticated');
+  const token = await user.getIdToken();
+  const base = {
+    'Authorization': `Bearer ${token}`
+  };
+  return isForm ? base : { 'Content-Type': 'application/json', ...base };
 };
 
 export const api = {
@@ -14,7 +20,7 @@ export const api = {
     
     const response = await fetch(`${API_URL}/resume/upload`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${API_TOKEN}` },
+      headers: await getAuthHeaders(true),
       body: formData
     });
     
@@ -26,7 +32,7 @@ export const api = {
   startInterview: async (userId, interviewType, difficulty, resumeData, customRole = null, candidateName = null, yearsExperience = null) => {
     const response = await fetch(`${API_URL}/interview/start`, {
       method: 'POST',
-      headers,
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         user_id: userId,
         interview_type: interviewType,
@@ -46,7 +52,7 @@ export const api = {
   submitResponse: async (sessionId, questionIndex, response, responseTime) => {
     const res = await fetch(`${API_URL}/interview/submit-response`, {
       method: 'POST',
-      headers,
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         session_id: sessionId,
         question_index: questionIndex,
@@ -63,7 +69,7 @@ export const api = {
   submitCode: async (sessionId, questionId, language, code) => {
     const response = await fetch(`${API_URL}/interview/submit-code`, {
       method: 'POST',
-      headers,
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         session_id: sessionId,
         question_id: questionId,
@@ -80,7 +86,7 @@ export const api = {
   getNextQuestion: async (sessionId) => {
     const response = await fetch(`${API_URL}/interview/next-question?session_id=${sessionId}`, {
       method: 'POST',
-      headers
+      headers: await getAuthHeaders()
     });
     
     if (!response.ok) throw new Error('Failed to get next question');
@@ -91,7 +97,7 @@ export const api = {
   completeInterview: async (sessionId) => {
     const response = await fetch(`${API_URL}/interview/complete?session_id=${sessionId}`, {
       method: 'POST',
-      headers
+      headers: await getAuthHeaders()
     });
     
     if (!response.ok) throw new Error('Failed to complete interview');
@@ -99,23 +105,32 @@ export const api = {
   },
 
   // Interview History
-  getInterviewHistory: async (userId, limit = 20) => {
-    const response = await fetch(`${API_URL}/interview/history?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
+  getInterviewHistory: async (limit = 20) => {
+    const response = await fetch(`${API_URL}/interview/history?limit=${limit}`, {
       method: 'GET',
-      headers
+      headers: await getAuthHeaders()
     });
 
     if (!response.ok) throw new Error('Failed to fetch interview history');
     return response.json();
   },
 
-  deleteInterview: async (sessionId, userId) => {
-    const response = await fetch(`${API_URL}/interview/history/${encodeURIComponent(sessionId)}?user_id=${encodeURIComponent(userId)}`, {
+  deleteInterview: async (sessionId) => {
+    const response = await fetch(`${API_URL}/interview/history/${encodeURIComponent(sessionId)}`, {
       method: 'DELETE',
-      headers
+      headers: await getAuthHeaders()
     });
 
     if (!response.ok) throw new Error('Failed to delete interview');
+    return response.json();
+  },
+
+  deleteAccountData: async () => {
+    const response = await fetch(`${API_URL}/interview/account/purge`, {
+      method: 'DELETE',
+      headers: await getAuthHeaders()
+    });
+    if (!response.ok) throw new Error('Failed to delete account data');
     return response.json();
   }
 };

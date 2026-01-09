@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from firebase_admin import firestore
 from firebase_config import db
+from firebase_admin import auth as firebase_auth
 
 from services.interview_service import InterviewService
 from services.code_execution_service import CodeExecutionService
@@ -14,7 +15,8 @@ from models.interview import (
     CodeSubmission
 )
 from utils.redis_client import create_session, get_session, update_session, delete_session
-from utils.auth import verify_api_token
+from utils.auth import verify_firebase_token
+from utils.rate_limit import check_rate_limit
 from utils.logger import get_logger
 from config import get_settings
 # Firestore writes removed for now; will be added later
@@ -60,7 +62,7 @@ def _serialize_firestore_timestamp(ts: Any) -> Any:
 
 
 class StartInterviewRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None  # kept for backward compatibility but ignored
     candidate_name: Optional[str] = None
     interview_type: InterviewType
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
@@ -79,10 +81,11 @@ class SubmitCodeRequest(BaseModel):
 @router.post("/start")
 async def start_interview(
     request: StartInterviewRequest,
-    auth: None = Depends(verify_api_token)
+    uid: str = Depends(verify_firebase_token)
 ):
     """Start a new interview session (WebSocket MVP)"""
     try:
+        await check_rate_limit(uid, "start", limit=10, window_seconds=60)
         # Validate custom role
         if request.interview_type == InterviewType.CUSTOM and not request.custom_role:
             raise HTTPException(400, "custom_role required for custom interviews")
@@ -106,7 +109,7 @@ async def start_interview(
         # Create session
         session = InterviewSession(
             session_id=session_id,
-            user_id=request.user_id,
+            user_id=uid,
             candidate_name=candidate_name,
             years_experience=request.years_experience,
             interview_type=request.interview_type,
@@ -127,7 +130,7 @@ async def start_interview(
         try:
             db.collection("interviews").document(session_id).set({
                 "session_id": session_id,
-                "user_id": request.user_id,
+                "user_id": uid,
                 "candidate_name": candidate_name,
                 "years_experience": request.years_experience,
                 "interview_type": request.interview_type.value,
@@ -163,13 +166,17 @@ async def start_interview(
 @router.post("/submit-code")
 async def submit_code(
     request: SubmitCodeRequest,
-    auth: None = Depends(verify_api_token)
+    uid: str = Depends(verify_firebase_token)
 ):
     """Execute code against test cases (DSA interviews)"""
     try:
+        await check_rate_limit(uid, "submit_code", limit=30, window_seconds=60)
         session_data = await get_session(f"interview:{request.session_id}")
         if not session_data:
             raise HTTPException(404, "Session not found")
+
+        if session_data.get("user_id") and session_data.get("user_id") != uid:
+            raise HTTPException(403, "Not authorized for this session")
         
         session = InterviewSession(**session_data)
         
@@ -242,13 +249,17 @@ async def submit_code(
 @router.post("/complete")
 async def complete_interview(
     session_id: str,
-    auth: None = Depends(verify_api_token)
+    uid: str = Depends(verify_firebase_token)
 ):
     """Complete interview and generate final feedback"""
     try:
+        await check_rate_limit(uid, "complete", limit=20, window_seconds=60)
         session_data = await get_session(f"interview:{session_id}")
         if not session_data:
             raise HTTPException(404, "Session not found")
+
+        if session_data.get("user_id") and session_data.get("user_id") != uid:
+            raise HTTPException(403, "Not authorized for this session")
         
         session = InterviewSession(**session_data)
         
@@ -325,17 +336,17 @@ async def complete_interview(
 
 @router.get("/history")
 async def get_interview_history(
-    user_id: str,
     limit: int = 20,
-    auth: None = Depends(verify_api_token)
+    uid: str = Depends(verify_firebase_token)
 ):
     """Return recent interviews for the user from Firestore."""
     try:
+        await check_rate_limit(uid, "history", limit=60, window_seconds=60)
         # Cap the limit to avoid heavy reads
         safe_limit = max(1, min(limit, 50))
 
         # Avoid Firestore composite index requirement by sorting in memory
-        query = db.collection("interviews").where("user_id", "==", user_id).limit(safe_limit)
+        query = db.collection("interviews").where("user_id", "==", uid).limit(safe_limit)
 
         docs = query.stream()
         history = []
@@ -363,13 +374,16 @@ async def get_interview_history(
 @router.get("/session/{session_id}")
 async def get_session_details(
     session_id: str,
-    auth: None = Depends(verify_api_token)
+    uid: str = Depends(verify_firebase_token)
 ):
     """Get complete session details"""
     try:
         session_data = await get_session(f"interview:{session_id}")
         if not session_data:
             raise HTTPException(404, "Session not found")
+
+        if session_data.get("user_id") and session_data.get("user_id") != uid:
+            raise HTTPException(403, "Not authorized for this session")
         
         return session_data
         
@@ -382,18 +396,18 @@ async def get_session_details(
 @router.delete("/history/{session_id}")
 async def delete_interview_history(
     session_id: str,
-    user_id: str,
-    auth: None = Depends(verify_api_token)
+    uid: str = Depends(verify_firebase_token)
 ):
     """Delete a stored interview history entry for the given user."""
     try:
+        await check_rate_limit(uid, "delete", limit=20, window_seconds=60)
         doc_ref = db.collection("interviews").document(session_id)
         snapshot = doc_ref.get()
         if not snapshot.exists:
             raise HTTPException(404, "Interview not found")
 
         data = snapshot.to_dict() or {}
-        if data.get("user_id") != user_id:
+        if data.get("user_id") != uid:
             raise HTTPException(403, "Not authorized to delete this interview")
 
         doc_ref.delete()
@@ -411,3 +425,54 @@ async def delete_interview_history(
     except Exception as e:
         logger.error(f"Error deleting interview history: {e}", exc_info=True)
         raise HTTPException(500, "Failed to delete interview")
+
+
+@router.delete("/account/purge")
+async def purge_account_data(
+    uid: str = Depends(verify_firebase_token)
+):
+    """Delete all interview data for the authenticated user and remove their auth record."""
+    try:
+        await check_rate_limit(uid, "account_purge", limit=3, window_seconds=3600)
+
+        # Delete interviews in Firestore
+        try:
+            docs = db.collection("interviews").where("user_id", "==", uid).stream()
+            for doc in docs:
+                doc.reference.delete()
+        except Exception as e:
+            logger.warning(f"Failed deleting Firestore interviews for {uid}: {e}")
+
+        # Delete user profile doc if present
+        try:
+            prof_ref = db.collection("users").document(uid)
+            if prof_ref.get().exists:
+                prof_ref.delete()
+        except Exception as e:
+            logger.warning(f"Failed deleting user profile for {uid}: {e}")
+
+        # Cleanup Redis sessions for this user
+        try:
+            async for key in redis.scan_iter("interview:*"):
+                try:
+                    data = await get_session(key)
+                    if data and data.get("user_id") == uid:
+                        await delete_session(key)
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"Failed cleaning Redis for {uid}: {e}")
+
+        # Delete Firebase auth user (best-effort)
+        try:
+            firebase_auth.delete_user(uid)
+        except Exception as e:
+            logger.warning(f"Failed deleting auth user {uid}: {e}")
+
+        return {"message": "Account and interview data purged"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error purging account data: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to purge account")

@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
-import { sendEmailVerification } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { motion } from "framer-motion";
 import { User, Mail, Phone, Lock, ArrowRight } from "lucide-react";
 
 const SignUp = () => {
-  const { signup } = useAuth();
+  const { signup, sendVerification } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState("");
@@ -54,7 +53,7 @@ const SignUp = () => {
         createdAt: serverTimestamp(),
       });
 
-      await sendEmailVerification(user);
+      await sendVerification();
       alert("Account created! Verification email sent. Please check your inbox.");
       navigate("/signin");
     } catch (err) {
