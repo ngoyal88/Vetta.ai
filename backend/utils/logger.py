@@ -79,4 +79,4 @@ def get_logger(name: str | None = None) -> logging.Logger:
     Uses cached setup_logging to avoid reinitializing handlers.
     """
     setup_logging()
-    return logging.getLogger(name or "ai-interviewer")
+    return logging.getLogger(name or "vetta-ai")

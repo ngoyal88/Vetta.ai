@@ -3,16 +3,19 @@ import json
 from fastapi.encoders import jsonable_encoder
 from redis.asyncio import Redis
 from utils.logger import get_logger
+from config import get_settings
 
 log = get_logger(__name__)
+settings = get_settings()
 
 # ------------------------------------------------------------------ #
 # Redis client init
 # ------------------------------------------------------------------ #
 redis = Redis(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", 6379)),
-    password=os.getenv("REDIS_PASSWORD"),
+    host=settings.redis_host,
+    port=int(settings.redis_port),
+    password=settings.redis_password or os.getenv("REDIS_PASSWORD"),
+    db=getattr(settings, "redis_db", 0),
     decode_responses=True,
 )
 

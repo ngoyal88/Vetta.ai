@@ -14,9 +14,12 @@ const Navbar = () => {
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-b border-cyan-600/20">
       <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-        
-        <Link to="/" className="text-2xl font-bold text-white hover:text-cyan-400 transition">
-          InterviewAI
+        <Link to="/" className="flex items-center gap-3 text-white hover:text-cyan-400 transition">
+          <img
+            src="/vettalogo-removebg-preview.png"
+            alt="Vetta.ai logo"
+            className="h-8 w-auto"
+          />
         </Link>
 
         <div className="flex gap-6 items-center">

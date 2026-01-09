@@ -22,6 +22,7 @@ from services.edge_tts_service import EdgeTTSService
 # from services.elevenlabs_service import ElevenLabsTTSService
 from services.elevenlabs_service import TTSCache
 from services.interview_service import InterviewService
+from models.interview import InterviewType, DifficultyLevel
 from utils.redis_client import get_session, update_session
 from utils.logger import get_logger
 from config import get_settings
@@ -45,10 +46,11 @@ class InterviewPhase(str, Enum):
 class InterviewWebSocketHandler:
     """FIXED: WebSocket handler with proper audio flow"""
     
-    def __init__(self, websocket: WebSocket, session_id: str):
+    def __init__(self, websocket: WebSocket, session_id: str, user_id: Optional[str] = None):
         self.websocket = websocket
         self.session_id = session_id
         self.session_key = f"interview:{session_id}"
+        self.user_id = user_id
         
         # Services
         self.stt_service: Optional[DeepgramSTTService] = None
@@ -131,11 +133,14 @@ class InterviewWebSocketHandler:
             
             logger.info(f"📋 Session loaded: {session_data.get('interview_type')}")
             
-            # Initialize STT with callback
+            # Initialize STT with callback (gracefully fail if not configured)
+            if not settings.deepgram_api_key:
+                await self.send_error("Speech service not configured")
+                await self.websocket.close(code=1011)
+                return
+
             logger.info("🎤 Initializing Deepgram STT...")
-            self.stt_service = DeepgramSTTService(
-                on_transcript=self._on_transcript_received
-            )
+            self.stt_service = DeepgramSTTService(on_transcript=self._on_transcript_received)
             
             # Connect to Deepgram
             if not await self.stt_service.connect():
@@ -439,6 +444,16 @@ class InterviewWebSocketHandler:
                 
                 # Extract text
                 speak_text = self._extract_speakable_text(response)
+
+                # Keep client phase aligned with the question type
+                if isinstance(response, dict) and response.get("type") == "coding":
+                    if self.current_phase != InterviewPhase.DSA_CODING:
+                        await self.send_message({"type": "phase_change", "phase": "dsa"})
+                    self.current_phase = InterviewPhase.DSA_CODING
+                elif self.current_phase == InterviewPhase.DSA_CODING:
+                    # Shift back to behavioral/technical when leaving coding
+                    self.current_phase = InterviewPhase.BEHAVIORAL
+                    await self.send_message({"type": "phase_change", "phase": "behavioral"})
                 
                 if not speak_text:
                     logger.warning("⚠️ No speakable text")
@@ -510,7 +525,77 @@ class InterviewWebSocketHandler:
     async def _handle_skip_question(self):
         """Skip current question"""
         logger.info("⏭️ Skipping question")
-        # Implementation here
+        try:
+            session_data = await get_session(self.session_key)
+            if not session_data:
+                await self.send_error("Session not found")
+                return
+
+            questions = session_data.get("questions", []) or []
+            current_q_index = int(session_data.get("current_question_index", 0))
+
+            try:
+                interview_type = InterviewType(session_data.get("interview_type", "dsa"))
+            except Exception:
+                interview_type = InterviewType.DSA
+
+            try:
+                difficulty = DifficultyLevel(session_data.get("difficulty", "medium"))
+            except Exception:
+                difficulty = DifficultyLevel.MEDIUM
+
+            responses = session_data.get("responses", []) or []
+            skipped_question = questions[current_q_index] if current_q_index < len(questions) else None
+            if skipped_question:
+                responses.append({
+                    "question_index": current_q_index,
+                    "question": skipped_question,
+                    "response": "[skipped by user]",
+                    "skipped": True,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+
+            # Generate next question
+            # TODO: Re-enable DSA question generation post-deploy
+            if interview_type == InterviewType.DSA:
+                context = self.interview_service._build_context(
+                    interview_type,
+                    session_data.get("resume_data"),
+                    session_data.get("custom_role"),
+                    session_data.get("years_experience"),
+                )
+                next_question_raw = await self.interview_service._generate_dsa_question(difficulty, context)
+                next_question_obj = {
+                    "question": next_question_raw,
+                    "type": "coding",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                follow_up_text = await self.interview_service.generate_follow_up(responses, interview_type)
+                next_question_obj = {
+                    "question": {"question": follow_up_text},
+                    "type": interview_type.value,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+
+            questions.append(next_question_obj)
+            session_data["questions"] = questions
+            session_data["responses"] = responses
+            session_data["current_question_index"] = current_q_index + 1
+            session_data["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+            await update_session(self.session_key, session_data)
+
+            # TODO: Re-enable DSA phase switch post-deploy
+            if next_question_obj.get("type") == "coding":
+                self.current_phase = InterviewPhase.DSA_CODING
+                await self.send_message({"type": "phase_change", "phase": "dsa"})
+
+            await self._speak_response(next_question_obj)
+
+        except Exception as e:
+            logger.error(f"❌ Skip question error: {e}", exc_info=True)
+            await self.send_error("Failed to skip question")
     
     async def _end_interview(self):
         """End interview"""

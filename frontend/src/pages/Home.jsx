@@ -15,8 +15,12 @@ const HomeNavbar = () => {
       <div className="max-w-7xl mx-auto px-6 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link to="/" className="text-2xl font-bold text-white hover:text-cyan-400 transition">
-            InterviewAI
+          <Link to="/" className="flex items-center gap-3 text-white hover:text-cyan-400 transition">
+            <img
+              src="/vettalogo-removebg-preview.png"
+              alt="Vetta.ai logo"
+              className="h-12 w-auto"
+            />
           </Link>
 
           {/* Desktop Nav */}
@@ -279,7 +283,7 @@ const Testimonials = () => {
       name: 'Sarah Chen',
       role: 'Software Engineer at Google',
       avatar: '👩‍💻',
-      content: 'InterviewAI helped me land my dream job! The real-time voice practice made me so much more confident in actual interviews.',
+      content: 'Vetta.ai helped me land my dream job! The real-time voice practice made me so much more confident in actual interviews.',
       rating: 5
     },
     {
@@ -371,7 +375,7 @@ const CTA = () => (
           Ready to Ace Your Next Interview?
         </h2>
         <p className="text-xl text-gray-300 mb-8">
-          Join 50,000+ developers who are mastering their interview skills with InterviewAI
+          Join 50,000+ developers who are mastering their interview skills with Vetta.ai
         </p>
         <Link to="/signup">
           <motion.button
@@ -397,7 +401,7 @@ const Footer = () => (
         {/* Brand */}
         <div className="md:col-span-1">
           <div className="text-2xl font-bold text-white mb-4">
-            InterviewAI
+            Vetta.ai
           </div>
           <p className="text-gray-400 text-sm mb-4">
             AI-powered interview preparation platform helping developers succeed.
@@ -437,7 +441,7 @@ const Footer = () => (
 
       <div className="border-t border-cyan-600/20 pt-8 text-center">
         <p className="text-gray-500 text-sm">
-          © 2024 InterviewAI. All rights reserved.
+          © 2026 Vetta.ai. All rights reserved.
         </p>
       </div>
     </div>

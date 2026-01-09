@@ -1,8 +1,8 @@
-# 🎯 IntervuAI - AI-Powered Mock Interview Platform
+# 🎯 Vetta.ai - AI-Powered Mock Interview Platform
 
 <div align="center">
 
-![InterviewAI Logo](https://img.shields.io/badge/InterviewAI-AI%20Interviews-blue?style=for-the-badge)
+![Vetta.ai Badge](https://img.shields.io/badge/Vetta.ai-AI%20Interviews-00bcd4?style=for-the-badge)
 [![React](https://img.shields.io/badge/React-19.1.0-61DAFB?style=flat&logo=react)](https://reactjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110.0-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python)](https://www.python.org/)
@@ -28,9 +28,9 @@
 
 ## 🌟 Overview
 
-**IntervuAI** is an advanced AI-powered mock interview platform designed to help software developers and engineers prepare for technical interviews. The platform features real-time voice conversations with an AI interviewer, live coding challenges with instant test execution, and comprehensive feedback powered by Google's Gemini AI.
+**Vetta.ai** is an advanced AI-powered mock interview platform designed to help software developers and engineers prepare for technical interviews. The platform features real-time voice conversations with an AI interviewer, live coding challenges with instant test execution, and comprehensive feedback powered by Google's Gemini AI.
 
-### What Makes IntervuAI Unique?
+### What Makes Vetta.ai Unique?
 
 - 🎤 **Real-Time Voice Interaction**: Natural conversations using Deepgram STT and ElevenLabs TTS
 - 💻 **Live Coding Environment**: Integrated Monaco Editor with Judge0 code execution
@@ -226,8 +226,8 @@ Client                  Backend                 External Services
 
 1. **Clone the repository**:
 ```bash
-git clone https://github.com/ngoyal88/Mock-Interview.git
-cd Mock-Interview
+git clone https://github.com/ngoyal88/vetta-ai.git
+cd vetta-ai
 ```
 
 2. **Create environment file**:
@@ -247,6 +247,10 @@ cp path/to/serviceAccount.json backend/
 ```bash
 docker-compose up -d
 ```
+
+  - View backend logs: `docker logs vetta-backend`
+  - View frontend logs: `docker logs vetta-frontend`
+  - View redis logs: `docker logs vetta-redis`
 
 6. **Access the application**:
 - Frontend: http://localhost:3000

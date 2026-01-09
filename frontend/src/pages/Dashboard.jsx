@@ -277,6 +277,16 @@ const Dashboard = () => {
           >
             Previous Interviews ({previousInterviews.length})
           </button>
+          <button
+            onClick={() => setActiveTab('account')}
+            className={`px-6 py-3 font-medium transition ${
+              activeTab === 'account'
+                ? 'text-cyan-400 border-b-2 border-cyan-400'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Account & Profile
+          </button>
         </div>
 
         {/* Start Interview Tab */}
@@ -636,7 +646,7 @@ const Dashboard = () => {
         )}
 
         {/* Account & Profile Tab */}
-        {activeTab === 'history' && (
+        {activeTab === 'account' && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

@@ -14,7 +14,13 @@ from models.interview import (
     InterviewType, DifficultyLevel, InterviewSession,
     CodeSubmission
 )
-from utils.redis_client import create_session, get_session, update_session, delete_session
+from utils.redis_client import (
+    create_session,
+    get_session,
+    update_session,
+    delete_session,
+    redis,
+)
 from utils.auth import verify_firebase_token
 from utils.rate_limit import check_rate_limit
 from utils.logger import get_logger
@@ -57,7 +63,20 @@ def _parse_scores_from_feedback(feedback_text: Optional[str]) -> Dict[str, Any]:
 def _serialize_firestore_timestamp(ts: Any) -> Any:
     """Convert Firestore timestamps to ISO strings for API responses."""
     if isinstance(ts, datetime):
-        return ts.isoformat()
+        # Ensure timezone-aware ISO strings
+        dt = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+
+    # Firestore Timestamp objects expose to_datetime(); handle without tight coupling
+    if hasattr(ts, "to_datetime"):
+        try:
+                        dt = ts.to_datetime()
+                        if isinstance(dt, datetime):
+                                dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                                return dt.isoformat()
+        except Exception:
+                        pass
+
     return ts
 
 
@@ -360,7 +379,9 @@ async def get_interview_history(
 
         # Sort client-side by start/completion time descending
         def _sort_key(item):
-            return item.get("started_at") or item.get("created_at") or item.get("completed_at") or ""
+            ts = item.get("started_at") or item.get("created_at") or item.get("completed_at") or ""
+            # Ensure we always sort on a comparable string
+            return ts.isoformat() if isinstance(ts, datetime) else str(ts)
 
         history.sort(key=_sort_key, reverse=True)
 

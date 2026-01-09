@@ -88,7 +88,7 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     return {
-        "message": "AI Interviewer Platform v5.0.0",
+        "message": "AI Interviewer Platform v1.0.0",
         "status": "operational",
         "architecture": "WebSocket + Deepgram STT + Edge TTS + LLM",
         "features": [
@@ -105,20 +105,38 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check"""
+    """Health check with lightweight dependency probes."""
+    redis_ok = await test_connection()
+    deepgram_configured = bool(settings.deepgram_api_key)
+    judge0_configured = bool(settings.judge0_api_key)
+    llm_configured = bool(settings.llm_api_key or settings.groq_api_key)
+    tts_edge = (getattr(settings, "tts_provider", "edge") or "edge").lower() == "edge"
+    eleven_configured = bool(settings.elevenlabs_api_key)
+    livekit_configured = bool(settings.livekit_api_key and settings.livekit_api_secret)
+
+    try:
+        from firebase_admin import _apps as firebase_apps  # type: ignore
+        firebase_ok = bool(firebase_apps)
+    except Exception:
+        firebase_ok = False
+
+    services = {
+        "llm": llm_configured,
+        "deepgram": deepgram_configured,
+        "edge_tts": tts_edge,
+        "elevenlabs": eleven_configured,
+        "judge0": judge0_configured,
+        "redis": redis_ok,
+        "firebase": firebase_ok,
+        "livekit": livekit_configured,
+    }
+
+    overall = all(services.values())
+
     return {
-        "status": "healthy",
-        "version": "5.0.0",
-        "services": {
-            "gemini": bool(settings.llm_api_key),
-            "deepgram": bool(settings.deepgram_api_key),
-            "edge_tts": (getattr(settings, "tts_provider", "edge") or "edge").lower() == "edge",
-            # Switch-back note: set TTS_PROVIDER=elevenlabs
-            "elevenlabs": bool(settings.elevenlabs_api_key),
-            "judge0": bool(settings.judge0_api_key),
-            "redis": True,
-            "firebase": True
-        }
+        "status": "ok" if overall else "degraded",
+        "version": "1.0.0",
+        "services": services,
     }
 
 

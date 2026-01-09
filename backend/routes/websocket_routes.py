@@ -7,6 +7,7 @@ import contextlib
 import json
 
 from fastapi import APIRouter, WebSocket
+from firebase_admin import auth as firebase_auth
 
 from config import get_settings
 from services.deepgram_service import DeepgramSTTService
@@ -36,7 +37,34 @@ async def interview_websocket(
     - Status updates
     - Feedback
     """
-    handler = InterviewWebSocketHandler(websocket, session_id)
+    # Auth: try Firebase ID token via Authorization header; fallback to API_TOKEN query/header
+    expected_api_token = settings.api_token or None
+    auth_header = websocket.headers.get("authorization") or ""
+    header_parts = auth_header.split()
+    header_token = header_parts[1] if len(header_parts) == 2 and header_parts[0].lower() == "bearer" else None
+    query_token = websocket.query_params.get("token")
+
+    uid = None
+    # Prefer Firebase token if present
+    if header_token:
+        try:
+            decoded = firebase_auth.verify_id_token(header_token)
+            uid = decoded.get("uid")
+        except Exception:
+            uid = None
+
+    # Fallback to API token (for testing tools)
+    if uid is None and expected_api_token:
+        if header_token == expected_api_token or query_token == expected_api_token:
+            uid = "api_token_user"
+
+    if not uid:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "message": "Unauthorized"})
+        await websocket.close(code=1008)
+        return
+
+    handler = InterviewWebSocketHandler(websocket, session_id, user_id=uid)
     await handler.handle_connection()
 
 
