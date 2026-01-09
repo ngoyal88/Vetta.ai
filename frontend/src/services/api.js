@@ -23,7 +23,7 @@ export const api = {
   },
 
   // Start Interview
-  startInterview: async (userId, interviewType, difficulty, resumeData, customRole = null, candidateName = null) => {
+  startInterview: async (userId, interviewType, difficulty, resumeData, customRole = null, candidateName = null, yearsExperience = null) => {
     const response = await fetch(`${API_URL}/interview/start`, {
       method: 'POST',
       headers,
@@ -33,7 +33,8 @@ export const api = {
         difficulty,
         custom_role: customRole,
         resume_data: resumeData,
-        candidate_name: candidateName
+        candidate_name: candidateName,
+        years_experience: yearsExperience
       })
     });
     
@@ -94,6 +95,27 @@ export const api = {
     });
     
     if (!response.ok) throw new Error('Failed to complete interview');
+    return response.json();
+  },
+
+  // Interview History
+  getInterviewHistory: async (userId, limit = 20) => {
+    const response = await fetch(`${API_URL}/interview/history?user_id=${encodeURIComponent(userId)}&limit=${limit}`, {
+      method: 'GET',
+      headers
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch interview history');
+    return response.json();
+  },
+
+  deleteInterview: async (sessionId, userId) => {
+    const response = await fetch(`${API_URL}/interview/history/${encodeURIComponent(sessionId)}?user_id=${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers
+    });
+
+    if (!response.ok) throw new Error('Failed to delete interview');
     return response.json();
   }
 };

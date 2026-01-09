@@ -14,27 +14,20 @@ function App() {
   return (
     <AuthProvider>
       <Toaster
-        position="top-right"
+        position="top-center"
+        gutter={10}
         toastOptions={{
-          duration: 3000,
+          duration: 3200,
           style: {
-            background: '#1a1a1a',
-            color: '#ffffff',
-            border: '1px solid rgba(6, 182, 212, 0.2)'
+            background: '#0b1324',
+            color: '#e5f6ff',
+            border: '1px solid rgba(34, 211, 238, 0.28)',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.35)'
           },
-          success: {
-            iconTheme: {
-              primary: '#06b6d4',
-              secondary: '#ffffff',
-            },
-          },
-          error: {
-            iconTheme: {
-              primary: '#ef4444',
-              secondary: '#ffffff',
-            },
-          },
+          success: { iconTheme: { primary: '#22d3ee', secondary: '#0b1324' } },
+          error: { iconTheme: { primary: '#f43f5e', secondary: '#0b1324' } }
         }}
+        containerStyle={{ marginTop: 68 }}
       />
       
       {/* Navbar only shows on certain routes */}

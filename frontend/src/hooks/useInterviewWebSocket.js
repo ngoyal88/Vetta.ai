@@ -5,6 +5,7 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AudioRecorder, AudioPlayer, checkBrowserSupport } from '../utils/audioUtils';
+import { api } from '../services/api';
 import toast from 'react-hot-toast';
 
 const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
@@ -564,9 +565,16 @@ export const useInterviewWebSocket = (sessionId) => {
   /**
    * End interview
    */
-  const endInterview = useCallback(() => {
+  const endInterview = useCallback(async () => {
     sendMessage({ type: 'end_interview' });
-  }, [sendMessage]);
+
+    // Also call REST completion so backend finalizes even if WS path misses it
+    try {
+      await api.completeInterview(sessionId);
+    } catch (err) {
+      console.error('REST completion failed', err);
+    }
+  }, [sendMessage, sessionId]);
 
   /**
    * Disconnect and cleanup

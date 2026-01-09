@@ -204,10 +204,11 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
         interview_type: InterviewType,
         difficulty: DifficultyLevel,
         resume_data: Dict = None,
-        custom_role: str = None
+        custom_role: str = None,
+        years_experience: Optional[int] = None
     ) -> Dict[str, Any]:
         """Generate contextual first question"""
-        context = self._build_context(interview_type, resume_data, custom_role)
+        context = self._build_context(interview_type, resume_data, custom_role, years_experience)
 
         if interview_type == InterviewType.DSA:
             q = await self._generate_dsa_question(difficulty, context)
@@ -223,7 +224,8 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
         self,
         interview_type: InterviewType,
         resume_data: Dict = None,
-        custom_role: str = None
+        custom_role: str = None,
+        years_experience: Optional[int] = None
     ) -> str:
         """Build context from resume data"""
         context = ""
@@ -239,6 +241,9 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
 
         if custom_role:
             context += f"\nTarget Role: {custom_role}"
+
+        if years_experience is not None:
+            context += f"\nYears of Experience: {years_experience}"
 
         return context
 

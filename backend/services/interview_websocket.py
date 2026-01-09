@@ -12,6 +12,7 @@ import base64
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any
+import re
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
@@ -24,6 +25,8 @@ from services.interview_service import InterviewService
 from utils.redis_client import get_session, update_session
 from utils.logger import get_logger
 from config import get_settings
+from firebase_config import db
+from firebase_admin import firestore
 
 logger = get_logger("InterviewWebSocket")
 settings = get_settings()
@@ -92,6 +95,26 @@ class InterviewWebSocketHandler:
         self.audio_chunks_received = 0
         
         logger.info(f"✅ WebSocket handler initialized for session: {session_id}")
+
+    def _parse_scores_from_feedback(self, feedback_text: Optional[str]) -> Dict[str, float]:
+        if not feedback_text:
+            return {}
+
+        scores = {}
+        tech_match = re.search(r"TECHNICAL SKILLS:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
+        comm_match = re.search(r"COMMUNICATION:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
+        overall_match = re.search(r"SCORE:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
+
+        if tech_match:
+            scores["technical"] = float(tech_match.group(1))
+        if comm_match:
+            scores["communication"] = float(comm_match.group(1))
+        if overall_match:
+            scores["overall"] = float(overall_match.group(1))
+        elif scores:
+            scores["overall"] = sum(scores.values()) / len(scores)
+
+        return scores
     
     async def handle_connection(self):
         """Main connection handler"""
@@ -492,8 +515,99 @@ class InterviewWebSocketHandler:
     async def _end_interview(self):
         """End interview"""
         logger.info("🏁 Ending interview")
-        self.current_phase = InterviewPhase.ENDED
-        # Implementation here
+        if self.current_phase == InterviewPhase.ENDED:
+            return
+
+        self.current_phase = InterviewPhase.FEEDBACK
+
+        try:
+            session_data = await get_session(self.session_key)
+            if not session_data:
+                await self.send_error("Session not found")
+                return
+
+            # Compute duration
+            started_at_raw = session_data.get("started_at")
+            started_at = None
+            if isinstance(started_at_raw, str):
+                try:
+                    started_at = datetime.fromisoformat(started_at_raw.replace("Z", "+00:00"))
+                except Exception:
+                    started_at = None
+            elif isinstance(started_at_raw, datetime):
+                started_at = started_at_raw
+
+            if not started_at:
+                started_at = datetime.now(timezone.utc)
+
+            duration_minutes = int(max(0, (datetime.now(timezone.utc) - started_at).total_seconds() / 60))
+
+            feedback_payload = {
+                "interview_type": session_data.get("interview_type"),
+                "custom_role": session_data.get("custom_role"),
+                "duration": duration_minutes,
+                "responses": session_data.get("responses", []),
+                "code_submissions": session_data.get("code_submissions", []),
+            }
+
+            final_feedback = await self.interview_service.generate_final_feedback(feedback_payload)
+            scores = self._parse_scores_from_feedback(final_feedback.get("feedback") if isinstance(final_feedback, dict) else None)
+
+            # Update session state
+            completion_reason = "ended_early" if session_data.get("status") != "completed" else "completed"
+            completed_ts = datetime.now(timezone.utc).isoformat()
+
+            session_data["status"] = "ended_early"
+            session_data["completion_reason"] = completion_reason
+            session_data["completed_at"] = completed_ts
+            session_data["last_updated"] = completed_ts
+            session_data["final_feedback"] = final_feedback
+            session_data["duration_minutes"] = duration_minutes
+            session_data["questions_answered"] = len(session_data.get("responses", []))
+            session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
+
+            await update_session(self.session_key, session_data)
+
+            # Persist to Firestore (best effort)
+            try:
+                payload = {
+                    "status": "ended_early",
+                    "completion_reason": completion_reason,
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "last_updated": firestore.SERVER_TIMESTAMP,
+                    "duration_minutes": duration_minutes,
+                    "questions_answered": len(session_data.get("responses", [])),
+                    "code_problems_attempted": len(session_data.get("code_submissions", [])),
+                    "responses": session_data.get("responses", []),
+                    "questions": session_data.get("questions", []),
+                    "code_submissions": session_data.get("code_submissions", []),
+                    "final_feedback": final_feedback,
+                    "scores": scores or None,
+                }
+                db.collection("interviews").document(self.session_id).set(payload, merge=True)
+            except Exception as fe:
+                logger.warning(f"Failed to persist early completion to Firestore: {fe}")
+
+            await self.send_message({
+                "type": "feedback",
+                "feedback": final_feedback.get("feedback") if isinstance(final_feedback, dict) else final_feedback,
+                "full": final_feedback,
+                "duration_minutes": duration_minutes,
+                "questions_answered": len(session_data.get("responses", [])),
+                "code_problems_attempted": len(session_data.get("code_submissions", [])),
+                "status": "ended_early",
+                "timestamp": completed_ts,
+            })
+
+            await self.send_status("completed")
+
+        except Exception as e:
+            logger.error(f"❌ Error ending interview: {e}", exc_info=True)
+            await self.send_error("Failed to finalize interview")
+        finally:
+            async with self.speech_lock:
+                self.is_ai_speaking = False
+            self.current_phase = InterviewPhase.ENDED
     
     async def _heartbeat_loop(self):
         """Send periodic heartbeats"""

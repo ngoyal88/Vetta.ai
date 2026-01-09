@@ -1,6 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { motion } from 'framer-motion';
 
-// Progressive subtitles that reveal words over time while AI is speaking
+/**
+ * Progressive subtitles that reveal words over time while AI is speaking
+ * Styled to match the cyan/white color scheme
+ */
 const Subtitles = ({ text = '', isSpeaking = false, wpm = 180 }) => {
   const [visibleText, setVisibleText] = useState('');
   const words = useRef([]);
@@ -20,6 +24,7 @@ const Subtitles = ({ text = '', isSpeaking = false, wpm = 180 }) => {
     const msPerWord = Math.max(120, Math.round(60000 / wpm));
 
     if (isSpeaking) {
+      // Progressive reveal word by word
       timerRef.current = setInterval(() => {
         const i = indexRef.current;
         if (i < words.current.length) {
@@ -40,12 +45,26 @@ const Subtitles = ({ text = '', isSpeaking = false, wpm = 180 }) => {
   if (!text) return null;
 
   return (
-    <div className="w-full max-w-3xl bg-white/5 border border-white/10 backdrop-blur-md px-6 py-4 rounded-2xl">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="w-full bg-cyan-500/10 border border-cyan-500/30 backdrop-blur-md px-6 py-4 rounded-2xl shadow-lg"
+    >
       <div className="flex items-start gap-3">
-        <span className="text-xs font-bold text-purple-300 uppercase mt-1">AI</span>
-        <p className="flex-1 text-sm text-gray-100 leading-relaxed">{visibleText}</p>
+        <span className="text-xs font-bold text-cyan-400 uppercase mt-1 flex-shrink-0">
+          AI
+        </span>
+        <div className="flex-1">
+          <p className="text-sm text-gray-100 leading-relaxed">
+            {visibleText}
+            {isSpeaking && visibleText.length < text.length && (
+              <span className="inline-block w-1 h-4 bg-cyan-400 ml-1 animate-pulse" />
+            )}
+          </p>
+        </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

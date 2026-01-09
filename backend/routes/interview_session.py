@@ -1,8 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone
+from firebase_admin import firestore
+from firebase_config import db
 
 from services.interview_service import InterviewService
 from services.code_execution_service import CodeExecutionService
@@ -10,7 +13,7 @@ from models.interview import (
     InterviewType, DifficultyLevel, InterviewSession,
     CodeSubmission
 )
-from utils.redis_client import create_session, get_session, update_session
+from utils.redis_client import create_session, get_session, update_session, delete_session
 from utils.auth import verify_api_token
 from utils.logger import get_logger
 from config import get_settings
@@ -24,6 +27,38 @@ code_service = CodeExecutionService()
 settings = get_settings()
 
 
+def _parse_scores_from_feedback(feedback_text: Optional[str]) -> Dict[str, Any]:
+    """Extract simple numeric scores from the final feedback text (best effort)."""
+    if not feedback_text:
+        return {}
+
+    import re
+
+    scores = {}
+    tech_match = re.search(r"TECHNICAL SKILLS:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
+    comm_match = re.search(r"COMMUNICATION:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
+    overall_match = re.search(r"SCORE:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
+
+    if tech_match:
+        scores["technical"] = float(tech_match.group(1))
+    if comm_match:
+        scores["communication"] = float(comm_match.group(1))
+    if overall_match:
+        scores["overall"] = float(overall_match.group(1))
+    elif scores:
+        # If we found any component scores, average them for a basic overall value
+        scores["overall"] = sum(scores.values()) / len(scores)
+
+    return scores
+
+
+def _serialize_firestore_timestamp(ts: Any) -> Any:
+    """Convert Firestore timestamps to ISO strings for API responses."""
+    if isinstance(ts, datetime):
+        return ts.isoformat()
+    return ts
+
+
 class StartInterviewRequest(BaseModel):
     user_id: str
     candidate_name: Optional[str] = None
@@ -31,6 +66,7 @@ class StartInterviewRequest(BaseModel):
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
     custom_role: Optional[str] = None
     resume_data: Optional[dict] = None
+    years_experience: Optional[int] = None
 
 
 class SubmitCodeRequest(BaseModel):
@@ -58,7 +94,8 @@ async def start_interview(
             request.interview_type,
             request.difficulty,
             request.resume_data,
-            request.custom_role
+            request.custom_role,
+            request.years_experience
         )
 
         # Prefer an explicit candidate name, else derive from resume if present
@@ -71,6 +108,7 @@ async def start_interview(
             session_id=session_id,
             user_id=request.user_id,
             candidate_name=candidate_name,
+            years_experience=request.years_experience,
             interview_type=request.interview_type,
             custom_role=request.custom_role,
             difficulty=request.difficulty,
@@ -85,7 +123,25 @@ async def start_interview(
             expire_seconds=7200  # 2 hours
         )
 
-        # Firestore persistence skipped
+        # Persist lightweight record to Firestore for history
+        try:
+            db.collection("interviews").document(session_id).set({
+                "session_id": session_id,
+                "user_id": request.user_id,
+                "candidate_name": candidate_name,
+                "years_experience": request.years_experience,
+                "interview_type": request.interview_type.value,
+                "difficulty": request.difficulty.value,
+                "custom_role": request.custom_role,
+                "status": "active",
+                "started_at": firestore.SERVER_TIMESTAMP,
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "last_updated": firestore.SERVER_TIMESTAMP,
+                "questions_answered": 0,
+                "code_problems_attempted": 0,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to persist interview start to Firestore: {e}")
         
         logger.info(f"Started interview: {session_id}, type: {request.interview_type}")
         
@@ -216,7 +272,40 @@ async def complete_interview(
         
         await update_session(f"interview:{session_id}", session.dict())
 
-        # Firestore update skipped
+        # Firestore update
+        try:
+            scores = _parse_scores_from_feedback(final_feedback.get('feedback'))
+            payload = jsonable_encoder({
+                "session_id": session_id,
+                "user_id": session.user_id,
+                "candidate_name": session.candidate_name,
+                "interview_type": session.interview_type.value,
+                "difficulty": session.difficulty.value,
+                "custom_role": session.custom_role,
+                "status": "completed",
+                "duration_minutes": int(duration),
+                "questions_answered": len(session.responses),
+                "code_problems_attempted": len(session.code_submissions),
+                "responses": session.responses,
+                "questions": session.questions,
+                "code_submissions": [s.dict() for s in session.code_submissions],
+                "live_transcription": session.live_transcription,
+                "final_feedback": final_feedback,
+                "scores": scores if scores else None,
+            })
+
+            # Ensure start timestamps exist if initial write failed
+            payload.setdefault("started_at", session.started_at)
+            payload.setdefault("created_at", session.started_at)
+            payload["last_updated"] = firestore.SERVER_TIMESTAMP
+            # Replace timestamp fields after encoding to preserve Firestore sentinel values
+            payload["completed_at"] = firestore.SERVER_TIMESTAMP
+            if "scores" in payload and not payload["scores"]:
+                payload.pop("scores", None)
+
+            db.collection("interviews").document(session_id).set(payload, merge=True)
+        except Exception as e:
+            logger.warning(f"Failed to persist interview completion to Firestore: {e}")
 
         
         return {
@@ -234,7 +323,41 @@ async def complete_interview(
         raise HTTPException(500, str(e))
 
 
-# History endpoint removed for now
+@router.get("/history")
+async def get_interview_history(
+    user_id: str,
+    limit: int = 20,
+    auth: None = Depends(verify_api_token)
+):
+    """Return recent interviews for the user from Firestore."""
+    try:
+        # Cap the limit to avoid heavy reads
+        safe_limit = max(1, min(limit, 50))
+
+        # Avoid Firestore composite index requirement by sorting in memory
+        query = db.collection("interviews").where("user_id", "==", user_id).limit(safe_limit)
+
+        docs = query.stream()
+        history = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            data["id"] = doc.id
+            for ts_key in ("started_at", "completed_at", "created_at", "last_updated"):
+                if ts_key in data:
+                    data[ts_key] = _serialize_firestore_timestamp(data.get(ts_key))
+            history.append(data)
+
+        # Sort client-side by start/completion time descending
+        def _sort_key(item):
+            return item.get("started_at") or item.get("created_at") or item.get("completed_at") or ""
+
+        history.sort(key=_sort_key, reverse=True)
+
+        return {"history": history}
+
+    except Exception as e:
+        logger.error(f"Error fetching history: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to fetch interview history")
 
 
 @router.get("/session/{session_id}")
@@ -254,3 +377,37 @@ async def get_session_details(
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+@router.delete("/history/{session_id}")
+async def delete_interview_history(
+    session_id: str,
+    user_id: str,
+    auth: None = Depends(verify_api_token)
+):
+    """Delete a stored interview history entry for the given user."""
+    try:
+        doc_ref = db.collection("interviews").document(session_id)
+        snapshot = doc_ref.get()
+        if not snapshot.exists:
+            raise HTTPException(404, "Interview not found")
+
+        data = snapshot.to_dict() or {}
+        if data.get("user_id") != user_id:
+            raise HTTPException(403, "Not authorized to delete this interview")
+
+        doc_ref.delete()
+
+        # Best-effort cleanup of Redis session
+        try:
+            await delete_session(f"interview:{session_id}")
+        except Exception:
+            pass
+
+        return {"message": "Interview deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting interview history: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to delete interview")

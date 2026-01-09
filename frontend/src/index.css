@@ -91,3 +91,83 @@ body,
   color: #0a0a0a;
   transform: translateY(-2px);
 }
+
+/* Toast positioning fix - prevent overlap with header/buttons */
+[data-react-hot-toast] {
+  top: 80px !important; /* Below the header */
+  z-index: 9999 !important;
+}
+
+/* Ensure toasts are visible on all backgrounds */
+[data-react-hot-toast] > div {
+  max-width: 400px !important;
+}
+
+/* Custom toast styles for better visibility */
+.react-hot-toast {
+  background: rgba(0, 0, 0, 0.9) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(6, 182, 212, 0.3) !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Animation for smooth transitions */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutRight {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* Pulse animation for status indicators */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Glow effect for cyan elements */
+.glow-cyan {
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+}
+
+/* Smooth fade transitions */
+.fade-enter {
+  opacity: 0;
+}
+
+.fade-enter-active {
+  opacity: 1;
+  transition: opacity 300ms ease-in;
+}
+
+.fade-exit {
+  opacity: 1;
+}
+
+.fade-exit-active {
+  opacity: 0;
+  transition: opacity 300ms ease-out;
+}

@@ -71,6 +71,7 @@ class InterviewSession(BaseModel):
     session_id: str
     user_id: str
     candidate_name: Optional[str] = None
+    years_experience: Optional[int] = None
     interview_type: InterviewType
     custom_role: Optional[str] = None  # For custom interviews
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM

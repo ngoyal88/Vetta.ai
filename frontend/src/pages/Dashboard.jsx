@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -6,7 +6,6 @@ import toast from 'react-hot-toast';
 import { Upload, Rocket, FileText, Clock, TrendingUp, CheckCircle, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import useUserProfile from '../hooks/useUserProfile';
-// History fetching deferred; skipping Firestore/backend history for now
 
 const Dashboard = () => {
   const { currentUser, logout } = useAuth();
@@ -18,9 +17,12 @@ const Dashboard = () => {
   const [interviewType, setInterviewType] = useState('dsa');
   const [difficulty, setDifficulty] = useState('medium');
   const [customRole, setCustomRole] = useState('');
+  const [yearsExperience, setYearsExperience] = useState('');
   const [file, setFile] = useState(null);
-  const [previousInterviews] = useState([]);
+  const [previousInterviews, setPreviousInterviews] = useState([]);
   const [loadingInterviews, setLoadingInterviews] = useState(true);
+  const [expandedInterviewId, setExpandedInterviewId] = useState(null);
+  const [deletingInterviewId, setDeletingInterviewId] = useState(null);
   const [activeTab, setActiveTab] = useState('start'); // 'start' or 'history'
 
   const interviewTypes = [
@@ -33,11 +35,65 @@ const Dashboard = () => {
     { value: 'custom', label: 'Custom Role', icon: '✨', desc: 'Any Specific Role' }
   ];
 
+  const formatDate = (value) => {
+    if (!value) return 'Date unknown';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return 'Date unknown';
+    return parsed.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const handleToggleDetails = (id) => {
+    setExpandedInterviewId((prev) => (prev === id ? null : id));
+  };
+
+  const handleDeleteInterview = async (id) => {
+    if (!currentUser) return;
+    const confirmDelete = window.confirm('Delete this interview? This cannot be undone.');
+    if (!confirmDelete) return;
+
+    try {
+      setDeletingInterviewId(id);
+      await api.deleteInterview(id, currentUser.uid);
+      toast.success('Interview deleted');
+      await fetchHistory();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to delete interview');
+    } finally {
+      setDeletingInterviewId(null);
+    }
+  };
+
+  const fetchHistory = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      setLoadingInterviews(true);
+      const data = await api.getInterviewHistory(currentUser.uid);
+      setPreviousInterviews(data.history || []);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to load interview history');
+    } finally {
+      setLoadingInterviews(false);
+    }
+  }, [currentUser]);
+
   // Load previous interviews
   useEffect(() => {
-    // History fetch deferred; mark as loaded with empty list
-    setLoadingInterviews(false);
-  }, [currentUser]);
+    fetchHistory();
+  }, [fetchHistory]);
+
+  useEffect(() => {
+    if (activeTab === 'history') {
+      fetchHistory();
+    }
+  }, [activeTab, fetchHistory]);
 
   // Check if resume already exists in localStorage
   useEffect(() => {
@@ -125,7 +181,8 @@ const Dashboard = () => {
         difficulty,
         parsedResume,
         interviewType === 'custom' ? customRole : null,
-        candidateName
+        candidateName,
+        yearsExperience ? Number(yearsExperience) : null
       );
 
       const sessionId = response.session_id;
@@ -137,7 +194,8 @@ const Dashboard = () => {
         difficulty,
         customRole: interviewType === 'custom' ? customRole : null,
         resumeData: parsedResume,
-        candidateName
+        candidateName,
+        yearsExperience: yearsExperience ? Number(yearsExperience) : null
       }));
 
       navigate(`/interview/${sessionId}`);
@@ -360,6 +418,20 @@ const Dashboard = () => {
                 </div>
               </div>
 
+              {/* Years of Experience */}
+              <div className="mb-8">
+                <label className="block text-sm font-semibold text-gray-300 mb-2">Years of Experience</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="40"
+                  value={yearsExperience}
+                  onChange={(e) => setYearsExperience(e.target.value)}
+                  placeholder="e.g., 3"
+                  className="w-full p-3 bg-black/50 border-2 border-cyan-600/20 rounded-lg focus:border-cyan-500 focus:outline-none text-white placeholder-gray-500"
+                />
+              </div>
+
               {/* Start Button */}
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -416,7 +488,7 @@ const Dashboard = () => {
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           <h3 className="text-lg font-bold text-white">
-                            {interview.interview_type?.toUpperCase() || 'Interview'}
+                            {(interview.custom_role || interview.interview_type || 'Interview').toUpperCase()}
                           </h3>
                           <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                             interview.difficulty === 'easy'
@@ -430,39 +502,112 @@ const Dashboard = () => {
                           <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                             interview.status === 'completed'
                               ? 'bg-cyan-500/20 text-cyan-400'
+                              : interview.status === 'ended_early'
+                              ? 'bg-amber-500/20 text-amber-300'
                               : 'bg-gray-500/20 text-gray-400'
                           }`}>
-                            {interview.status || 'in progress'}
+                            {interview.status === 'ended_early' ? 'Ended Early' : interview.status || 'in progress'}
                           </span>
                         </div>
                         
                         <p className="text-gray-400 text-sm mb-3">
-                          {interview.created_at ? new Date(interview.created_at.seconds * 1000).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          }) : 'Date unknown'}
+                          {formatDate(interview.started_at || interview.created_at || interview.completed_at)}
                         </p>
 
-                        {interview.score && (
+                        {(interview.scores?.overall ?? interview.score) && (
                           <div className="flex items-center gap-2 text-sm">
                             <TrendingUp className="w-4 h-4 text-cyan-400" />
                             <span className="text-cyan-400 font-medium">
-                              Score: {interview.score}/100
+                              Score: {(interview.scores?.overall ?? interview.score).toFixed ? (interview.scores?.overall ?? interview.score).toFixed(1) : interview.scores?.overall ?? interview.score}
                             </span>
+                          </div>
+                        )}
+
+                        <div className="text-gray-400 text-xs mt-3">
+                          <span className="mr-4">Questions: {interview.questions_answered ?? '—'}</span>
+                          <span>Duration: {interview.duration_minutes !== undefined && interview.duration_minutes !== null ? `${interview.duration_minutes} min` : '—'}</span>
+                        </div>
+
+                        {interview.final_feedback?.feedback && (
+                          <div className="mt-3 p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg text-sm text-gray-200 max-h-32 overflow-hidden">
+                            <div className="flex items-center gap-2 mb-1 text-cyan-300">
+                              <FileText className="w-4 h-4" />
+                              <span className="font-semibold text-xs uppercase tracking-wide">Feedback</span>
+                            </div>
+                            <p className="leading-relaxed whitespace-pre-line">{interview.final_feedback.feedback}</p>
+                          </div>
+                        )}
+
+                        {interview.live_transcription?.length > 0 && (
+                          <div className="mt-3 p-3 bg-black/40 border border-cyan-600/20 rounded-lg text-sm text-gray-300 max-h-28 overflow-hidden">
+                            <div className="flex items-center gap-2 mb-1 text-cyan-300">
+                              <Clock className="w-4 h-4" />
+                              <span className="font-semibold text-xs uppercase tracking-wide">Transcript</span>
+                            </div>
+                            <div className="space-y-1">
+                              {interview.live_transcription.slice(-3).map((entry, idx) => (
+                                <p key={idx} className="text-xs text-gray-200">
+                                  <span className="text-cyan-400 mr-1">{entry.speaker || 'speaker'}:</span>
+                                  {entry.text}
+                                </p>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </div>
 
-                      <button
-                        onClick={() => navigate(`/interview/${interview.id}`)}
-                        className="px-4 py-2 btn-outline-cyan text-sm"
-                      >
-                        View Details
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleToggleDetails(interview.id)}
+                          className="px-4 py-2 btn-outline-cyan text-sm"
+                        >
+                          {expandedInterviewId === interview.id ? 'Hide Details' : 'View Details'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteInterview(interview.id)}
+                          disabled={deletingInterviewId === interview.id}
+                          className="px-3 py-2 border border-red-500/40 text-red-300 rounded-lg text-xs hover:bg-red-500/10 disabled:opacity-60"
+                        >
+                          {deletingInterviewId === interview.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
                     </div>
+
+                    {expandedInterviewId === interview.id && (
+                      <div className="mt-4 space-y-3 text-sm text-gray-200">
+                        {Array.isArray(interview.responses) && interview.responses.length > 0 && (
+                          <div className="p-3 bg-black/40 border border-cyan-600/20 rounded-lg">
+                            <div className="font-semibold text-cyan-300 mb-2">Answers</div>
+                            <div className="space-y-2 max-h-44 overflow-auto custom-scrollbar">
+                              {interview.responses.map((resp, idx) => (
+                                <div key={idx} className="text-xs text-gray-200">
+                                  <span className="text-cyan-400 mr-1">Q{idx + 1}:</span>
+                                  <span className="text-gray-300">{resp.question?.question?.question || resp.question?.question || resp.question || 'Question'}</span>
+                                  <div className="mt-1 text-gray-400">A: {resp.response}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {Array.isArray(interview.code_submissions) && interview.code_submissions.length > 0 && (
+                          <div className="p-3 bg-black/40 border border-cyan-600/20 rounded-lg">
+                            <div className="font-semibold text-cyan-300 mb-2">Code Submissions</div>
+                            <div className="space-y-2 text-xs text-gray-300 max-h-36 overflow-auto custom-scrollbar">
+                              {interview.code_submissions.map((sub, idx) => (
+                                <div key={idx} className="border-b border-cyan-600/10 pb-2 last:border-0 last:pb-0">
+                                  <div className="flex justify-between">
+                                    <span className="text-cyan-400">{sub.language}</span>
+                                    <span className="text-gray-500">{formatDate(sub.timestamp)}</span>
+                                  </div>
+                                  <div className="mt-1 text-gray-400 break-all">{sub.code?.slice(0, 200) || '—'}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </motion.div>
                 ))}
               </div>

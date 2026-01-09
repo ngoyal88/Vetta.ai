@@ -1,10 +1,11 @@
 import React, { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
+import { Mic, MicOff, Send, SkipForward, LogOut, Code } from "lucide-react";
 
 import { useInterviewWebSocket } from "../hooks/useInterviewWebSocket";
-import AIAvatar from "../components/AIAvatar";
+import AudioVisualizer from "../components/AudioVisualizer";
 import Subtitles from "../components/Subtitles";
 import CodeEditor from "../components/CodeEditor";
 import DSAQuestionDisplay from "../components/DSAQuestionDisplay";
@@ -21,8 +22,6 @@ const InterviewRoom = () => {
   );
 };
 
-
-// WebSocket-based interview content (fallback/alt transport)
 const InterviewRoomWSContent = ({ sessionId, onBack }) => {
   const {
     connected,
@@ -52,101 +51,269 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
   }, [error]);
 
   const handleEndInterview = async () => {
-    endInterview();
-    setTimeout(() => onBack(), 3000);
+    if (window.confirm("Are you sure you want to end the interview?")) {
+      endInterview();
+      setTimeout(() => onBack(), 2000);
+    }
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-gray-900 via-gray-800 to-black overflow-hidden text-white">
-      <header className="px-6 py-4 flex justify-between items-center bg-black/30 backdrop-blur-md border-b border-white/10">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-            <span className="font-medium text-sm text-gray-300">
-              {connected ? 'LIVE (WebSocket)' : 'CONNECTING...'}
-            </span>
+    <div className="h-screen flex flex-col bg-gradient-to-br from-black via-gray-900 to-black overflow-hidden">
+      {/* Header */}
+      <header className="relative z-10 px-6 py-4 bg-black/80 backdrop-blur-md border-b border-cyan-600/20">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          {/* Left: Status */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-cyan-400 animate-pulse' : 'bg-red-500'}`} />
+              <span className="text-sm font-medium text-gray-300">
+                {connected ? 'CONNECTED' : 'CONNECTING...'}
+              </span>
+            </div>
+            
+            <div className="h-6 w-px bg-cyan-600/30" />
+            
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+              {phase === 'dsa' ? <Code className="w-4 h-4 text-cyan-400" /> : <Mic className="w-4 h-4 text-cyan-400" />}
+              <span className="text-sm font-medium text-cyan-400">
+                {phase === 'dsa' ? 'Coding Phase' : 'Interview Phase'}
+              </span>
+            </div>
           </div>
-          <div className="px-3 py-1 bg-purple-500/20 border border-purple-500/50 rounded-full text-xs font-medium text-purple-300">
-            {phase === 'dsa' ? '💻 Coding Phase' : '🗣️ Behavioral Phase'}
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-3">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={skipQuestion}
+              className="px-4 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-400 hover:bg-yellow-500/20 transition text-sm font-medium flex items-center gap-2"
+            >
+              <SkipForward className="w-4 h-4" />
+              Skip
+            </motion.button>
+            
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleEndInterview}
+              className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition text-sm font-medium flex items-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              End Interview
+            </motion.button>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={skipQuestion} className="px-4 py-2 bg-yellow-500/20 border border-yellow-500/50 rounded-lg text-yellow-400">Skip</button>
-          <button onClick={handleEndInterview} className="px-4 py-2 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400">End</button>
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col p-6 overflow-hidden">
+      {/* Main Content */}
+      <div className="flex-1 overflow-hidden">
         {phase === 'dsa' ? (
-          <div className="w-full max-w-6xl flex-1 flex gap-4 overflow-hidden mx-auto">
-            <div className="flex-1 overflow-y-auto pr-1">
-              <DSAQuestionDisplay question={currentQuestion} />
-            </div>
-            <div className="flex-1 min-h-[520px] overflow-hidden">
-              <CodeEditor sessionId={sessionId} question={currentQuestion} />
+          // DSA Mode: Split view with question and code editor
+          <div className="h-full p-6">
+            <div className="max-w-7xl mx-auto h-full flex gap-6">
+              {/* Question Panel */}
+              <div className="w-1/2 overflow-y-auto custom-scrollbar">
+                <DSAQuestionDisplay question={currentQuestion} />
+              </div>
+              
+              {/* Code Editor Panel */}
+              <div className="w-1/2 overflow-hidden">
+                <CodeEditor sessionId={sessionId} question={currentQuestion} />
+              </div>
             </div>
           </div>
         ) : (
-          <div className="w-full max-w-5xl flex-1 mx-auto flex flex-col gap-6 overflow-hidden">
-            <AIAvatar isSpeaking={aiSpeaking} currentQuestion={currentQuestion} showQuestionCard={false} />
-
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-              <Subtitles text={aiFullText || aiText} isSpeaking={aiSpeaking} wpm={aiSpeechWpm || 180} />
-
-              {(transcriptFinal || transcriptInterim) && (
-                <motion.div
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="w-full bg-blue-500/10 border border-blue-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="text-xs font-bold text-blue-400 uppercase mt-1">You</span>
-                    <p className="flex-1 text-sm text-blue-100 leading-relaxed whitespace-pre-wrap">
-                      {transcriptFinal}
-                      {transcriptInterim ? <span className="opacity-80"> {transcriptInterim}</span> : null}
-                    </p>
+          // Interview Mode: Visualizer + Transcript
+          <div className="h-full flex flex-col">
+            {/* Visualizer Section */}
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="w-full max-w-3xl">
+                {/* 3D Audio Visualizer */}
+                <div className="relative h-[400px] rounded-2xl overflow-hidden border border-cyan-600/20 bg-black/40 backdrop-blur-sm">
+                  <AudioVisualizer 
+                    isSpeaking={aiSpeaking} 
+                    audioLevel={audioLevel}
+                  />
+                  
+                  {/* Status Badge */}
+                  <div className="absolute top-4 left-4 px-4 py-2 bg-black/60 backdrop-blur-md rounded-full border border-cyan-500/30">
+                    <span className="text-sm font-medium text-cyan-400">
+                      {aiSpeaking ? '🗣️ AI Speaking...' : '👂 Listening...'}
+                    </span>
                   </div>
-                </motion.div>
-              )}
+                </div>
 
-              {feedback && (
+                {/* AI Label */}
                 <motion.div
-                  initial={{ opacity: 0, y: 12 }}
+                  initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="w-full bg-green-500/10 border border-green-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
+                  className="text-center mt-4"
                 >
-                  <div className="flex items-start gap-3">
-                    <span className="text-xs font-bold text-green-400 uppercase mt-1">Feedback</span>
-                    <p className="flex-1 text-sm text-green-100 whitespace-pre-wrap">{feedback}</p>
-                  </div>
+                  <h2 className="text-xl font-bold text-white">AI Interviewer</h2>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {aiSpeaking ? 'Speaking now...' : isRecording ? 'Recording your response...' : 'Ready to listen'}
+                  </p>
                 </motion.div>
-              )}
+              </div>
             </div>
 
-            <div className="sticky bottom-0 left-0 right-0 mt-2 py-3 bg-black/40 backdrop-blur-md border-t border-white/10 flex items-center gap-3 flex-wrap justify-center">
-              {!isRecording ? (
-                <button onClick={startRecording} className="px-6 py-3 bg-cyan-600 rounded-xl">Start Talking</button>
-              ) : (
-                <button onClick={stopRecording} className="px-6 py-3 bg-gray-600 rounded-xl">Pause</button>
-              )}
+            {/* Transcript Section */}
+            <div className="px-6 pb-6 space-y-4 max-w-5xl mx-auto w-full">
+              {/* AI Subtitles */}
+              <AnimatePresence>
+                {(aiFullText || aiText) && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                  >
+                    <Subtitles 
+                      text={aiFullText || aiText} 
+                      isSpeaking={aiSpeaking} 
+                      wpm={aiSpeechWpm || 180}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              <button
-                onClick={submitAnswer}
-                disabled={aiSpeaking}
-                className={`px-6 py-3 rounded-xl ${aiSpeaking ? 'bg-gray-700 text-gray-400' : 'bg-green-600 text-white'}`}
-                title={aiSpeaking ? 'Wait for AI to finish speaking' : 'Submit answer and continue'}
-              >
-                I'm done
-              </button>
+              {/* User Transcript */}
+              <AnimatePresence>
+                {(transcriptFinal || transcriptInterim) && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="bg-blue-500/10 border border-blue-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xs font-bold text-blue-400 uppercase mt-1">You</span>
+                      <p className="flex-1 text-sm text-blue-100 leading-relaxed">
+                        {transcriptFinal}
+                        {transcriptInterim && <span className="opacity-60"> {transcriptInterim}</span>}
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              <button onClick={() => toggleMicrophone(!micEnabled)} className="px-4 py-3 bg-gray-700 rounded-xl">
-                {micEnabled ? 'Mute' : 'Unmute'}
-              </button>
+              {/* Feedback */}
+              <AnimatePresence>
+                {feedback && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="bg-green-500/10 border border-green-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-xs font-bold text-green-400 uppercase mt-1">Feedback</span>
+                      <p className="flex-1 text-sm text-green-100 whitespace-pre-wrap">{feedback}</p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         )}
       </div>
+
+      {/* Control Bar - Only show in interview mode */}
+      {phase !== 'dsa' && (
+        <div className="relative z-10 px-6 py-4 bg-black/80 backdrop-blur-md border-t border-cyan-600/20">
+          <div className="max-w-3xl mx-auto flex items-center justify-center gap-4">
+            {/* Mic Toggle */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => toggleMicrophone(!micEnabled)}
+              className={`p-4 rounded-xl border-2 transition ${
+                micEnabled
+                  ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
+                  : 'bg-gray-700/50 border-gray-600 text-gray-400'
+              }`}
+            >
+              {micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+            </motion.button>
+
+            {/* Record/Pause */}
+            {!isRecording ? (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={startRecording}
+                disabled={!micEnabled || aiSpeaking}
+                className="px-8 py-4 bg-cyan-600 rounded-xl text-white font-medium hover:bg-cyan-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Start Talking
+              </motion.button>
+            ) : (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={stopRecording}
+                className="px-8 py-4 bg-gray-600 rounded-xl text-white font-medium hover:bg-gray-500 transition"
+              >
+                Pause
+              </motion.button>
+            )}
+
+            {/* Submit Answer */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={submitAnswer}
+              disabled={aiSpeaking}
+              className={`px-8 py-4 rounded-xl font-medium transition flex items-center gap-2 ${
+                aiSpeaking
+                  ? 'bg-gray-700/50 text-gray-400 cursor-not-allowed'
+                  : 'bg-green-600 text-white hover:bg-green-500'
+              }`}
+              title={aiSpeaking ? 'Wait for AI to finish speaking' : 'Submit your answer'}
+            >
+              <Send className="w-5 h-5" />
+              I'm Done
+            </motion.button>
+          </div>
+
+          {/* Audio Level Indicator */}
+          {isRecording && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="mt-3 max-w-3xl mx-auto"
+            >
+              <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+                <motion.div
+                  className="h-full bg-cyan-400"
+                  style={{ width: `${Math.min(audioLevel * 100, 100)}%` }}
+                  transition={{ duration: 0.1 }}
+                />
+              </div>
+            </motion.div>
+          )}
+        </div>
+      )}
+
+      {/* Custom CSS for scrollbar */}
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(0, 0, 0, 0.2);
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(6, 182, 212, 0.3);
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(6, 182, 212, 0.5);
+        }
+      `}</style>
     </div>
   );
 };
+
 export default InterviewRoom;
