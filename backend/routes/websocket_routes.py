@@ -45,10 +45,17 @@ async def interview_websocket(
     query_token = websocket.query_params.get("token")
 
     uid = None
-    # Prefer Firebase token if present
+    # Prefer Firebase token if present (header first, then query param)
     if header_token:
         try:
             decoded = firebase_auth.verify_id_token(header_token)
+            uid = decoded.get("uid")
+        except Exception:
+            uid = None
+
+    if uid is None and query_token:
+        try:
+            decoded = firebase_auth.verify_id_token(query_token)
             uid = decoded.get("uid")
         except Exception:
             uid = None

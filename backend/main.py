@@ -12,14 +12,14 @@ settings = get_settings()
 
 app = FastAPI(
     title="AI Interviewer Platform API",
-    version="5.0.0",
+    version="1.0.0",
     description="AI-powered interview platform (WebSocket voice MVP)"
 )
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list(),
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,7 +33,7 @@ app.include_router(websocket_routes.router)
 @app.on_event("startup")
 async def startup_event():
     """Startup tasks"""
-    log.info("🚀 Starting AI Interviewer Platform v5.0.0 (WebSocket MVP)")
+    log.info("🚀 Starting AI Interviewer Platform v1.0.0 (WebSocket MVP)")
     
     # Test Redis
     redis_ok = await test_connection()

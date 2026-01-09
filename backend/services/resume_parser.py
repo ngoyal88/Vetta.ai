@@ -10,6 +10,12 @@ def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     Returns Affinda-style structure for easy plug-in to your workflow.
     """
     text = extract_text(file_bytes, filename)
+    text = (text or "").replace("\x00", "").strip()
+    if len(text) < 20:
+        raise ValueError(
+            "No readable text could be extracted from the file. "
+            "If this is a scanned/image PDF, please upload a text-based PDF or a DOCX."
+        )
     sections = split_sections(text)
     email, phone = extract_contact(text)
     name = extract_name(text, email)
@@ -47,13 +53,27 @@ def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
 def extract_text(file_bytes: bytes, filename: str) -> str:
     fn = filename.lower()
     if fn.endswith('.pdf'):
-        reader = PdfReader(BytesIO(file_bytes))
-        return "\n".join([page.extract_text() or "" for page in reader.pages])
-    elif fn.endswith(('.docx', '.doc')):
-        doc = docx.Document(BytesIO(file_bytes))
-        return "\n".join(paragraph.text for paragraph in doc.paragraphs)
+        try:
+            reader = PdfReader(BytesIO(file_bytes))
+            return "\n".join([page.extract_text() or "" for page in reader.pages])
+        except Exception as exc:
+            raise ValueError(f"Failed to read PDF: {exc}") from exc
+
+    # python-docx supports .docx (not legacy .doc)
+    elif fn.endswith('.docx'):
+        try:
+            doc = docx.Document(BytesIO(file_bytes))
+            return "\n".join(paragraph.text for paragraph in doc.paragraphs)
+        except Exception as exc:
+            raise ValueError(f"Failed to read DOCX: {exc}") from exc
+
+    elif fn.endswith('.doc'):
+        raise ValueError("Unsupported file type: .doc (please upload .docx)")
     else:
-        return file_bytes.decode("utf-8", errors="ignore")
+        try:
+            return file_bytes.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
 
 def split_sections(text: str) -> Dict[str, List[str]]:
     # Map section headers to normalized keys
@@ -69,10 +89,21 @@ def split_sections(text: str) -> Dict[str, List[str]]:
     lines = [l.strip() for l in text.splitlines()]
     sections = {}
     current = None
+    def _normalize_header(s: str) -> str:
+        # Keep alphanumerics and a few separators; collapse whitespace.
+        s = s.lower().strip()
+        s = re.sub(r"[^a-z0-9&\s]", " ", s)
+        s = re.sub(r"\s+", " ", s).strip(" :")
+        return s
+
     for ln in lines:
-        ln_norm = ln.lower().strip(' :')
-        # Detect section header
-        found = [k for k, hdrs in section_map.items() if ln_norm in hdrs]
+        ln_norm = _normalize_header(ln)
+        # Detect section header (exact OR prefix match; e.g., "education" or "education and certifications")
+        found = [
+            k
+            for k, hdrs in section_map.items()
+            if any(ln_norm == h or ln_norm.startswith(h + " ") for h in hdrs)
+        ]
         if found:
             current = found[0]
             sections.setdefault(current, [])

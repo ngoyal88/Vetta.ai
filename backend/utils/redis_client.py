@@ -17,6 +17,7 @@ redis = Redis(
     password=settings.redis_password or os.getenv("REDIS_PASSWORD"),
     db=getattr(settings, "redis_db", 0),
     decode_responses=True,
+    ssl=True,
 )
 
 # ------------------------------------------------------------------ #

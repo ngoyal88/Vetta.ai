@@ -14,7 +14,18 @@ async def upload_resume(
         raise HTTPException(400, "empty file")
     try:
         result = parse_resume(blob, file.filename)
-        # attach uid for traceability without storing PII
-        return {"message": "parsed", "uid": uid, "data": result}
+
+        # `parse_resume` returns an Affinda-style shape: {"data": {...}, "meta": {...}}
+        # Keep the public API consistent with README + frontend expectations.
+        data = result.get("data") if isinstance(result, dict) else None
+        meta = result.get("meta") if isinstance(result, dict) else None
+        if not isinstance(data, dict):
+            raise ValueError("parser returned invalid data shape")
+        if not isinstance(meta, dict):
+            meta = {}
+
+        # Attach uid for traceability without storing PII in the parsed content.
+        meta = {**meta, "uid": uid}
+        return {"data": data, "meta": meta}
     except Exception as exc:
         raise HTTPException(500, f"parser-error: {exc}") from exc
