@@ -3,7 +3,9 @@
 # ========================================
 
 import os
+import secrets
 from functools import lru_cache
+from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -57,12 +59,12 @@ class Settings(BaseSettings):
     firebase_credentials_path: str = "serviceAccount.json"
     
     # ---------- Security ----------------------------------------------- #
-    api_token: str = os.getenv("API_TOKEN","")
-    jwt_secret_key: str = "change-this-in-production"
+    api_token: str = os.getenv("API_TOKEN", "")
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "")
     jwt_algorithm: str = "HS256"
     
     # ---------- CORS --------------------------------------------------- #
-    allowed_origins: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
+    allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:5174")
     
     # ---------- Interview Settings ------------------------------------- #
     max_interview_duration_minutes: int = 60
@@ -74,6 +76,16 @@ class Settings(BaseSettings):
     log_format: str = "console"
     
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+
+    def jwt_key(self) -> str:
+        """Return a non-empty JWT secret key. Generates a random dev key if unset."""
+        if self.jwt_secret_key:
+            return self.jwt_secret_key
+        # Fallback: ephemeral key for local/dev only. Set JWT_SECRET_KEY in production.
+        return secrets.token_urlsafe(64)
+
+    def allowed_origins_list(self) -> List[str]:
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
 
 @lru_cache
