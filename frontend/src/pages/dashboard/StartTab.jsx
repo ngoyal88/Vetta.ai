@@ -30,7 +30,7 @@ export default function StartTab({
 
         {!currentUser?.emailVerified && (
           <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl text-yellow-200">
-            Your email is not verified yet. You’ll need to verify before starting an interview.
+            Your email is not verified yet. You can still start an interview, but verifying helps with account recovery.
           </div>
         )}
 

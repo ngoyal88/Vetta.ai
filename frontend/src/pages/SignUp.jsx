@@ -6,6 +6,23 @@ import { db } from "../firebase";
 import { motion } from "framer-motion";
 import { User, Mail, Lock, ArrowRight, LogIn } from "lucide-react";
 
+const formatAuthError = (err) => {
+  const code = err?.code;
+  if (code === 'auth/unauthorized-domain') {
+    return 'Google sign-in blocked: add this domain in Firebase Console → Authentication → Settings → Authorized domains.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'Popup blocked by the browser. Allow popups for this site and try again.';
+  }
+  if (code === 'auth/popup-closed-by-user') {
+    return 'Popup was closed before completing sign-in. Please try again.';
+  }
+  if (code === 'auth/cancelled-popup-request') {
+    return 'Sign-in was cancelled. Please try again.';
+  }
+  return 'Failed to sign in with Google.';
+};
+
 const SignUp = () => {
   const { signup, signInWithGoogle, sendVerification } = useAuth();
   const navigate = useNavigate();
@@ -196,19 +213,24 @@ const SignUp = () => {
               try {
                 const result = await signInWithGoogle();
                 const user = result.user;
-                await setDoc(
-                  doc(db, "users", user.uid),
-                  {
-                    name: user.displayName || "New User",
-                    email: user.email,
-                    createdAt: serverTimestamp(),
-                  },
-                  { merge: true }
-                );
+                try {
+                  await setDoc(
+                    doc(db, "users", user.uid),
+                    {
+                      name: user.displayName || "New User",
+                      email: user.email,
+                      createdAt: serverTimestamp(),
+                    },
+                    { merge: true }
+                  );
+                } catch (profileErr) {
+                  // Don't block login if Firestore rules are misconfigured.
+                  console.warn('Profile write failed after Google sign-in:', profileErr?.code || profileErr, profileErr);
+                }
                 navigate("/dashboard");
               } catch (err) {
-                console.error("Google sign-in error", err);
-                setError("Failed to sign in with Google");
+                console.error("Google sign-in error", err?.code || err, err);
+                setError(formatAuthError(err));
               } finally {
                 setLoading(false);
               }

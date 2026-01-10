@@ -244,17 +244,6 @@ const Dashboard = () => {
       return;
     }
 
-    if (!currentUser?.emailVerified) {
-      toast.error('Please verify your email before starting an interview');
-      try {
-        await sendVerification();
-        toast.success('Verification email sent');
-      } catch (err) {
-        console.error(err);
-      }
-      return;
-    }
-
     try {
       const candidateName = parsedResume?.name?.raw || profile?.name || currentUser?.displayName || 'Candidate';
       const response = await api.startInterview(

@@ -11,15 +11,27 @@ const useUserProfile = () => {
 
   useEffect(() => {
     const fetchProfile = async () => {
-      if (!currentUser) return;
-
-      const ref = doc(db, "users", currentUser.uid);
-      const snap = await getDoc(ref);
-
-      if (snap.exists()) {
-        setProfile(snap.data());
+      if (!currentUser) {
+        setProfile(null);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      try {
+        const ref = doc(db, "users", currentUser.uid);
+        const snap = await getDoc(ref);
+
+        if (snap.exists()) {
+          setProfile(snap.data());
+        } else {
+          setProfile(null);
+        }
+      } catch (err) {
+        console.warn('Failed to load user profile:', err?.code || err, err);
+        setProfile(null);
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchProfile();
