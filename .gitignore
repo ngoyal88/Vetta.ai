@@ -1,5 +1,4 @@
 backend/.env
-frontend/src/firebase.js
 backend/serviceAccount.json
 backend/__pycache__
 backend/parser/__pycache__
