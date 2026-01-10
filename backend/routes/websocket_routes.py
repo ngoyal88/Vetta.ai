@@ -15,15 +15,14 @@ from services.interview_websocket import InterviewWebSocketHandler
 from utils.logger import get_logger
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
+# Legacy/no-prefix router for backwards compatibility with clients that connect to
+# /interview/{session_id} instead of /ws/interview/{session_id}.
+legacy_router = APIRouter(tags=["WebSocket"])
 logger = get_logger("WebSocketRoutes")
 settings = get_settings()
 
 
-@router.websocket("/interview/{session_id}")
-async def interview_websocket(
-    websocket: WebSocket,
-    session_id: str
-):
+async def _handle_interview_websocket(websocket: WebSocket, session_id: str) -> None:
     """
     WebSocket endpoint for real-time interview
     
@@ -73,6 +72,16 @@ async def interview_websocket(
 
     handler = InterviewWebSocketHandler(websocket, session_id, user_id=uid)
     await handler.handle_connection()
+
+
+@router.websocket("/interview/{session_id}")
+async def interview_websocket(websocket: WebSocket, session_id: str):
+    await _handle_interview_websocket(websocket, session_id)
+
+
+@legacy_router.websocket("/interview/{session_id}")
+async def interview_websocket_legacy(websocket: WebSocket, session_id: str):
+    await _handle_interview_websocket(websocket, session_id)
 
 
 @router.websocket("/stt")

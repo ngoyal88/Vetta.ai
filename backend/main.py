@@ -29,6 +29,7 @@ app.add_middleware(
 app.include_router(resume.router)
 app.include_router(interview_session.router)
 app.include_router(websocket_routes.router)
+app.include_router(websocket_routes.legacy_router)
 
 @app.on_event("startup")
 async def startup_event():
