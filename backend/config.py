@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     
     # ---------- CORS --------------------------------------------------- #
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:5174")
+    allowed_origin_regex: str = os.getenv("ALLOWED_ORIGIN_REGEX", "")
     
     # ---------- Interview Settings ------------------------------------- #
     max_interview_duration_minutes: int = 60
@@ -86,6 +87,10 @@ class Settings(BaseSettings):
 
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+    def allowed_origin_regex_value(self) -> str | None:
+        value = (self.allowed_origin_regex or "").strip()
+        return value or None
 
 
 @lru_cache
