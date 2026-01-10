@@ -20,6 +20,31 @@ redis = Redis(
     ssl=True,
 )
 
+
+async def close_redis() -> None:
+    """Best-effort cleanup for Redis connections/pool."""
+    try:
+        # redis-py asyncio: aclose() is preferred when available
+        aclose = getattr(redis, "aclose", None)
+        if callable(aclose):
+            await aclose()
+        else:
+            close = getattr(redis, "close", None)
+            if callable(close):
+                result = close()
+                if result is not None:
+                    await result
+
+        pool = getattr(redis, "connection_pool", None)
+        disconnect = getattr(pool, "disconnect", None) if pool is not None else None
+        if callable(disconnect):
+            result = disconnect()
+            if result is not None:
+                await result
+    except Exception:
+        # Don't crash shutdown on cleanup.
+        pass
+
 # ------------------------------------------------------------------ #
 # Connection test
 # ------------------------------------------------------------------ #

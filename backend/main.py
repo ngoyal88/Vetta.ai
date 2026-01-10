@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes import resume, interview_session, websocket_routes
 from config import get_settings
 from utils.logger import setup_logging, get_logger
-from utils.redis_client import test_connection
+from utils.redis_client import test_connection, close_redis
 from services.interview_service import InterviewService
 
 setup_logging()
@@ -19,8 +19,7 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list(),
-    allow_origin_regex=settings.allowed_origin_regex_value(),
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,6 +82,10 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown"""
     log.info("🛑 Shutting down...")
+    try:
+        await close_redis()
+    except Exception:
+        pass
     log.info("✅ Shutdown complete")
 
 
