@@ -9,7 +9,14 @@ import { api } from '../services/api';
 import { auth } from '../firebase';
 import toast from 'react-hot-toast';
 
-const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
+const normalizeWsBaseUrl = (value) => {
+  const raw = (value || '').trim();
+  if (!raw) return 'ws://localhost:8000/ws';
+  const withoutTrailing = raw.replace(/\/+$/, '');
+  return withoutTrailing.endsWith('/ws') ? withoutTrailing : `${withoutTrailing}/ws`;
+};
+
+const WS_URL = normalizeWsBaseUrl(process.env.REACT_APP_WS_URL);
 
 export const useInterviewWebSocket = (sessionId) => {
   // Connection state
