@@ -8,9 +8,6 @@ import { User, Mail, Lock, ArrowRight, LogIn } from "lucide-react";
 
 const formatAuthError = (err) => {
   const code = err?.code;
-  if (code === 'auth/unauthorized-domain') {
-    return 'Google sign-in blocked: add this domain in Firebase Console → Authentication → Settings → Authorized domains.';
-  }
   if (code === 'auth/popup-blocked') {
     return 'Popup blocked by the browser. Allow popups for this site and try again.';
   }
@@ -114,6 +111,53 @@ const SignUp = () => {
           </motion.div>
         )}
 
+        {/* Social Sign Up (Top) */}
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={async () => {
+              setError("");
+              setLoading(true);
+              try {
+                const result = await signInWithGoogle();
+                const user = result.user;
+                try {
+                  await setDoc(
+                    doc(db, "users", user.uid),
+                    {
+                      name: user.displayName || "New User",
+                      email: user.email,
+                      createdAt: serverTimestamp(),
+                    },
+                    { merge: true }
+                  );
+                } catch (profileErr) {
+                  // Don't block login if Firestore rules are misconfigured.
+                  console.warn('Profile write failed after Google sign-in:', profileErr?.code || profileErr, profileErr);
+                }
+                navigate("/dashboard");
+              } catch (err) {
+                console.error("Google sign-in error", err?.code || err, err);
+                setError(formatAuthError(err));
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white text-black rounded-lg font-medium hover:bg-gray-100 transition border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <LogIn size={18} />
+            Continue with Google
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div className="my-6 flex items-center">
+          <div className="flex-1 border-t border-cyan-600/20"></div>
+          <span className="px-4 text-gray-500 text-sm">or</span>
+          <div className="flex-1 border-t border-cyan-600/20"></div>
+        </div>
+
         {/* Form */}
         <form className="space-y-5" onSubmit={handleSubmit}>
           <div>
@@ -195,52 +239,6 @@ const SignUp = () => {
             {!loading && <ArrowRight size={20} />}
           </motion.button>
         </form>
-
-        {/* Divider */}
-        <div className="my-6 flex items-center">
-          <div className="flex-1 border-t border-cyan-600/20"></div>
-          <span className="px-4 text-gray-500 text-sm">or</span>
-          <div className="flex-1 border-t border-cyan-600/20"></div>
-        </div>
-
-        {/* Social Sign Up */}
-        <div className="space-y-3">
-          <button
-            type="button"
-            onClick={async () => {
-              setError("");
-              setLoading(true);
-              try {
-                const result = await signInWithGoogle();
-                const user = result.user;
-                try {
-                  await setDoc(
-                    doc(db, "users", user.uid),
-                    {
-                      name: user.displayName || "New User",
-                      email: user.email,
-                      createdAt: serverTimestamp(),
-                    },
-                    { merge: true }
-                  );
-                } catch (profileErr) {
-                  // Don't block login if Firestore rules are misconfigured.
-                  console.warn('Profile write failed after Google sign-in:', profileErr?.code || profileErr, profileErr);
-                }
-                navigate("/dashboard");
-              } catch (err) {
-                console.error("Google sign-in error", err?.code || err, err);
-                setError(formatAuthError(err));
-              } finally {
-                setLoading(false);
-              }
-            }}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white text-black rounded-lg font-medium hover:bg-gray-100 transition border border-gray-200"
-          >
-            <LogIn size={18} />
-            Continue with Google
-          </button>
-        </div>
 
         {/* Sign In Link */}
         <div className="text-center">

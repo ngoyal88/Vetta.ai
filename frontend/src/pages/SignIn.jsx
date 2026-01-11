@@ -1,13 +1,27 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { sendPasswordResetEmail } from "firebase/auth";
-import { auth } from "../firebase";
 import { motion } from "framer-motion";
-import { Mail, Lock, ArrowRight } from "lucide-react";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
+import { Mail, Lock, ArrowRight, LogIn } from "lucide-react";
+
+const formatAuthError = (err) => {
+  const code = err?.code;
+  if (code === 'auth/popup-blocked') {
+    return 'Popup blocked by the browser. Allow popups for this site and try again.';
+  }
+  if (code === 'auth/popup-closed-by-user') {
+    return 'Popup was closed before completing sign-in. Please try again.';
+  }
+  if (code === 'auth/cancelled-popup-request') {
+    return 'Sign-in was cancelled. Please try again.';
+  }
+  return 'Failed to sign in with Google.';
+};
 
 const SignIn = () => {
-  const { signin, resetPassword } = useAuth();
+  const { signin, resetPassword, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState(""); 
@@ -41,6 +55,35 @@ const SignIn = () => {
       alert("Password reset email sent! Check your inbox.");
     } catch (err) {
       setError("Failed to send reset email");
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await signInWithGoogle();
+      const user = result.user;
+      try {
+        await setDoc(
+          doc(db, "users", user.uid),
+          {
+            name: user.displayName || "User",
+            email: user.email,
+            lastLoginAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (profileErr) {
+        // Don't block sign-in if Firestore rules are misconfigured.
+        console.warn('Profile write failed after Google sign-in:', profileErr?.code || profileErr, profileErr);
+      }
+      navigate("/dashboard");
+    } catch (err) {
+      console.error('Google sign-in error:', err?.code || err, err);
+      setError(formatAuthError(err));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -79,6 +122,26 @@ const SignIn = () => {
             {error}
           </motion.div>
         )}
+
+        {/* Google Sign In (Top) */}
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white text-black rounded-lg font-medium hover:bg-gray-100 transition border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <LogIn size={18} />
+            Continue with Google
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div className="my-6 flex items-center">
+          <div className="flex-1 border-t border-cyan-600/20"></div>
+          <span className="px-4 text-gray-500 text-sm">or</span>
+          <div className="flex-1 border-t border-cyan-600/20"></div>
+        </div>
 
         {/* Form */}
         <form className="space-y-6" onSubmit={handleSubmit}>
@@ -137,13 +200,6 @@ const SignIn = () => {
             {!loading && <ArrowRight size={20} />}
           </motion.button>
         </form>
-
-        {/* Divider */}
-        <div className="my-6 flex items-center">
-          <div className="flex-1 border-t border-cyan-600/20"></div>
-          <span className="px-4 text-gray-500 text-sm">or</span>
-          <div className="flex-1 border-t border-cyan-600/20"></div>
-        </div>
 
         {/* Sign Up Link */}
         <div className="text-center">
