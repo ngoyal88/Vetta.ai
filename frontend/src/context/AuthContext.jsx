@@ -71,9 +71,22 @@ export const AuthProvider = ({ children }) => {
     await deleteUser(auth.currentUser);
   };
 
+  if (loading) {
+    return (
+      <AuthContext.Provider value={{ currentUser, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount }}>
+        <div className="min-h-screen bg-black flex items-center justify-center" aria-busy="true" aria-live="polite">
+          <div className="flex flex-col items-center gap-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-2 border-cyan-500 border-t-transparent" />
+            <p className="text-gray-400">Checking auth...</p>
+          </div>
+        </div>
+      </AuthContext.Provider>
+    );
+  }
+
   return (
     <AuthContext.Provider value={{ currentUser, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount }}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };

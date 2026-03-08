@@ -1,7 +1,5 @@
-// frontend/src/hooks/useInterviewWebSocket.js
 /**
- * Enhanced WebSocket hook with complete edge case handling
- * Handles: Echo prevention, interruptions, reconnection, network issues, VAD
+ * WebSocket hook for interview room: connection, audio, VAD, reconnection.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AudioRecorder, AudioPlayer, checkBrowserSupport } from '../utils/audioUtils';
@@ -9,42 +7,49 @@ import { api } from '../services/api';
 import { auth } from '../firebase';
 import toast from 'react-hot-toast';
 
-const normalizeWsBaseUrl = (value) => {
-  const raw = (value || '').trim();
-  if (!raw) return 'ws://localhost:8000/ws';
-  const withoutTrailing = raw.replace(/\/+$/, '');
-  return withoutTrailing.endsWith('/ws') ? withoutTrailing : `${withoutTrailing}/ws`;
-};
+/**
+ * Build WebSocket base URL at runtime so protocol matches the page (ws on http, wss on https).
+ * Prevents "Invalid HTTP request" when env has wss:// but backend is plain ws.
+ */
+function getWebSocketBaseUrl() {
+  const raw = (process.env.REACT_APP_WS_URL || '').trim();
+  const isSecure = typeof window !== 'undefined' && window.location?.protocol === 'https:';
+  const protocol = isSecure ? 'wss:' : 'ws:';
+  let hostPort = 'localhost:8000';
+  if (raw) {
+    try {
+      const url = new URL(raw.startsWith('ws') ? raw : `ws://${raw}`);
+      hostPort = url.host;
+    } catch {
+      hostPort = raw.replace(/^wss?:\/\//, '').replace(/\/.*$/, '').trim() || hostPort;
+    }
+  }
+  return `${protocol}//${hostPort}/ws`;
+}
 
-const WS_URL = normalizeWsBaseUrl(process.env.REACT_APP_WS_URL);
-
-export const useInterviewWebSocket = (sessionId) => {
-  // Connection state
+export const useInterviewWebSocket = (sessionId, initialPhase = 'behavioral') => {
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState('disconnected');
 
-  // Interview state
   const [currentQuestion, setCurrentQuestion] = useState(null);
-  const [phase, setPhase] = useState('behavioral');
+  const [loadingNextProblem, setLoadingNextProblem] = useState(false);
+  const [phase, setPhase] = useState(initialPhase);
   const [transcriptInterim, setTranscriptInterim] = useState('');
   const [transcriptFinal, setTranscriptFinal] = useState('');
-  const [aiText, setAiText] = useState(''); // displayed text (progressively revealed)
+  const [aiText, setAiText] = useState('');
   const [aiFullText, setAiFullText] = useState('');
   const [aiSpeechWpm, setAiSpeechWpm] = useState(180);
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [error, setError] = useState(null);
 
-  // Recording state
   const [isRecording, setIsRecording] = useState(false);
   const [micEnabled, setMicEnabled] = useState(true);
   const [audioLevel, setAudioLevel] = useState(0);
 
-  // Network state
   const [networkIssue, setNetworkIssue] = useState(false);
   const [messageQueue, setMessageQueue] = useState([]);
 
-  // Refs
   const wsRef = useRef(null);
   const recorderRef = useRef(null);
   const playerRef = useRef(null);
@@ -55,17 +60,18 @@ export const useInterviewWebSocket = (sessionId) => {
   const audioLevelIntervalRef = useRef(null);
   const heartbeatIntervalRef = useRef(null);
   const lastActivityRef = useRef(Date.now());
+  const handleMessageRef = useRef(null);
+  const startHeartbeatRef = useRef(null);
+  const stopHeartbeatRef = useRef(null);
+  const flushMessageQueueRef = useRef(null);
+  const attemptReconnectRef = useRef(null);
+  const sendMessageRef = useRef(null);
 
-  // Constants
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY = 3000;
-  const HEARTBEAT_INTERVAL = 30000; // 30 seconds
-  const ACTIVITY_TIMEOUT = 300000; // 5 minutes
-  const AUTO_STOP_SILENCE = 2000; // 2 seconds of silence
+  const HEARTBEAT_INTERVAL = 30000; // 30s
+  const ACTIVITY_TIMEOUT = 300000; // 5min
 
-  /**
-   * Check browser support on mount
-   */
   useEffect(() => {
     const support = checkBrowserSupport();
     if (!support.supported) {
@@ -78,9 +84,6 @@ export const useInterviewWebSocket = (sessionId) => {
     }
   }, []);
 
-  /**
-   * Connect to WebSocket with error handling
-   */
   const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       console.log('⚠️ Already connected');
@@ -97,8 +100,9 @@ export const useInterviewWebSocket = (sessionId) => {
         return;
       }
 
-      console.log('🔌 Connecting to WebSocket...');
-      const ws = new WebSocket(`${WS_URL}/interview/${sessionId}?token=${encodeURIComponent(token)}`);
+      const wsBase = getWebSocketBaseUrl();
+      console.log('🔌 Connecting to WebSocket...', wsBase);
+      const ws = new WebSocket(`${wsBase}/interview/${sessionId}?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
       // Connection opened
@@ -110,11 +114,8 @@ export const useInterviewWebSocket = (sessionId) => {
         setNetworkIssue(false);
         reconnectAttemptsRef.current = 0;
 
-        // Start heartbeat
-        startHeartbeat();
-
-        // Send queued messages
-        flushMessageQueue();
+        startHeartbeatRef.current?.();
+        flushMessageQueueRef.current?.();
 
         toast.success('Connected to interview');
       };
@@ -122,7 +123,7 @@ export const useInterviewWebSocket = (sessionId) => {
       // Message received
       ws.onmessage = (event) => {
         lastActivityRef.current = Date.now();
-        handleMessage(JSON.parse(event.data));
+        handleMessageRef.current?.(JSON.parse(event.data));
       };
 
       // Connection error
@@ -137,18 +138,15 @@ export const useInterviewWebSocket = (sessionId) => {
         console.log('📴 WebSocket closed:', event.code, event.reason);
         setConnected(false);
         setStatus('disconnected');
-        stopHeartbeat();
+        stopHeartbeatRef.current?.();
 
-        // Handle different close codes
         if (event.code === 1000) {
-          // Normal closure
           console.log('✅ Connection closed normally');
         } else if (event.code === 1006) {
-          // Abnormal closure
           setNetworkIssue(true);
-          attemptReconnect();
+          attemptReconnectRef.current?.();
         } else {
-          attemptReconnect();
+          attemptReconnectRef.current?.();
         }
       };
 
@@ -186,9 +184,8 @@ export const useInterviewWebSocket = (sessionId) => {
   const startHeartbeat = useCallback(() => {
     heartbeatIntervalRef.current = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        sendMessage({ type: 'ping' });
+        sendMessageRef.current?.({ type: 'ping' });
 
-        // Check for activity timeout
         const inactiveTime = Date.now() - lastActivityRef.current;
         if (inactiveTime > ACTIVITY_TIMEOUT) {
           console.warn('⚠️ Activity timeout detected');
@@ -215,8 +212,13 @@ export const useInterviewWebSocket = (sessionId) => {
     console.log('📨 Message received:', message.type);
 
     switch (message.type) {
-      case 'question':
-        setCurrentQuestion(message.question);
+      case 'question': {
+        const q = message.question;
+        const inner = (message.phase === 'dsa' && q && typeof q === 'object' && q.question && typeof q.question === 'object')
+          ? q.question
+          : q;
+        setCurrentQuestion(inner);
+        setLoadingNextProblem(false);
         setPhase(message.phase);
 
         // Reset user transcript for the new turn
@@ -337,6 +339,7 @@ export const useInterviewWebSocket = (sessionId) => {
 
         toast.success('New question received');
         break;
+      }
 
       case 'transcript':
         if (message.is_final) {
@@ -368,14 +371,36 @@ export const useInterviewWebSocket = (sessionId) => {
         }
         break;
 
-      case 'feedback':
-        setFeedback(message.feedback);
+      case 'feedback': {
+        const payload = {
+          feedback: message.feedback,
+          full: message.full,
+          duration_minutes: message.duration_minutes,
+          questions_answered: message.questions_answered,
+          code_problems_attempted: message.code_problems_attempted,
+        };
+        setFeedback(payload);
+        try {
+          if (sessionId) {
+            sessionStorage.setItem(
+              `interview_feedback_${sessionId}`,
+              JSON.stringify(payload)
+            );
+          }
+        } catch (e) {
+          // ignore storage errors
+        }
         toast.success('Interview completed!');
         break;
+      }
 
       case 'pong':
         // Heartbeat response
         console.log('💓 Heartbeat received');
+        break;
+
+      case 'heartbeat':
+        // Server keepalive — no action needed
         break;
 
       case 'error':
@@ -386,11 +411,13 @@ export const useInterviewWebSocket = (sessionId) => {
       default:
         console.warn('Unknown message type:', message.type);
     }
-  }, [isRecording, micEnabled]);
+  }, [isRecording, micEnabled, sessionId]);
 
-  /**
-   * Send message with queueing for offline support
-   */
+  const queueMessage = useCallback((message) => {
+    setMessageQueue(prev => [...prev, message]);
+    console.log('📦 Message queued:', message.type);
+  }, []);
+
   const sendMessage = useCallback((message) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       try {
@@ -402,15 +429,7 @@ export const useInterviewWebSocket = (sessionId) => {
     } else {
       queueMessage(message);
     }
-  }, []);
-
-  /**
-   * Queue message for later sending
-   */
-  const queueMessage = useCallback((message) => {
-    setMessageQueue(prev => [...prev, message]);
-    console.log('📦 Message queued:', message.type);
-  }, []);
+  }, [queueMessage]);
 
   /**
    * Flush queued messages
@@ -428,6 +447,23 @@ export const useInterviewWebSocket = (sessionId) => {
       setMessageQueue([]);
     }
   }, [messageQueue]);
+
+  const startAudioLevelMonitoring = useCallback(() => {
+    audioLevelIntervalRef.current = setInterval(() => {
+      if (recorderRef.current) {
+        const level = recorderRef.current.getAudioLevel();
+        setAudioLevel(level);
+      }
+    }, 100);
+  }, []);
+
+  const stopAudioLevelMonitoring = useCallback(() => {
+    if (audioLevelIntervalRef.current) {
+      clearInterval(audioLevelIntervalRef.current);
+      audioLevelIntervalRef.current = null;
+    }
+    setAudioLevel(0);
+  }, []);
 
   /**
    * Start recording with VAD and echo prevention
@@ -475,7 +511,7 @@ export const useInterviewWebSocket = (sessionId) => {
       console.error('Failed to start recording:', error);
       toast.error(error.message || 'Failed to start recording');
     }
-  }, [micEnabled, connected, aiSpeaking, sendMessage]);
+  }, [micEnabled, connected, aiSpeaking, sendMessage, startAudioLevelMonitoring]);
 
   /**
    * Stop recording
@@ -498,7 +534,7 @@ export const useInterviewWebSocket = (sessionId) => {
     } catch (error) {
       console.error('Failed to stop recording:', error);
     }
-  }, [isRecording, sendMessage]);
+  }, [isRecording, sendMessage, stopAudioLevelMonitoring]);
 
   /**
    * Submit the current answer (manual turn-taking)
@@ -517,29 +553,6 @@ export const useInterviewWebSocket = (sessionId) => {
 
     sendMessage({ type: 'answer_complete' });
   }, [connected, aiSpeaking, isRecording, stopRecording, sendMessage]);
-
-  /**
-   * Start audio level monitoring for visualization
-   */
-  const startAudioLevelMonitoring = useCallback(() => {
-    audioLevelIntervalRef.current = setInterval(() => {
-      if (recorderRef.current) {
-        const level = recorderRef.current.getAudioLevel();
-        setAudioLevel(level);
-      }
-    }, 100);
-  }, []);
-
-  /**
-   * Stop audio level monitoring
-   */
-  const stopAudioLevelMonitoring = useCallback(() => {
-    if (audioLevelIntervalRef.current) {
-      clearInterval(audioLevelIntervalRef.current);
-      audioLevelIntervalRef.current = null;
-    }
-    setAudioLevel(0);
-  }, []);
 
   /**
    * Toggle microphone
@@ -572,11 +585,22 @@ export const useInterviewWebSocket = (sessionId) => {
   }, [aiSpeaking, micEnabled, sendMessage, startRecording]);
 
   /**
-   * Skip current question
+   * Skip current question (voice/behavioral interviews)
    */
   const skipQuestion = useCallback(() => {
     sendMessage({ type: 'skip_question' });
     toast.success('Skipping question...');
+  }, [sendMessage]);
+
+  /**
+   * Request next DSA problem: clear current question and send dsa_next_question
+   * so the UI shows "Loading next problem..." until the new question arrives.
+   */
+  const requestNextDSAQuestion = useCallback(() => {
+    setCurrentQuestion(null);
+    setLoadingNextProblem(true);
+    sendMessage({ type: 'dsa_next_question' });
+    toast.success('Loading next problem...');
   }, [sendMessage]);
 
   /**
@@ -708,8 +732,14 @@ export const useInterviewWebSocket = (sessionId) => {
     };
   }, [connected, connect]);
 
+  handleMessageRef.current = handleMessage;
+  startHeartbeatRef.current = startHeartbeat;
+  stopHeartbeatRef.current = stopHeartbeat;
+  flushMessageQueueRef.current = flushMessageQueue;
+  attemptReconnectRef.current = attemptReconnect;
+  sendMessageRef.current = sendMessage;
+
   return {
-    // Connection state
     connected,
     status,
     error,
@@ -717,6 +747,7 @@ export const useInterviewWebSocket = (sessionId) => {
 
     // Interview state
     currentQuestion,
+    loadingNextProblem,
     phase,
     transcriptInterim,
     transcriptFinal,
@@ -738,9 +769,10 @@ export const useInterviewWebSocket = (sessionId) => {
     toggleMicrophone,
     interruptAI,
     skipQuestion,
+    requestNextDSAQuestion,
     endInterview,
     disconnect,
     sendMessage,  // Expose for manual message sending
-    startInterview: () => sendMessage({ type: 'start' }) 
+    startInterview: () => sendMessage({ type: 'start' })
   };
 };

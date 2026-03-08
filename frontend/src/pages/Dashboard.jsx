@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { deleteField, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { useAuth } from '../context/AuthContext';
+import { useConfirmDialog } from '../context/ConfirmDialogContext';
 import useUserProfile from '../hooks/useUserProfile';
 import { api } from '../services/api';
 import { db } from '../firebase';
@@ -16,6 +17,7 @@ import AccountTab from './dashboard/AccountTab';
 
 const Dashboard = () => {
   const { currentUser, sendVerification, resetPassword, updateProfileInfo, deleteAccount, refreshUser } = useAuth();
+  const { confirmDialog } = useConfirmDialog();
   const { profile, loading: profileLoading } = useUserProfile();
   const navigate = useNavigate();
 
@@ -131,16 +133,17 @@ const Dashboard = () => {
     try {
       setUploadingResume(true);
       const res = await api.uploadResume(file);
-      const data = res?.data;
-      if (!data) throw new Error('Resume parser returned empty data');
+      // Support new LLM parser shape { profile, meta } and legacy { data, meta }.
+      const parsed = res?.profile ?? res?.data;
+      if (!parsed) throw new Error('Resume parser returned empty data');
 
-      setParsedResume(data);
-      localStorage.setItem(resumeStorageKey, JSON.stringify(data));
+      setParsedResume(parsed);
+      localStorage.setItem(resumeStorageKey, JSON.stringify(parsed));
 
       await setDoc(
         doc(db, 'users', currentUser.uid),
         {
-          resume: data,
+          resume: parsed,
           resumeUpdatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -155,29 +158,33 @@ const Dashboard = () => {
     }
   }, [currentUser, file, resumeStorageKey]);
 
-  const handleDeleteResume = useCallback(async () => {
+  const handleDeleteResume = useCallback(() => {
     if (!currentUser) return;
-    const confirmDelete = window.confirm('Delete your stored resume?');
-    if (!confirmDelete) return;
-
-    try {
-      setParsedResume(null);
-      setFile(null);
-      localStorage.removeItem(resumeStorageKey);
-      await setDoc(
-        doc(db, 'users', currentUser.uid),
-        {
-          resume: deleteField(),
-          resumeUpdatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-      toast.success('Resume deleted');
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to delete resume');
-    }
-  }, [currentUser, resumeStorageKey]);
+    confirmDialog({
+      title: 'Delete resume',
+      message: 'Delete your stored resume?',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          setParsedResume(null);
+          setFile(null);
+          localStorage.removeItem(resumeStorageKey);
+          await setDoc(
+            doc(db, 'users', currentUser.uid),
+            {
+              resume: deleteField(),
+              resumeUpdatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+          toast.success('Resume deleted');
+        } catch (err) {
+          console.error(err);
+          toast.error('Failed to delete resume');
+        }
+      },
+    });
+  }, [currentUser, resumeStorageKey, confirmDialog]);
 
   const fetchHistory = useCallback(async () => {
     if (!currentUser) return;
@@ -194,24 +201,28 @@ const Dashboard = () => {
   }, [currentUser]);
 
   const handleDeleteInterview = useCallback(
-    async (id) => {
+    (id) => {
       if (!currentUser) return;
-      const confirmDelete = window.confirm('Delete this interview? This cannot be undone.');
-      if (!confirmDelete) return;
-
-      try {
-        setDeletingInterviewId(id);
-        await api.deleteInterview(id);
-        toast.success('Interview deleted');
-        await fetchHistory();
-      } catch (err) {
-        console.error(err);
-        toast.error('Failed to delete interview');
-      } finally {
-        setDeletingInterviewId(null);
-      }
+      confirmDialog({
+        title: 'Delete interview',
+        message: 'Delete this interview? This cannot be undone.',
+        destructive: true,
+        onConfirm: async () => {
+          try {
+            setDeletingInterviewId(id);
+            await api.deleteInterview(id);
+            toast.success('Interview deleted');
+            await fetchHistory();
+          } catch (err) {
+            console.error(err);
+            toast.error('Failed to delete interview');
+          } finally {
+            setDeletingInterviewId(null);
+          }
+        },
+      });
     },
-    [currentUser, fetchHistory]
+    [currentUser, fetchHistory, confirmDialog]
   );
 
   useEffect(() => {
@@ -257,6 +268,8 @@ const Dashboard = () => {
       );
 
       const sessionId = response.session_id;
+
+      sessionStorage.setItem(`interview_type_${sessionId}`, interviewType);
 
       localStorage.setItem('interviewConfig', JSON.stringify({
         sessionId,
@@ -306,11 +319,11 @@ const Dashboard = () => {
           {/* Navbar already has logout; keep header clean */}
         </motion.div>
 
-        {/* Tabs */}
-        <div className="flex gap-4 mb-8 border-b border-cyan-600/20">
+        {/* Tabs: horizontal scroll on small screens, no wrap */}
+        <div className="flex gap-4 mb-8 border-b border-cyan-600/20 overflow-x-auto custom-scrollbar pb-px">
           <button
             onClick={() => setActiveTab('start')}
-            className={`px-6 py-3 font-medium transition ${
+            className={`flex-shrink-0 px-4 sm:px-6 py-3 font-medium transition whitespace-nowrap ${
               activeTab === 'start'
                 ? 'text-cyan-400 border-b-2 border-cyan-400'
                 : 'text-gray-400 hover:text-white'
@@ -320,7 +333,7 @@ const Dashboard = () => {
           </button>
           <button
             onClick={() => setActiveTab('resume')}
-            className={`px-6 py-3 font-medium transition ${
+            className={`flex-shrink-0 px-4 sm:px-6 py-3 font-medium transition whitespace-nowrap ${
               activeTab === 'resume'
                 ? 'text-cyan-400 border-b-2 border-cyan-400'
                 : 'text-gray-400 hover:text-white'
@@ -330,7 +343,7 @@ const Dashboard = () => {
           </button>
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-6 py-3 font-medium transition ${
+            className={`flex-shrink-0 px-4 sm:px-6 py-3 font-medium transition whitespace-nowrap ${
               activeTab === 'history'
                 ? 'text-cyan-400 border-b-2 border-cyan-400'
                 : 'text-gray-400 hover:text-white'
@@ -340,7 +353,7 @@ const Dashboard = () => {
           </button>
           <button
             onClick={() => setActiveTab('account')}
-            className={`px-6 py-3 font-medium transition ${
+            className={`flex-shrink-0 px-4 sm:px-6 py-3 font-medium transition whitespace-nowrap ${
               activeTab === 'account'
                 ? 'text-cyan-400 border-b-2 border-cyan-400'
                 : 'text-gray-400 hover:text-white'

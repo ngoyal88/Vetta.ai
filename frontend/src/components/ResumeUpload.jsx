@@ -40,10 +40,12 @@ const ResumeUpload = ({ onParsed }) => {
 
     try {
       setLoading(true);
-      const data = await api.uploadResume(file);
-      
-      setParsedData(data.data);
-      onParsed?.(data.data);
+      const res = await api.uploadResume(file);
+      const parsed = res?.profile ?? res?.data;
+      if (!parsed) throw new Error('Resume parser returned empty data');
+
+      setParsedData(parsed);
+      onParsed?.(parsed);
       toast.success('Resume parsed successfully!');
     } catch (err) {
       toast.error('Failed to parse resume');
