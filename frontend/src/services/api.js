@@ -1,3 +1,4 @@
+/** API client for resume, interview, and account endpoints (Firebase auth). */
 import { auth } from '../firebase';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -13,7 +14,6 @@ const getAuthHeaders = async (isForm = false) => {
 };
 
 export const api = {
-  // Resume Upload
   uploadResume: async (file) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -28,7 +28,6 @@ export const api = {
     return response.json();
   },
 
-  // Start Interview
   startInterview: async (userId, interviewType, difficulty, resumeData, customRole = null, candidateName = null, yearsExperience = null) => {
     const response = await fetch(`${API_URL}/interview/start`, {
       method: 'POST',
@@ -48,24 +47,6 @@ export const api = {
     return response.json();
   },
 
-  // Submit Response
-  submitResponse: async (sessionId, questionIndex, response, responseTime) => {
-    const res = await fetch(`${API_URL}/interview/submit-response`, {
-      method: 'POST',
-      headers: await getAuthHeaders(),
-      body: JSON.stringify({
-        session_id: sessionId,
-        question_index: questionIndex,
-        response,
-        response_time_seconds: responseTime
-      })
-    });
-    
-    if (!res.ok) throw new Error('Failed to submit response');
-    return res.json();
-  },
-
-  // Submit Code (DSA)
   submitCode: async (sessionId, questionId, language, code) => {
     const response = await fetch(`${API_URL}/interview/submit-code`, {
       method: 'POST',
@@ -82,18 +63,6 @@ export const api = {
     return response.json();
   },
 
-  // Get Next Question
-  getNextQuestion: async (sessionId) => {
-    const response = await fetch(`${API_URL}/interview/next-question?session_id=${sessionId}`, {
-      method: 'POST',
-      headers: await getAuthHeaders()
-    });
-    
-    if (!response.ok) throw new Error('Failed to get next question');
-    return response.json();
-  },
-
-  // Complete Interview
   completeInterview: async (sessionId) => {
     const response = await fetch(`${API_URL}/interview/complete?session_id=${sessionId}`, {
       method: 'POST',
@@ -104,7 +73,6 @@ export const api = {
     return response.json();
   },
 
-  // Interview History
   getInterviewHistory: async (limit = 20) => {
     const response = await fetch(`${API_URL}/interview/history?limit=${limit}`, {
       method: 'GET',
