@@ -7,7 +7,6 @@ import {
   Award, Shield, Menu, X
 } from 'lucide-react';
 
-// Navbar Component
 const HomeNavbar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { currentUser, logout } = useAuth();
@@ -122,7 +121,6 @@ const HomeNavbar = () => {
   );
 };
 
-// Hero Section
 const Hero = () => (
   <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-20 bg-black">
     <div className="absolute inset-0 opacity-10">
@@ -197,7 +195,6 @@ const Hero = () => (
   </section>
 );
 
-// Features Section
 const Features = () => {
   const features = [
     {
@@ -273,7 +270,6 @@ const Features = () => {
   );
 };
 
-// How It Works
 const HowItWorks = () => {
   const steps = [
     { number: '01', title: 'Upload Resume', description: 'Share your background for personalized questions' },
@@ -322,7 +318,6 @@ const HowItWorks = () => {
   );
 };
 
-// Testimonials
 const Testimonials = () => {
   const testimonials = [
     {
@@ -397,7 +392,6 @@ const Testimonials = () => {
   );
 };
 
-// CTA Section
 const CTA = () => (
   <section className="py-24 bg-cyan-600/10 border-y border-cyan-600/20 relative overflow-hidden">
     <div className="absolute inset-0 opacity-5">
@@ -439,7 +433,6 @@ const CTA = () => (
   </section>
 );
 
-// Footer
 const Footer = () => (
   <footer className="bg-black border-t border-cyan-600/20 py-12">
     <div className="max-w-7xl mx-auto px-6">
@@ -494,7 +487,6 @@ const Footer = () => (
   </footer>
 );
 
-// Main Home Component
 const Home = () => {
   return (
     <div className="bg-black text-white min-h-screen">

@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { Mail, Lock, ArrowRight, LogIn } from "lucide-react";
+import toast from "react-hot-toast";
 
 const formatAuthError = (err) => {
   const code = err?.code;
@@ -52,7 +53,7 @@ const SignIn = () => {
     
     try {
       await resetPassword(email);
-      alert("Password reset email sent! Check your inbox.");
+      toast.success("Password reset email sent! Check your inbox.");
     } catch (err) {
       setError("Failed to send reset email");
     }

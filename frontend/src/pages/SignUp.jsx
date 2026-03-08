@@ -5,6 +5,7 @@ import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { motion } from "framer-motion";
 import { User, Mail, Lock, ArrowRight, LogIn } from "lucide-react";
+import toast from "react-hot-toast";
 
 const formatAuthError = (err) => {
   const code = err?.code;
@@ -61,7 +62,7 @@ const SignUp = () => {
       });
 
       await sendVerification();
-      alert("Account created! Verification email sent. Please check your inbox.");
+      toast.success("Account created! Verification email sent. Please check your inbox.");
       navigate("/signin");
     } catch (err) {
       console.error("Signup error:", err.code, err.message);

@@ -1,7 +1,5 @@
-# backend/services/elevenlabs_service.py
 """
-ElevenLabs Text-to-Speech Service
-Converts AI responses to natural speech
+ElevenLabs Text-to-Speech: converts AI responses to natural speech.
 """
 import asyncio
 from typing import Optional, AsyncGenerator

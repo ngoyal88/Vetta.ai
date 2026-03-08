@@ -27,5 +27,5 @@ async def check_rate_limit(uid: str, key: str, limit: int = 60, window_seconds: 
     except HTTPException:
         raise
     except Exception:
-        # Fail open on Redis issues to avoid blocking; log upstream.
+        # Fail open on Redis errors so service remains available.
         return

@@ -1,6 +1,4 @@
-# backend/services/deepgram_service.py
-"""backend/services/deepgram_service.py
-
+"""
 Lean Deepgram realtime STT client using raw WebSocket via aiohttp.
 
 Why: deepgram-sdk versions in the wild differ (v3 vs v5 APIs). The previous

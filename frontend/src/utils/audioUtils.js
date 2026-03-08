@@ -1,14 +1,5 @@
-// frontend/src/utils/audioUtils.js
 /**
- * FIXED: Audio recording with proper PCM encoding for Deepgram
- * Changes:
- * 1. Convert WebM/Opus to PCM 16-bit
- * 2. Add detailed logging
- * 3. Fix audio chunk sending
- */
-
-/**
- * AudioRecorder - Records audio and converts to PCM for Deepgram
+ * Audio recording and playback: PCM encoding for Deepgram, level metering, browser support.
  */
 export class AudioRecorder {
   constructor() {
