@@ -1,18 +1,30 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Routes, Route } from "react-router-dom";
 import { Toaster } from 'react-hot-toast';
-import { AuthProvider } from './context/AuthContext';
 import Navbar from './components/Navbar';
+import ErrorBoundary from './components/ErrorBoundary';
 import Home from "./pages/Home";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import Dashboard from './pages/Dashboard';
 import PrivateRoute from './components/PrivateRoute';
-import InterviewRoom from './pages/InterviewRoom';
+
+const InterviewRoom = lazy(() => import('./pages/InterviewRoom'));
+
+function InterviewRoomFallback() {
+  return (
+    <div className="min-h-screen bg-black flex items-center justify-center">
+      <div className="flex flex-col items-center gap-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-2 border-cyan-500 border-t-transparent" />
+        <p className="text-gray-400">Loading interview...</p>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   return (
-    <AuthProvider>
+    <>
       <Toaster
         position="top-center"
         gutter={10}
@@ -29,32 +41,35 @@ function App() {
         }}
         containerStyle={{ marginTop: 68 }}
       />
-      
-      {/* Navbar only shows on certain routes */}
+
       <Navbar />
-      
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/signin" element={<SignIn />} />
-        <Route path="/signup" element={<SignUp />} />
-        <Route
-          path="/dashboard"
-          element={
-            <PrivateRoute>
-              <Dashboard />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/interview/:sessionId"
-          element={
-            <PrivateRoute>
-              <InterviewRoom />
-            </PrivateRoute>
-          }
-        />
-      </Routes>
-    </AuthProvider>
+
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/signin" element={<SignIn />} />
+          <Route path="/signup" element={<SignUp />} />
+          <Route
+            path="/dashboard"
+            element={
+              <PrivateRoute>
+                <Dashboard />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/interview/:sessionId"
+            element={
+              <PrivateRoute>
+                <Suspense fallback={<InterviewRoomFallback />}>
+                  <InterviewRoom />
+                </Suspense>
+              </PrivateRoute>
+            }
+          />
+        </Routes>
+      </ErrorBoundary>
+    </>
   );
 }
 

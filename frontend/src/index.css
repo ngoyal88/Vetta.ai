@@ -38,6 +38,115 @@ body,
   background: #0891b2;
 }
 
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(6, 182, 212, 0.3);
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(6, 182, 212, 0.5);
+}
+
+/* LeetCode HTML content renderer */
+.lc-content {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.lc-content p {
+  margin-bottom: 0.85rem;
+  line-height: 1.7;
+  color: #d1d5db;
+}
+/* Empty spacer paragraphs LeetCode uses */
+.lc-content p:empty,
+.lc-content p > br:only-child {
+  display: none;
+}
+/* Example headings: <strong class="example">Example 1:</strong> */
+.lc-content strong.example {
+  display: block;
+  color: #9ca3af;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+}
+.lc-content pre {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin: 0.5rem 0 1rem;
+  overflow-x: auto;
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: #e6edf3;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* Bold labels inside pre blocks: Input:, Output:, Explanation: */
+.lc-content pre strong {
+  color: #58a6ff;
+  font-weight: 600;
+  background: transparent;
+}
+.lc-content code {
+  background: #1c2128;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.82em;
+  color: #79c0ff;
+}
+.lc-content pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+.lc-content ul,
+.lc-content ol {
+  padding-left: 1.5rem;
+  margin-bottom: 0.85rem;
+  color: #d1d5db;
+}
+.lc-content ul { list-style-type: disc; }
+.lc-content ol { list-style-type: decimal; }
+.lc-content li {
+  margin-bottom: 0.35rem;
+  line-height: 1.6;
+  color: #d1d5db;
+}
+.lc-content li code {
+  font-size: 0.8em;
+}
+/* Constraints section */
+.lc-content li span {
+  color: #d1d5db;
+}
+.lc-content strong {
+  color: #f0f6fc;
+  font-weight: 600;
+}
+.lc-content em { color: #d1d5db; font-style: italic; }
+.lc-content sup { font-size: 0.7em; vertical-align: super; }
+.lc-content sub { font-size: 0.7em; vertical-align: sub; }
+/* Follow-up section */
+.lc-content p strong:not(.example) {
+  color: #e2b96f;
+}
+
 /* Custom utility classes */
 .bg-dark {
   background-color: #0a0a0a;

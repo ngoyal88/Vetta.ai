@@ -1,17 +1,17 @@
 // Paste your Firebase config values below
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore"; // NEW
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCpmB7Y9aW3fz5Qg4zy2qrRu33dOf-J5tg",
-  authDomain: "mock-interview-5259f.firebaseapp.com",
-  projectId: "mock-interview-5259f",
-  storageBucket: "mock-interview-5259f.firebasestorage.app",
-  messagingSenderId: "797338571724",
-  appId: "1:797338571724:web:14f8d2798062f264168369"
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app); // NEW
+export const db = getFirestore(app);
