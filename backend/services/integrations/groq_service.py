@@ -65,3 +65,34 @@ class GroqService:
         except Exception as e:
             logger.error(f"Groq chat error: {e}", exc_info=True)
             return f"Error in chat: {str(e)}"
+
+    async def json_completion(self, system_prompt: str, user_prompt: str) -> str:
+        """
+        Generate a JSON object using Groq Chat Completions with llama-3.1-8b-instant
+        and response_format={"type": "json_object"}.
+        """
+        if not self.client:
+            return "{}"
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                model="llama-3.1-8b-instant",
+                temperature=0.0,
+                max_tokens=self.max_tokens,
+                stream=False,
+                response_format={"type": "json_object"},
+            )
+            choice = (chat_completion.choices or [None])[0]
+            content = (
+                getattr(choice, "message", None).content
+                if choice and getattr(choice, "message", None)
+                else None
+            )
+            return content or "{}"
+        except Exception as e:
+            logger.error(f"Groq JSON completion error: {e}", exc_info=True)
+            return "{}"
+

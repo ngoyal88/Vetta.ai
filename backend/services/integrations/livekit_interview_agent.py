@@ -25,9 +25,9 @@ from livekit.agents import (
 )
 from livekit.plugins import deepgram, elevenlabs, openai
 
-from services.interview_service import InterviewService
+from services.interview import InterviewService
 import json
-from services.gemini_service import GeminiService
+from services.integrations.gemini_service import GeminiService
 from config import get_settings
 from utils.redis_client import get_session, update_session
 from utils.logger import get_logger
@@ -318,10 +318,13 @@ class InterviewLLM(llm.LLM):
         if isinstance(response, dict):
             q = response.get("question")
             if isinstance(q, dict):
+                # DSA question - speak only title and brief description
                 if q.get("type") == "coding":
                     title = q.get("title", "")
                     desc = q.get("description", "")
                     return f"{title}. {desc[:200]}..."
+                
+                # Regular question
                 return q.get("question", "")
             elif isinstance(q, str):
                 return q
@@ -345,3 +348,4 @@ if __name__ == "__main__":
             ws_url=settings.livekit_url,
         )
     )
+

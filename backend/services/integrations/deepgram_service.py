@@ -209,3 +209,4 @@ class DeepgramSTTService:
             await self.connection.send_str(json.dumps(payload))
         except Exception as exc:
             logger.warning(f"⚠️ Failed to send control message to Deepgram: {exc}")
+
