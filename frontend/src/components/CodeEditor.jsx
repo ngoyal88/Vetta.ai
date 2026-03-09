@@ -143,60 +143,67 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
   };
 
   const tabStateClass = (state) => {
-    if (state === "pass") return "border-green-500 text-green-400";
+    if (state === "pass") return "border-emerald-500 text-emerald-400";
     if (state === "fail") return "border-red-500 text-red-400";
-    return "border-transparent text-gray-400 hover:text-gray-200";
+    return "border-transparent text-zinc-400 hover:text-zinc-200";
   };
 
   const allPassed = testResults && lastPassCount === lastTotalCount;
 
+  const showOutputPanel = testResults != null || runError != null || lastPassCount !== null;
+  const languages = Object.keys(languageMap);
+
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar */}
-      <div className="flex justify-between items-center mb-2 bg-gray-900 px-3 py-2 rounded-lg border border-gray-700">
-        <select
-          value={language}
-          onChange={(e) => handleLanguageChange(e.target.value)}
-          className="bg-gray-800 text-white text-sm px-3 py-1.5 rounded border border-gray-700 focus:outline-none focus:border-cyan-500"
-        >
-          {Object.keys(languageMap).map((lang) => (
-            <option key={lang} value={lang}>
-              {lang.toUpperCase()}
-            </option>
+      {/* Toolbar: pill language selector + Run */}
+      <div className="flex justify-between items-center gap-3 mb-2 flex-wrap">
+        <div className="flex flex-wrap gap-1.5 p-1 rounded-lg bg-raised border border-[var(--border-subtle)]">
+          {languages.map((lang) => (
+            <button
+              key={lang}
+              type="button"
+              onClick={() => handleLanguageChange(lang)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                language === lang
+                  ? 'bg-overlay text-cyan-400 border border-cyan-500/40'
+                  : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+              }`}
+            >
+              {lang === 'javascript' ? 'JS' : lang === 'cpp' ? 'C++' : lang.toUpperCase()}
+            </button>
           ))}
-        </select>
-
+        </div>
         <div className="flex items-center gap-2">
           {typeof onRequestNextQuestion === "function" && (
             <motion.button
-              whileHover={{ scale: loadingNextProblem ? 1 : 1.05 }}
-              whileTap={{ scale: loadingNextProblem ? 1 : 0.95 }}
+              whileHover={loadingNextProblem ? {} : { scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={onRequestNextQuestion}
               disabled={loadingNextProblem}
-              className={`px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg transition flex items-center gap-1.5${loadingNextProblem ? ' opacity-50 cursor-not-allowed' : ''}`}
+              className="px-3 py-1.5 text-sm rounded-lg border border-[var(--border-subtle)] text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
               <ChevronRight className="w-3.5 h-3.5" />
               {loadingNextProblem ? 'Loading...' : 'Next'}
             </motion.button>
           )}
           <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={loading || !question?.question_id ? {} : { scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={runCode}
             disabled={loading || !question?.question_id}
-            className="px-4 py-1.5 text-sm bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition flex items-center gap-2 font-medium"
+            className="px-4 py-1.5 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-overlay disabled:text-zinc-500 disabled:cursor-not-allowed text-white transition-colors flex items-center gap-2 font-medium"
           >
             {loading ? (
               <><Clock className="w-3.5 h-3.5 animate-spin" /> Running...</>
             ) : (
-              <><Play className="w-3.5 h-3.5" /> Run & Submit</>
+              <><Play className="w-3.5 h-3.5" /> Run</>
             )}
           </motion.button>
         </div>
       </div>
 
       {/* Monaco Editor */}
-      <div className="flex-1 border border-gray-700 rounded-lg overflow-hidden min-h-0">
+      <div className="flex-1 border border-[var(--border-subtle)] rounded-lg overflow-hidden min-h-0">
         <Editor
           height="100%"
           language={language}
@@ -216,10 +223,17 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
         />
       </div>
 
-      {/* Test Case Panel */}
-      <div className="mt-2 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden flex-shrink-0">
+      {/* Output panel: slides up when run has been executed */}
+      {showOutputPanel && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+          className="mt-2 bg-raised border border-[var(--border-subtle)] rounded-lg overflow-hidden flex-shrink-0"
+        >
         {/* Tab bar */}
-        <div className="flex items-center border-b border-gray-700 bg-gray-900/80 overflow-x-auto">
+        <div className="flex items-center border-b border-[var(--border-subtle)] overflow-x-auto">
           {/* Visible test case tabs */}
           {(visibleCases.length > 0 ? visibleCases : [{}, {}]).map((tc, i) => {
             const state = getTabState(i);
@@ -230,7 +244,7 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
                 onClick={() => setActiveTestTab(`case-${i}`)}
                 className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 flex-shrink-0 transition-colors ${
                   isActive
-                    ? (state === "pass" ? "border-green-500 text-green-400" : state === "fail" ? "border-red-500 text-red-400" : "border-cyan-400 text-cyan-400")
+                    ? (state === "pass" ? "border-emerald-500 text-emerald-400" : state === "fail" ? "border-red-500 text-red-400" : "border-cyan-500 text-cyan-400")
                     : tabStateClass(state)
                 }`}
               >
@@ -241,24 +255,52 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
             );
           })}
 
-          {/* Result tab — always visible after run */}
-          {(testResults || runError || lastPassCount !== null) && (
+          {/* Test Cases summary tab */}
+          {testResults && (
             <button
-              onClick={() => setActiveTestTab("result")}
+              onClick={() => setActiveTestTab("tests")}
               className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 flex-shrink-0 transition-colors ${
-                activeTestTab === "result"
-                  ? (allPassed ? "border-green-500 text-green-400" : "border-red-500 text-red-400")
-                  : (allPassed ? "border-transparent text-green-500 hover:text-green-400" : "border-transparent text-red-500 hover:text-red-400")
+                activeTestTab === "tests"
+                  ? (allPassed ? "border-emerald-500 text-emerald-400" : "border-red-500 text-red-400")
+                  : "border-transparent text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              {allPassed ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-              Result
+              Test Cases
             </button>
           )}
+          {/* Result tab */}
+          <button
+            onClick={() => setActiveTestTab("result")}
+            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 flex-shrink-0 transition-colors ${
+              activeTestTab === "result"
+                ? (allPassed ? "border-emerald-500 text-emerald-400" : "border-red-500 text-red-400")
+                : (allPassed ? "border-transparent text-emerald-500 hover:text-emerald-400" : "border-transparent text-red-500 hover:text-red-400")
+            }`}
+          >
+            {allPassed ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+            Result
+          </button>
         </div>
 
         {/* Tab content */}
         <div className="p-3 h-40 overflow-y-auto custom-scrollbar">
+          {/* Test Cases tab: pass/fail chips with execution time */}
+          {activeTestTab === "tests" && testResults && (
+            <div className="flex flex-wrap gap-2">
+              {testResults.map((r, i) => (
+                <span
+                  key={i}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                    r.passed ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30'
+                  }`}
+                >
+                  {r.passed ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                  {r.hidden ? `Hidden ${i + 1}` : `Case ${i + 1}`}
+                  {r.time != null && <span className="text-zinc-500 font-mono">{r.time}s</span>}
+                </span>
+              ))}
+            </div>
+          )}
           {/* Case tabs */}
           {activeTestTab.startsWith("case-") && (() => {
             const idx = parseInt(activeTestTab.split("-")[1], 10);
@@ -268,15 +310,15 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
             return (
               <div className="space-y-2 text-xs font-mono">
                 <div>
-                  <span className="text-gray-500 font-sans font-medium text-xs">Input</span>
-                  <pre className="mt-1 bg-gray-800 text-gray-200 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap text-xs">
-                    {tc.input != null ? String(tc.input) : <span className="text-gray-500 italic">Not available</span>}
+                  <span className="text-zinc-500 font-sans font-medium text-xs">Input</span>
+                  <pre className="mt-1 bg-overlay text-zinc-200 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap text-xs">
+                    {tc.input != null ? String(tc.input) : <span className="text-zinc-500 italic">Not available</span>}
                   </pre>
                 </div>
                 <div>
-                  <span className="text-gray-500 font-sans font-medium text-xs">Expected Output</span>
-                  <pre className="mt-1 bg-gray-800 text-gray-200 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap text-xs">
-                    {tc.output != null ? String(tc.output) : tc.expected_output != null ? String(tc.expected_output) : <span className="text-gray-500 italic">Not available</span>}
+                  <span className="text-zinc-500 font-sans font-medium text-xs">Expected Output</span>
+                  <pre className="mt-1 bg-overlay text-zinc-200 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap text-xs">
+                    {tc.output != null ? String(tc.output) : tc.expected_output != null ? String(tc.expected_output) : <span className="text-zinc-500 italic">Not available</span>}
                   </pre>
                 </div>
                 {result && (
@@ -296,7 +338,7 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
                   </div>
                 )}
                 {!result && (
-                  <p className="text-gray-500 text-xs italic font-sans">Run your code to see output.</p>
+                  <p className="text-zinc-500 text-xs italic font-sans">Run your code to see output.</p>
                 )}
               </div>
             );
@@ -312,32 +354,33 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
                 </div>
               ) : testResults ? (
                 <>
-                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold ${allPassed ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold ${allPassed ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'}`}>
                     {allPassed ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                     {lastPassCount}/{lastTotalCount} test cases passed
                   </div>
                   <div className="space-y-1">
                     {testResults.map((r, i) => (
-                      <div key={i} className={`flex items-center gap-2 text-xs px-2 py-1 rounded ${r.passed ? 'text-green-400' : 'text-red-400'}`}>
+                      <div key={i} className={`flex items-center gap-2 text-xs px-2 py-1 rounded ${r.passed ? 'text-emerald-400' : 'text-red-400'}`}>
                         {r.passed ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                         {r.hidden ? `Hidden test ${i + 1}` : `Case ${i + 1}`}
                         {r.status && r.status !== 'Accepted' && (
-                          <span className="text-gray-500 ml-1">— {r.status}</span>
+                          <span className="text-zinc-500 ml-1">— {r.status}</span>
                         )}
                         {r.time != null && (
-                          <span className="text-gray-600 ml-auto">{r.time}s</span>
+                          <span className="text-zinc-500 ml-auto font-mono">{r.time}s</span>
                         )}
                       </div>
                     ))}
                   </div>
                 </>
               ) : (
-                <p className="text-gray-500 text-xs italic">Run your code to see results.</p>
+                <p className="text-zinc-500 text-xs italic">Run your code to see results.</p>
               )}
             </div>
           )}
         </div>
-      </div>
+        </motion.div>
+      )}
     </div>
   );
 };

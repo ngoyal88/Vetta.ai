@@ -1,43 +1,90 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { Mic, MicOff, Send } from 'lucide-react';
 
 export default function VoiceControlBar({
-  micEnabled, isRecording, aiSpeaking, audioLevel,
-  onToggleMic, onStartRecording, onStopRecording, onSubmitAnswer,
+  micEnabled,
+  isRecording,
+  aiSpeaking,
+  onToggleMic,
+  onStartRecording,
+  onStopRecording,
+  onSubmitAnswer,
 }) {
+  const reducedMotion = useReducedMotion();
+
   return (
-    <div className="relative z-10 px-6 py-4 bg-black/80 backdrop-blur-md border-t border-cyan-600/20">
-      <div className="max-w-3xl mx-auto flex items-center justify-center gap-4">
-        <motion.button type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => onToggleMic(!micEnabled)}
-          className={"p-4 rounded-xl border-2 transition focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-black " + (micEnabled ? "bg-cyan-500/20 border-cyan-500/50 text-cyan-400" : "bg-gray-700/50 border-gray-600 text-gray-400")}
-          aria-label={micEnabled ? 'Mute microphone' : 'Unmute microphone'}>
+    <div
+      className="fixed bottom-12 left-1/2 -translate-x-1/2 z-20 px-6 py-3 rounded-2xl bg-base/80 backdrop-blur-xl border border-[var(--border-subtle)] shadow-xl"
+      style={{ maxWidth: 'min(90vw, 360px)' }}
+    >
+      <div className="flex items-center justify-center gap-4">
+        <motion.button
+          type="button"
+          whileHover={reducedMotion ? {} : { scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => onToggleMic(!micEnabled)}
+          className={
+            'p-3 rounded-xl border transition-colors duration-150 ' +
+            (micEnabled
+              ? 'bg-overlay border-cyan-500/40 text-cyan-400'
+              : 'bg-overlay border-[var(--border-subtle)] text-zinc-500')
+          }
+          aria-label={micEnabled ? 'Mute microphone' : 'Unmute microphone'}
+        >
           {micEnabled ? <Mic className="w-5 h-5" aria-hidden /> : <MicOff className="w-5 h-5" aria-hidden />}
         </motion.button>
-        {!isRecording ? (
-          <motion.button type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={onStartRecording} disabled={!micEnabled || aiSpeaking}
-            className="px-8 py-4 bg-cyan-600 rounded-xl text-white font-medium hover:bg-cyan-500 transition disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-black" aria-label="Start talking">
-            Start Talking
-          </motion.button>
-        ) : (
-          <motion.button type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={onStopRecording}
-            className="px-8 py-4 bg-gray-600 rounded-xl text-white font-medium hover:bg-gray-500 transition focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-black" aria-label="Pause recording">
-            Pause
-          </motion.button>
-        )}
-        <motion.button type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={onSubmitAnswer} disabled={aiSpeaking}
-          className={"px-8 py-4 rounded-xl font-medium transition flex items-center gap-2 focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-black " + (aiSpeaking ? "bg-gray-700/50 text-gray-400 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-500")}
-          aria-label={aiSpeaking ? 'Wait for AI to finish speaking' : "I'm done, submit answer"}>
-          <Send className="w-5 h-5" aria-hidden /> I'm Done
+
+        {/* 64px record button: idle=empty, recording=red dot + pulse ring, processing=spinner */}
+        <motion.button
+          type="button"
+          whileHover={reducedMotion ? {} : { scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={isRecording ? onStopRecording : onStartRecording}
+          disabled={!micEnabled || aiSpeaking}
+          className={
+            'relative w-16 h-16 rounded-full flex items-center justify-center border-2 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed ' +
+            (isRecording
+              ? 'border-cyan-500 bg-base ring-4 ring-cyan-500/30'
+              : 'border-[var(--border-subtle)] bg-overlay hover:border-cyan-500/50')
+          }
+          aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+        >
+          {isRecording && (
+            <motion.span
+              className="absolute inset-0 rounded-full border-2 border-cyan-500"
+              animate={reducedMotion ? {} : { scale: [1, 1.15, 1], opacity: [0.6, 0.2, 0.6] }}
+              transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+            />
+          )}
+          {isRecording ? (
+            <span className="relative w-4 h-4 rounded-full bg-red-500" aria-hidden />
+          ) : (
+            <span className="relative w-3 h-3 rounded-full bg-zinc-500" aria-hidden />
+          )}
+        </motion.button>
+
+        <motion.button
+          type="button"
+          whileHover={reducedMotion ? {} : { scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onSubmitAnswer}
+          disabled={aiSpeaking}
+          className={
+            'p-3 rounded-xl border transition-colors duration-150 flex items-center justify-center ' +
+            (aiSpeaking
+              ? 'bg-overlay border-[var(--border-subtle)] text-zinc-500 cursor-not-allowed'
+              : 'bg-overlay border-emerald-500/40 text-emerald-400 hover:border-emerald-500/60')
+          }
+          aria-label={aiSpeaking ? 'Wait for AI to finish' : "I'm done, submit answer"}
+        >
+          <Send className="w-5 h-5" aria-hidden />
         </motion.button>
       </div>
-      {isRecording && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-3 max-w-3xl mx-auto">
-          <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
-            <motion.div className="h-full bg-cyan-400" style={{ width: Math.min(audioLevel * 100, 100) + '%' }} transition={{ duration: 0.1 }} />
-          </div>
-        </motion.div>
-      )}
+      <p className="text-center text-zinc-600 text-xs mt-2">
+        <span className="sr-only">Shortcuts: </span>
+        Space to record · Enter to submit
+      </p>
     </div>
   );
 }

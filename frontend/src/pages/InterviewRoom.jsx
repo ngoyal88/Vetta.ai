@@ -11,7 +11,6 @@ import CodeEditor from "../components/CodeEditor";
 import DSAQuestionDisplay from "../components/DSAQuestionDisplay";
 import InterviewRoomHeader from "../components/InterviewRoomHeader";
 import VoiceControlBar from "../components/VoiceControlBar";
-import TranscriptBlock from "../components/TranscriptBlock";
 import FeedbackCard from "../components/FeedbackCard";
 import DSASplitLayout from "../components/DSASplitLayout";
 import { fadeInUp, slidePhase } from "../utils/animations";
@@ -117,16 +116,15 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
     onBack();
   };
 
-  // Post-interview view: scrollable feedback + sticky "Back to Dashboard" so user is never stuck
+  // Post-interview view: scrollable feedback + sticky "Back to Dashboard"
   if (interviewEnded) {
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-br from-black via-gray-900 to-black overflow-hidden">
+      <div className="h-screen flex flex-col bg-base overflow-hidden">
         {errorAnnouncer}
-        {/* Scrollable content: title + feedback (or loading state) */}
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-6 sm:p-8 max-w-3xl mx-auto w-full">
             <h1 className="text-2xl font-bold text-white mb-2">Thank you for completing the interview</h1>
-            <p className="text-gray-400 mb-6">
+            <p className="text-zinc-500 mb-6">
               {feedback ? 'Here is your feedback.' : 'Generating your feedback...'}
             </p>
             {feedback ? (
@@ -137,18 +135,17 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
             ) : (
               <div className="flex flex-col items-center gap-4 py-8">
                 <div className="h-10 w-10 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" aria-hidden />
-                <p className="text-gray-500 text-sm">This may take a moment.</p>
+                <p className="text-zinc-500 text-sm">This may take a moment.</p>
               </div>
             )}
           </div>
         </div>
-        {/* Sticky footer: primary CTA always visible so user can always go back */}
-        <footer className="flex-shrink-0 p-6 border-t border-gray-800/80 bg-black/40">
+        <footer className="flex-shrink-0 p-6 border-t border-[var(--border-subtle)] bg-raised">
           <div className="max-w-3xl mx-auto w-full">
             <button
               type="button"
               onClick={handleBackAfterFeedback}
-              className="w-full py-3 px-6 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+              className="w-full h-10 px-6 rounded-lg bg-overlay border border-cyan-500 text-white font-medium hover:border-cyan-400 transition-colors"
             >
               {feedback ? 'Back to Dashboard' : 'Back to Dashboard without waiting'}
             </button>
@@ -159,7 +156,7 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-black via-gray-900 to-black overflow-hidden">
+    <div className="h-screen flex flex-col bg-base overflow-hidden">
       {errorAnnouncer}
       <InterviewRoomHeader
         connected={connected}
@@ -180,22 +177,22 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
                   currentQuestion
                     ? <DSAQuestionDisplay question={currentQuestion} />
                     : (
-                        <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 animate-pulse space-y-4 h-full">
+                        <div className="bg-overlay p-6 rounded-xl border border-[var(--border-subtle)] animate-pulse space-y-4 h-full">
                           <div className="flex justify-between items-center">
-                            <div className="h-6 bg-gray-700 rounded w-2/3" />
-                            <div className="h-5 bg-gray-700 rounded w-16" />
+                            <div className="h-6 bg-raised rounded w-2/3" />
+                            <div className="h-5 bg-raised rounded w-16" />
                           </div>
                           <div className="space-y-2">
-                            <div className="h-4 bg-gray-700 rounded w-full" />
-                            <div className="h-4 bg-gray-700 rounded w-5/6" />
-                            <div className="h-4 bg-gray-700 rounded w-4/6" />
+                            <div className="h-4 bg-raised rounded w-full" />
+                            <div className="h-4 bg-raised rounded w-5/6" />
+                            <div className="h-4 bg-raised rounded w-4/6" />
                           </div>
-                          <div className="h-4 bg-gray-700 rounded w-1/3 mt-4" />
+                          <div className="h-4 bg-raised rounded w-1/3 mt-4" />
                           <div className="space-y-2">
-                            <div className="h-3 bg-gray-700 rounded w-full" />
-                            <div className="h-3 bg-gray-700 rounded w-3/4" />
+                            <div className="h-3 bg-raised rounded w-full" />
+                            <div className="h-3 bg-raised rounded w-3/4" />
                           </div>
-                          <p className="text-xs text-gray-500 pt-2">
+                          <p className="text-xs text-zinc-500 pt-2">
                             {loadingNextProblem ? 'Loading next problem...' : 'Loading problem...'}
                           </p>
                         </div>
@@ -213,39 +210,27 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
             </motion.div>
           ) : (
             <motion.div key="voice" {...slidePhase.voice} className="h-full flex flex-col">
-              <div className="flex-1 flex items-center justify-center p-6 min-h-0">
-                <div className="w-full max-w-3xl">
-                  <div className="relative h-[400px] rounded-2xl overflow-hidden border border-cyan-600/20 bg-black/40 backdrop-blur-sm shadow-inner">
+              <div className="flex-1 flex flex-col items-center justify-center p-6 min-h-0">
+                <div className="w-full max-w-2xl flex flex-col items-center">
+                  <div className="relative w-full aspect-square max-h-[320px] flex items-center justify-center">
                     <AudioVisualizer isSpeaking={aiSpeaking} audioLevel={audioLevel} />
-                    <div className="absolute top-4 left-4 px-4 py-2 bg-black/60 backdrop-blur-md rounded-full border border-cyan-500/30">
-                      <span className="text-sm font-medium text-cyan-400">
-                        {aiSpeaking ? 'AI Speaking...' : 'Listening...'}
-                      </span>
-                    </div>
                   </div>
-                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-center mt-4">
-                    <h2 className="text-xl font-bold text-white">AI Interviewer</h2>
-                    <p className="text-sm text-gray-400 mt-1">
-                      {aiSpeaking ? 'Speaking now...' : isRecording ? 'Recording your response...' : 'Ready to listen'}
-                    </p>
-                  </motion.div>
+                  <p className="text-sm font-medium text-white mt-4">AI Interviewer</p>
+                  <p className="text-sm text-zinc-500 mt-1">
+                    {aiSpeaking ? 'Speaking...' : 'Listening...'}
+                  </p>
                 </div>
               </div>
-              <div className="px-6 pb-6 space-y-4 max-w-5xl mx-auto w-full">
-                <AnimatePresence>
-                  {(aiFullText || aiText) && (
-                    <motion.div {...fadeInUp}>
-                      <Subtitles text={aiFullText || aiText} isSpeaking={aiSpeaking} wpm={aiSpeechWpm || 180} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                <AnimatePresence>
-                  {(transcriptFinal || transcriptInterim) && (
-                    <motion.div {...fadeInUp}>
-                      <TranscriptBlock label="You" text={transcriptFinal} interim={transcriptInterim} className="bg-blue-500/10 border-blue-500/30 text-blue-100" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+              <Subtitles text={aiFullText || aiText} isSpeaking={aiSpeaking} wpm={aiSpeechWpm || 180} />
+              <div className="absolute left-1/2 -translate-x-1/2 text-center w-full max-w-[600px] px-4 pointer-events-none z-10" style={{ bottom: 'calc(30% - 3rem)' }}>
+                {(transcriptFinal || transcriptInterim) && (
+                  <p className="text-sm text-cyan-500/90">
+                    You: {transcriptFinal}
+                    {transcriptInterim && <span className="opacity-70"> {transcriptInterim}</span>}
+                  </p>
+                )}
+              </div>
+              <div className="px-6 pb-32 max-w-3xl mx-auto w-full">
                 <AnimatePresence>
                   {feedback && (
                     <motion.div {...fadeInUp}>

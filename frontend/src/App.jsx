@@ -13,10 +13,10 @@ const InterviewRoom = lazy(() => import('./pages/InterviewRoom'));
 
 function InterviewRoomFallback() {
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center">
+    <div className="min-h-screen bg-base flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-2 border-cyan-500 border-t-transparent" />
-        <p className="text-gray-400">Loading interview...</p>
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-cyan-500 border-t-transparent" />
+        <p className="text-zinc-500 text-sm">Loading interview...</p>
       </div>
     </div>
   );
@@ -27,19 +27,20 @@ function App() {
     <>
       <Toaster
         position="top-center"
-        gutter={10}
+        gutter={8}
+        limit={1}
         toastOptions={{
           duration: 3200,
           style: {
-            background: '#0b1324',
-            color: '#e5f6ff',
-            border: '1px solid rgba(34, 211, 238, 0.28)',
-            boxShadow: '0 10px 40px rgba(0,0,0,0.35)'
+            background: 'var(--bg-surface)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border-subtle)',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
           },
-          success: { iconTheme: { primary: '#22d3ee', secondary: '#0b1324' } },
-          error: { iconTheme: { primary: '#f43f5e', secondary: '#0b1324' } }
+          success: { iconTheme: { primary: 'var(--success)', secondary: 'var(--bg-surface)' } },
+          error: { iconTheme: { primary: 'var(--error)', secondary: 'var(--bg-surface)' } },
         }}
-        containerStyle={{ marginTop: 68 }}
+        containerStyle={{ marginTop: 56 }}
       />
 
       <Navbar />

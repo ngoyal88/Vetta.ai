@@ -17,7 +17,7 @@ function renderHintWithCode(hint) {
       parts.push(hint.slice(lastIndex, m.index));
     }
     parts.push(
-      <code key={m.index} className="px-1.5 py-0.5 rounded bg-gray-800 text-cyan-300 font-mono text-xs border border-gray-600">
+      <code key={m.index} className="px-1.5 py-0.5 rounded bg-overlay text-cyan-400 font-mono text-xs border border-[var(--border-subtle)]">
         {m[1]}
       </code>
     );
@@ -27,10 +27,10 @@ function renderHintWithCode(hint) {
   return parts.length ? parts : hint;
 }
 
-const difficultyColors = {
-  easy: "bg-green-900/60 text-green-300 border-green-700",
-  medium: "bg-yellow-900/60 text-yellow-300 border-yellow-700",
-  hard: "bg-red-900/60 text-red-300 border-red-700",
+const difficultyBorder = {
+  easy: "border-l-green-500",
+  medium: "border-l-amber-500",
+  hard: "border-l-red-500",
 };
 
 const DSAQuestionDisplay = ({ question }) => {
@@ -38,7 +38,7 @@ const DSAQuestionDisplay = ({ question }) => {
 
   if (!question) {
     return (
-      <div className="text-center text-gray-400 py-8">
+      <div className="text-center text-zinc-500 py-8 text-sm">
         No question selected.
       </div>
     );
@@ -64,59 +64,51 @@ const DSAQuestionDisplay = ({ question }) => {
   const tags = Array.isArray(question.tags) ? question.tags : [];
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
-      {/* Header */}
-      <div className="px-5 pt-4 pb-0 border-b border-gray-700">
-        <div className="flex justify-between items-start mb-3">
-          <h2 className="text-lg font-bold text-white leading-tight pr-4">
+    <div className="flex flex-col h-full bg-raised rounded-xl border border-[var(--border-subtle)] overflow-hidden">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 px-4 pt-4 pb-0 border-b border-[var(--border-subtle)] bg-raised">
+        <div className="flex justify-between items-start gap-2 mb-3">
+          <h2 className="text-base font-semibold text-white leading-tight font-sans">
             {question.title || "Problem Title"}
           </h2>
           <span
-            className={`flex-shrink-0 text-xs px-2.5 py-1 rounded-full font-semibold border ${
-              difficultyColors[question.difficulty] || "bg-gray-700 text-gray-300 border-gray-600"
+            className={`flex-shrink-0 text-xs pl-2.5 py-1 border-l-2 font-medium text-zinc-400 ${
+              difficultyBorder[question.difficulty] || "border-l-zinc-600"
             }`}
           >
             {(question.difficulty || "unknown").charAt(0).toUpperCase() + (question.difficulty || "unknown").slice(1)}
           </span>
         </div>
-
-        {/* Tags */}
         {tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-3">
             {tags.map((tag, i) => (
-              <span key={i} className="flex items-center gap-1 text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded border border-gray-700">
+              <span key={i} className="flex items-center gap-1 text-xs text-zinc-500 px-2 py-0.5 rounded border border-[var(--border-subtle)]">
                 <Tag className="w-2.5 h-2.5" />
                 {tag}
               </span>
             ))}
           </div>
         )}
-
-        {/* Tab bar */}
         <div className="flex gap-0">
           {TABS.map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-3 py-2 text-xs font-medium rounded-l-lg border-l-2 transition-colors ${
                 activeTab === tab
-                  ? "border-cyan-400 text-cyan-400"
-                  : "border-transparent text-gray-400 hover:text-gray-200"
+                  ? "bg-overlay text-cyan-400 border-cyan-500"
+                  : "text-zinc-500 hover:text-zinc-300 border-transparent hover:bg-overlay/50"
               }`}
             >
               {tab}
               {tab === "Hints" && hints.length > 0 && (
-                <span className="ml-1.5 text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded-full">
-                  {hints.length}
-                </span>
+                <span className="ml-1 text-zinc-500">{hints.length}</span>
               )}
             </button>
           ))}
         </div>
       </div>
-
-      {/* Tab content */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-5">
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
         <AnimatePresence mode="wait">
           {activeTab === "Problem" && (
             <motion.div
@@ -134,21 +126,21 @@ const DSAQuestionDisplay = ({ question }) => {
                     dangerouslySetInnerHTML={{ __html: question.description }}
                   />
                 ) : (
-                  <div className="lc-content text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">
+                  <div className="lc-content text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono">
                     {question.description}
                   </div>
                 )
               ) : (
-                <p className="text-sm text-gray-500 italic">No description available.</p>
+                <p className="text-sm text-zinc-500 italic">No description available.</p>
               )}
 
               {/* Constraints */}
               {question.constraints && question.constraints.length > 0 && (
                 <div className="mt-4">
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Constraints</h3>
+                  <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Constraints</h3>
                   <ul className="space-y-1">
                     {question.constraints.map((c, idx) => (
-                      <li key={idx} className="text-sm text-gray-300 font-mono bg-gray-800/50 px-3 py-1 rounded border-l-2 border-cyan-700">
+                      <li key={idx} className="text-sm text-zinc-300 font-mono bg-overlay px-3 py-1 rounded border-l-2 border-cyan-500">
                         {c}
                       </li>
                     ))}
@@ -160,14 +152,14 @@ const DSAQuestionDisplay = ({ question }) => {
               {(question.time_complexity_expected || question.space_complexity_expected) && (
                 <div className="mt-4 flex gap-4">
                   {question.time_complexity_expected && (
-                    <div className="text-xs text-gray-400">
-                      <span className="text-gray-500">Expected Time:</span>{" "}
+                    <div className="text-xs text-zinc-400">
+                      <span className="text-zinc-500">Expected Time:</span>{" "}
                       <code className="text-cyan-400 font-mono">{question.time_complexity_expected}</code>
                     </div>
                   )}
                   {question.space_complexity_expected && (
-                    <div className="text-xs text-gray-400">
-                      <span className="text-gray-500">Expected Space:</span>{" "}
+                    <div className="text-xs text-zinc-400">
+                      <span className="text-zinc-500">Expected Space:</span>{" "}
                       <code className="text-cyan-400 font-mono">{question.space_complexity_expected}</code>
                     </div>
                   )}
@@ -185,7 +177,7 @@ const DSAQuestionDisplay = ({ question }) => {
               transition={{ duration: 0.15 }}
             >
               {displayExamples.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">No examples available.</p>
+                <p className="text-sm text-zinc-500 text-center py-8">No examples available.</p>
               ) : (
                 <div className="space-y-4">
                   {displayExamples.map((ex, i) => {
@@ -196,9 +188,9 @@ const DSAQuestionDisplay = ({ question }) => {
                     const paramNames = question.function_signature?.params;
                     const showMultipleInputs = inputLines.length > 1;
                     return (
-                      <div key={i} className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-                        <div className="px-3 py-1.5 bg-gray-750 border-b border-gray-700">
-                          <span className="text-xs font-semibold text-gray-400">Example {i + 1}</span>
+                      <div key={i} className="bg-overlay rounded-lg border border-[var(--border-subtle)] overflow-hidden">
+                        <div className="px-3 py-1.5 bg-raised border-b border-[var(--border-subtle)]">
+                          <span className="text-xs font-semibold text-zinc-400">Example {i + 1}</span>
                         </div>
                         <div className="p-3 space-y-2 text-sm font-mono">
                           {showMultipleInputs ? (
@@ -208,25 +200,25 @@ const DSAQuestionDisplay = ({ question }) => {
                                 : `Input ${j + 1}`;
                               return (
                                 <div key={j}>
-                                  <span className="text-gray-500 text-xs font-sans font-medium">{label}</span>
-                                  <pre className="mt-1 text-gray-200 bg-gray-900/60 rounded px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap">{line}</pre>
+                                  <span className="text-zinc-500 text-xs font-sans font-medium">{label}</span>
+                                  <pre className="mt-1 text-zinc-200 bg-raised rounded px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap">{line}</pre>
                                 </div>
                               );
                             })
                           ) : (
                             <div>
-                              <span className="text-gray-500 text-xs font-sans font-medium">Input</span>
-                              <pre className="mt-1 text-gray-200 bg-gray-900/60 rounded px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap">{inputStr}</pre>
+                              <span className="text-zinc-500 text-xs font-sans font-medium">Input</span>
+                              <pre className="mt-1 text-zinc-200 bg-raised rounded px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap">{inputStr}</pre>
                             </div>
                           )}
                           <div>
-                            <span className="text-gray-500 text-xs font-sans font-medium">Output</span>
-                            <pre className="mt-1 text-green-300 bg-gray-900/60 rounded px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap">{String(ex.output ?? ex.expected_output ?? "")}</pre>
+                            <span className="text-zinc-500 text-xs font-sans font-medium">Output</span>
+                            <pre className="mt-1 text-emerald-300 bg-raised rounded px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap">{String(ex.output ?? ex.expected_output ?? "")}</pre>
                           </div>
                           {ex.explanation && (
                             <div>
-                              <span className="text-gray-500 text-xs font-sans font-medium">Explanation</span>
-                              <p className="mt-1 text-gray-300 text-xs leading-relaxed">{ex.explanation}</p>
+                              <span className="text-zinc-500 text-xs font-sans font-medium">Explanation</span>
+                              <p className="mt-1 text-zinc-300 text-xs leading-relaxed">{ex.explanation}</p>
                             </div>
                           )}
                         </div>
@@ -247,7 +239,7 @@ const DSAQuestionDisplay = ({ question }) => {
               transition={{ duration: 0.15 }}
             >
               {hints.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">No hints available for this problem.</p>
+                <p className="text-sm text-zinc-500 text-center py-8">No hints available for this problem.</p>
               ) : (
                 <div className="space-y-3">
                   {hints.map((hint, i) => (
