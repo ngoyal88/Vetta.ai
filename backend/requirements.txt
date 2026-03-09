@@ -42,3 +42,7 @@ python-dotenv==1.0.1
 aiohttp
 aiofiles
 tenacity
+
+# Monitoring / Error Tracking
+sentry-sdk[fastapi]>=2.0.0
+sentry_sdk

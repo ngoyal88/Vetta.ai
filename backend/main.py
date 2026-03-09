@@ -1,14 +1,33 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import resume, interview_session, websocket_routes
+from routes import resume, websocket_routes
+from services.interview import InterviewService
+from routes.interview import router as interview_router
 from config import get_settings
 from utils.logger import setup_logging, get_logger
 from utils.redis_client import test_connection, close_redis
-from services.interview_service import InterviewService
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 setup_logging()
 log = get_logger(__name__)
 settings = get_settings()
+
+if getattr(settings, "sentry_dsn", ""):
+    sentry_logging = LoggingIntegration(
+        level="INFO",
+        event_level="ERROR",
+    )
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        integrations=[
+            FastApiIntegration(),
+            sentry_logging,
+        ],
+        traces_sample_rate=0.0,
+        profiles_sample_rate=0.0,
+    )
 
 app = FastAPI(
     title="AI Interviewer Platform API",
@@ -16,18 +35,21 @@ app = FastAPI(
     description="AI-powered interview platform (WebSocket voice MVP)"
 )
 
-# CORS
+# CORS: from ALLOWED_ORIGINS env. In production, set it explicitly (include your frontend URL).
+_origins = settings.allowed_origins_list()
+if not _origins:
+    _origins = ["http://localhost:3000", "http://localhost:5173", "http://localhost:5174"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=settings.allowed_origin_regex_value(),
 )
 
-# Include routers
 app.include_router(resume.router)
-app.include_router(interview_session.router)
+app.include_router(interview_router)
 app.include_router(websocket_routes.router)
 app.include_router(websocket_routes.legacy_router)
 
@@ -36,16 +58,13 @@ async def startup_event():
     """Startup tasks"""
     log.info("🚀 Starting AI Interviewer Platform v1.0.0 (WebSocket MVP)")
     
-    # Test Redis
     redis_ok = await test_connection()
     if redis_ok:
         log.info("✅ Redis connected")
     else:
         log.warning("⚠️ Redis connection failed")
     
-    # Log configured services
     services = []
-    # LLM provider summary
     try:
         if (settings.llm_provider or "gemini").lower() == "groq":
             services.append("✅ Groq LLM" if settings.groq_api_key else "⚠️ Groq LLM (missing key)")
@@ -57,8 +76,6 @@ async def startup_event():
         services.append("✅ Judge0 Code Execution")
     if settings.deepgram_api_key:
         services.append("✅ Deepgram STT")
-    # TTS provider: Edge by default (no key required).
-    # Switch back later by setting TTS_PROVIDER=elevenlabs and providing ELEVENLABS_API_KEY.
     if (getattr(settings, "tts_provider", "edge") or "edge").lower() == "edge":
         services.append("✅ Edge TTS")
     elif settings.elevenlabs_api_key:
@@ -68,7 +85,6 @@ async def startup_event():
     
     log.info(f"Services: {', '.join(services) if services else 'None'}")
 
-    # LLM selection diagnostic
     try:
         _svc = InterviewService()
         log.info(
@@ -143,6 +159,13 @@ async def health_check():
         "version": "1.0.0",
         "services": services,
     }
+
+
+@app.get("/health/ready")
+async def readiness_check():
+    """Readiness: Redis only. Use for k8s/orchestrator to know the app can serve traffic."""
+    redis_ok = await test_connection()
+    return {"ready": redis_ok, "redis": redis_ok}
 
 
 if __name__ == "__main__":

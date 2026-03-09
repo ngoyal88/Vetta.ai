@@ -8,17 +8,38 @@ from config import get_settings
 log = get_logger(__name__)
 settings = get_settings()
 
-# ------------------------------------------------------------------ #
-# Redis client init
-# ------------------------------------------------------------------ #
-redis = Redis(
-    host=settings.redis_host,
-    port=int(settings.redis_port),
-    password=settings.redis_password or os.getenv("REDIS_PASSWORD"),
-    db=getattr(settings, "redis_db", 0),
-    decode_responses=True,
-    ssl=True,
-)
+# Redis: REDIS_URL (Upstash) or host/port for local
+_redis_url = (os.environ.get("REDIS_URL") or getattr(settings, "redis_url", "") or "").strip()
+
+# redis-py expects rediss:// for TLS, not https://. Upstash often shows https; normalize.
+if _redis_url.lower().startswith("https://"):
+    _redis_url = "rediss://" + _redis_url[8:]
+
+if _redis_url:
+    # Upstash or any Redis via single URL (e.g. rediss://default:PASS@host:6379)
+    # Use Redis (TCP) URL from Upstash dashboard "Redis Connect", not the REST URL.
+    redis = Redis.from_url(
+        _redis_url,
+        decode_responses=True,
+        socket_connect_timeout=10,
+        socket_keepalive=True,
+        health_check_interval=30,
+    )
+else:
+    _redis_host = os.environ.get("REDIS_HOST") or settings.redis_host
+    _redis_port = os.environ.get("REDIS_PORT")
+    _redis_port = int(_redis_port) if _redis_port else settings.redis_port
+    _redis_ssl_raw = os.environ.get("REDIS_SSL", "").strip().lower()
+    _redis_ssl = _redis_ssl_raw in ("1", "true", "yes")
+
+    redis = Redis(
+        host=_redis_host,
+        port=_redis_port,
+        password=settings.redis_password or os.getenv("REDIS_PASSWORD") or None,
+        db=getattr(settings, "redis_db", 0),
+        decode_responses=True,
+        ssl=_redis_ssl,
+    )
 
 
 async def close_redis() -> None:
@@ -42,12 +63,8 @@ async def close_redis() -> None:
             if result is not None:
                 await result
     except Exception:
-        # Don't crash shutdown on cleanup.
-        pass
+        pass  # Don't crash shutdown on cleanup.
 
-# ------------------------------------------------------------------ #
-# Connection test
-# ------------------------------------------------------------------ #
 async def test_connection():
     try:
         pong = await redis.ping()
@@ -56,11 +73,13 @@ async def test_connection():
             return True
     except Exception as e:
         log.error(f"❌ Redis connection failed: {e}", exc_info=True)
+        if "closed by server" in str(e).lower() or "connection" in str(e).lower():
+            log.warning(
+                "If using Upstash: set REDIS_URL to the Redis (TCP) URL from the "
+                "dashboard (Redis Connect), e.g. rediss://default:YOUR_PASSWORD@host:6379 — not the REST URL."
+            )
     return False
 
-# ------------------------------------------------------------------ #
-# Session management (all JSON-based)
-# ------------------------------------------------------------------ #
 async def create_session(session_id: str, data: dict, expire_seconds: int = 3600):
     """Create or overwrite a session (JSON-encoded)."""
     try:
