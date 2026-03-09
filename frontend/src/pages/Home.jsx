@@ -271,7 +271,7 @@ const Features = () => {
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            whileHover={{ boxShadow: '0 20px 40px -15px rgba(0,0,0,0.4), 0 0 0 1px rgba(6,182,212,0.15)' }}
+            whileHover={reducedMotion ? undefined : { boxShadow: '0 20px 40px -15px rgba(0,0,0,0.4), 0 0 0 1px rgba(6,182,212,0.15)' }}
             className="md:col-span-2 md:row-span-2 p-8 rounded-2xl bg-raised border border-[var(--border-subtle)] transition-shadow duration-150"
           >
             <div className="flex items-center gap-3 mb-6">
@@ -292,7 +292,7 @@ const Features = () => {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.05 }}
-            whileHover={{ boxShadow: '0 20px 40px -15px rgba(0,0,0,0.4), 0 0 0 1px rgba(6,182,212,0.15)' }}
+            whileHover={reducedMotion ? undefined : { boxShadow: '0 20px 40px -15px rgba(0,0,0,0.4), 0 0 0 1px rgba(6,182,212,0.15)' }}
             className="md:col-span-2 p-6 rounded-2xl bg-raised border border-[var(--border-subtle)] transition-shadow duration-150"
           >
             <div className="flex items-center gap-3 mb-4">
