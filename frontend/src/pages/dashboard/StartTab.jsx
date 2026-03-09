@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Rocket } from 'lucide-react';
+import { Mic } from 'lucide-react';
+
+const DIFFICULTY_BARS = { easy: 1, medium: 3, hard: 5 };
 
 export default function StartTab({
   currentUser,
@@ -15,41 +17,37 @@ export default function StartTab({
   setYearsExperience,
   handleStartInterview,
 }) {
-  return (
-    <>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="bg-gray-900/50 border border-cyan-600/20 rounded-2xl p-8"
-      >
-        <div className="flex items-center gap-3 mb-6">
-          <Rocket className="w-6 h-6 text-cyan-400" />
-          <h2 className="text-2xl font-bold text-white">Configure Your Interview</h2>
-        </div>
+  const [hoverStart, setHoverStart] = useState(false);
 
+  return (
+    <div className="max-w-2xl">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-2xl bg-raised border border-[var(--border-subtle)] p-6 md:p-8"
+      >
         {!currentUser?.emailVerified && (
-          <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl text-yellow-200">
-            Your email is not verified yet. You can still start an interview, but verifying helps with account recovery.
+          <div className="mb-6 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200 text-sm">
+            Email not verified. You can still start an interview; verifying helps with account recovery.
           </div>
         )}
 
+        {/* Interview type: horizontal pill tabs */}
         <div className="mb-6">
-          <label className="block text-sm font-semibold text-gray-300 mb-3">Interview Type</label>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <label className="block text-sm font-medium text-zinc-400 mb-3">Interview type</label>
+          <div className="flex flex-wrap gap-2">
             {interviewTypes.map((type) => (
               <button
                 key={type.value}
+                type="button"
                 onClick={() => setInterviewType(type.value)}
-                className={`p-4 rounded-xl border-2 transition text-left ${
+                className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors duration-150 ${
                   interviewType === type.value
-                    ? 'border-cyan-500 bg-cyan-500/10'
-                    : 'border-cyan-600/20 hover:border-cyan-600/40'
+                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400'
+                    : 'border-[var(--border-subtle)] text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
                 }`}
               >
-                <div className="text-3xl mb-2">{type.icon}</div>
-                <div className="font-semibold text-white">{type.label}</div>
-                <div className="text-xs text-gray-400 mt-1">{type.desc}</div>
+                {type.label}
               </button>
             ))}
           </div>
@@ -57,59 +55,90 @@ export default function StartTab({
 
         {interviewType === 'custom' && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mb-6">
-            <label className="block text-sm font-semibold text-gray-300 mb-2">Custom Role</label>
+            <label className="block text-sm font-medium text-zinc-400 mb-2">Custom role</label>
             <input
               type="text"
               value={customRole}
               onChange={(e) => setCustomRole(e.target.value)}
-              placeholder="e.g., Senior DevOps Engineer, ML Engineer..."
-              className="w-full p-3 bg-black/50 border-2 border-cyan-600/20 rounded-lg focus:border-cyan-500 focus:outline-none text-white placeholder-gray-500"
+              placeholder="e.g. Senior DevOps Engineer"
+              className="input-base w-full"
             />
           </motion.div>
         )}
 
-        <div className="mb-8">
-          <label className="block text-sm font-semibold text-gray-300 mb-3">Difficulty Level</label>
+        {/* Difficulty: 1 / 3 / 5 bars */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-zinc-400 mb-3">Difficulty</label>
           <div className="grid grid-cols-3 gap-3">
-            {['easy', 'medium', 'hard'].map((level) => (
-              <button
-                key={level}
-                onClick={() => setDifficulty(level)}
-                className={`p-4 rounded-lg border-2 transition font-medium ${
-                  difficulty === level
-                    ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400'
-                    : 'border-cyan-600/20 hover:border-cyan-600/40 text-gray-400'
-                }`}
-              >
-                {level.charAt(0).toUpperCase() + level.slice(1)}
-              </button>
-            ))}
+            {(['easy', 'medium', 'hard']).map((level) => {
+              const bars = DIFFICULTY_BARS[level];
+              const active = difficulty === level;
+              return (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => setDifficulty(level)}
+                  className={`p-4 rounded-xl border transition-all duration-150 text-left ${
+                    active
+                      ? 'border-cyan-500/50 bg-cyan-500/5'
+                      : 'border-[var(--border-subtle)] hover:border-zinc-600'
+                  }`}
+                >
+                  <div className="flex gap-1 mb-2">
+                    {[1, 2, 3, 4, 5].map((i) => (
+                      <span
+                        key={i}
+                        className={`w-1.5 rounded-full transition-colors ${
+                          i <= bars ? (active ? 'bg-cyan-500' : 'bg-zinc-600') : 'bg-transparent'
+                        }`}
+                        style={{ height: 6 + i * 2 }}
+                      />
+                    ))}
+                  </div>
+                  <span className={`text-sm font-medium ${active ? 'text-cyan-400' : 'text-zinc-500'}`}>
+                    {level.charAt(0).toUpperCase() + level.slice(1)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         <div className="mb-8">
-          <label className="block text-sm font-semibold text-gray-300 mb-2">Years of Experience</label>
+          <label className="block text-sm font-medium text-zinc-400 mb-2">Years of experience (optional)</label>
           <input
             type="number"
             min="0"
             max="40"
             value={yearsExperience}
             onChange={(e) => setYearsExperience(e.target.value)}
-            placeholder="e.g., 3"
-            className="w-full p-3 bg-black/50 border-2 border-cyan-600/20 rounded-lg focus:border-cyan-500 focus:outline-none text-white placeholder-gray-500"
+            placeholder="e.g. 3"
+            className="input-base w-full"
           />
         </div>
 
+        {/* Start button: full-width, dark bg, border glow on hover */}
         <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+          type="button"
+          onHoverStart={() => setHoverStart(true)}
+          onHoverEnd={() => setHoverStart(false)}
+          whileTap={{ scale: 0.99 }}
           onClick={handleStartInterview}
-          className="w-full py-4 btn-cyan text-lg flex items-center justify-center gap-3"
+          className="w-full h-10 rounded-lg bg-overlay border flex items-center justify-center gap-2 text-white font-medium transition-all duration-150"
+          style={{
+            borderColor: hoverStart ? 'rgba(6, 182, 212, 0.5)' : 'var(--border-subtle)',
+            boxShadow: hoverStart ? '0 0 24px rgba(6, 182, 212, 0.2)' : 'none',
+          }}
         >
-          <Rocket className="w-6 h-6" />
+          <Mic className="w-4 h-4" />
           Start Interview
         </motion.button>
+
+        {/* Mini preview */}
+        <div className="mt-8 rounded-xl bg-overlay border border-[var(--border-subtle)] p-4 aspect-video flex items-center justify-center">
+          <p className="text-zinc-600 text-sm">Interview room preview</p>
+        </div>
       </motion.div>
-    </>
+    </div>
   );
 }

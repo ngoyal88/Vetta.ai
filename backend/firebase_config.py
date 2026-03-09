@@ -31,7 +31,6 @@ def get_firebase_credentials():
 
     raise ValueError("❌ No Firebase credentials found! Set FIREBASE_CREDENTIALS_BASE64 or provide serviceAccount.json")
 
-# Initialize
 if not firebase_admin._apps:
     cred = get_firebase_credentials()
     firebase_admin.initialize_app(cred)

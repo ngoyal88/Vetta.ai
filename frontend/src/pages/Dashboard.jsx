@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { useNavigate, Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { deleteField, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { Home, Mic, FileText, Clock, User } from 'lucide-react';
 
 import { useAuth } from '../context/AuthContext';
+import { useConfirmDialog } from '../context/ConfirmDialogContext';
 import useUserProfile from '../hooks/useUserProfile';
 import { api } from '../services/api';
 import { db } from '../firebase';
@@ -14,11 +16,37 @@ import ResumeTab from './dashboard/ResumeTab';
 import HistoryTab from './dashboard/HistoryTab';
 import AccountTab from './dashboard/AccountTab';
 
+const SIDEBAR_ITEMS = [
+  { id: 'start', label: 'Start', icon: Mic },
+  { id: 'resume', label: 'Resume', icon: FileText },
+  { id: 'history', label: 'History', icon: Clock },
+  { id: 'account', label: 'Account', icon: User },
+];
+
+function useLiveClock() {
+  const [time, setTime] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return time;
+}
+
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 const Dashboard = () => {
   const { currentUser, sendVerification, resetPassword, updateProfileInfo, deleteAccount, refreshUser } = useAuth();
+  const { confirmDialog } = useConfirmDialog();
   const { profile, loading: profileLoading } = useUserProfile();
   const navigate = useNavigate();
+  const clock = useLiveClock();
 
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [parsedResume, setParsedResume] = useState(null);
   const [uploadingResume, setUploadingResume] = useState(false);
   const [interviewType, setInterviewType] = useState('dsa');
@@ -81,8 +109,6 @@ const Dashboard = () => {
       setParsedResume(null);
       return;
     }
-
-    // 1) Prefer Firestore
     try {
       const ref = doc(db, 'users', currentUser.uid);
       const snap = await getDoc(ref);
@@ -98,8 +124,6 @@ const Dashboard = () => {
     } catch (err) {
       console.warn('Failed to load resume from Firestore:', err);
     }
-
-    // 2) Fallback: local cache
     try {
       const cached = localStorage.getItem(resumeStorageKey);
       if (cached) {
@@ -127,25 +151,18 @@ const Dashboard = () => {
       toast.error('File too large (max 5MB)');
       return;
     }
-
     try {
       setUploadingResume(true);
       const res = await api.uploadResume(file);
-      const data = res?.data;
-      if (!data) throw new Error('Resume parser returned empty data');
-
-      setParsedResume(data);
-      localStorage.setItem(resumeStorageKey, JSON.stringify(data));
-
+      const parsed = res?.profile ?? res?.data;
+      if (!parsed) throw new Error('Resume parser returned empty data');
+      setParsedResume(parsed);
+      localStorage.setItem(resumeStorageKey, JSON.stringify(parsed));
       await setDoc(
         doc(db, 'users', currentUser.uid),
-        {
-          resume: data,
-          resumeUpdatedAt: serverTimestamp(),
-        },
+        { resume: parsed, resumeUpdatedAt: serverTimestamp() },
         { merge: true }
       );
-
       toast.success('Resume uploaded');
     } catch (err) {
       console.error(err);
@@ -155,29 +172,30 @@ const Dashboard = () => {
     }
   }, [currentUser, file, resumeStorageKey]);
 
-  const handleDeleteResume = useCallback(async () => {
+  const handleDeleteResume = useCallback(() => {
     if (!currentUser) return;
-    const confirmDelete = window.confirm('Delete your stored resume?');
-    if (!confirmDelete) return;
-
-    try {
-      setParsedResume(null);
-      setFile(null);
-      localStorage.removeItem(resumeStorageKey);
-      await setDoc(
-        doc(db, 'users', currentUser.uid),
-        {
-          resume: deleteField(),
-          resumeUpdatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-      toast.success('Resume deleted');
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to delete resume');
-    }
-  }, [currentUser, resumeStorageKey]);
+    confirmDialog({
+      title: 'Delete resume',
+      message: 'Delete your stored resume?',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          setParsedResume(null);
+          setFile(null);
+          localStorage.removeItem(resumeStorageKey);
+          await setDoc(
+            doc(db, 'users', currentUser.uid),
+            { resume: deleteField(), resumeUpdatedAt: serverTimestamp() },
+            { merge: true }
+          );
+          toast.success('Resume deleted');
+        } catch (err) {
+          console.error(err);
+          toast.error('Failed to delete resume');
+        }
+      },
+    });
+  }, [currentUser, resumeStorageKey, confirmDialog]);
 
   const fetchHistory = useCallback(async () => {
     if (!currentUser) return;
@@ -194,40 +212,39 @@ const Dashboard = () => {
   }, [currentUser]);
 
   const handleDeleteInterview = useCallback(
-    async (id) => {
+    (id) => {
       if (!currentUser) return;
-      const confirmDelete = window.confirm('Delete this interview? This cannot be undone.');
-      if (!confirmDelete) return;
-
-      try {
-        setDeletingInterviewId(id);
-        await api.deleteInterview(id);
-        toast.success('Interview deleted');
-        await fetchHistory();
-      } catch (err) {
-        console.error(err);
-        toast.error('Failed to delete interview');
-      } finally {
-        setDeletingInterviewId(null);
-      }
+      confirmDialog({
+        title: 'Delete interview',
+        message: 'Delete this interview? This cannot be undone.',
+        destructive: true,
+        onConfirm: async () => {
+          try {
+            setDeletingInterviewId(id);
+            await api.deleteInterview(id);
+            toast.success('Interview deleted');
+            await fetchHistory();
+          } catch (err) {
+            console.error(err);
+            toast.error('Failed to delete interview');
+          } finally {
+            setDeletingInterviewId(null);
+          }
+        },
+      });
     },
-    [currentUser, fetchHistory]
+    [currentUser, fetchHistory, confirmDialog]
   );
 
-  useEffect(() => {
-    loadResume();
-  }, [loadResume]);
-
+  useEffect(() => loadResume(), [loadResume]);
   useEffect(() => {
     if (!currentUser) return;
     fetchHistory();
   }, [currentUser, fetchHistory]);
-
   useEffect(() => {
     if (activeTab !== 'history') return;
     fetchHistory();
   }, [activeTab, fetchHistory]);
-
   useEffect(() => {
     setProfileName(profile?.name || currentUser?.displayName || '');
     setProfilePhoto(currentUser?.photoURL || '');
@@ -238,12 +255,10 @@ const Dashboard = () => {
       toast.error('Please upload your resume first for resume-based interview');
       return;
     }
-
     if (interviewType === 'custom' && !customRole.trim()) {
       toast.error('Please specify a custom role');
       return;
     }
-
     try {
       const candidateName = parsedResume?.name?.raw || profile?.name || currentUser?.displayName || 'Candidate';
       const response = await api.startInterview(
@@ -255,22 +270,22 @@ const Dashboard = () => {
         candidateName,
         yearsExperience ? Number(yearsExperience) : null
       );
-
       const sessionId = response.session_id;
-
-      localStorage.setItem('interviewConfig', JSON.stringify({
-        sessionId,
-        userId: currentUser.uid,
-        interviewType,
-        difficulty,
-        customRole: interviewType === 'custom' ? customRole : null,
-        resumeData: parsedResume,
-        candidateName,
-        yearsExperience: yearsExperience ? Number(yearsExperience) : null
-      }));
-
+      sessionStorage.setItem(`interview_type_${sessionId}`, interviewType);
+      localStorage.setItem(
+        'interviewConfig',
+        JSON.stringify({
+          sessionId,
+          userId: currentUser.uid,
+          interviewType,
+          difficulty,
+          customRole: interviewType === 'custom' ? customRole : null,
+          resumeData: parsedResume,
+          candidateName,
+          yearsExperience: yearsExperience ? Number(yearsExperience) : null,
+        })
+      );
       navigate(`/interview/${sessionId}`);
-    
     } catch (err) {
       console.error(err);
       toast.error('Failed to start interview: ' + err.message);
@@ -279,139 +294,155 @@ const Dashboard = () => {
 
   if (profileLoading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
+      <div className="min-h-screen bg-base flex items-center justify-center pt-12">
         <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-400"></div>
-          <p className="text-gray-400">Loading...</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-cyan-500 border-t-transparent" />
+          <p className="text-zinc-500 text-sm">Loading...</p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-black py-20 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex justify-between items-center mb-8"
-        >
-          <div>
-            <h1 className="text-4xl font-bold text-white mb-2">
-              Welcome back, {profile?.name || 'User'}! 👋
-            </h1>
-            <p className="text-gray-400">Ready to ace your next interview?</p>
-          </div>
-          {/* Navbar already has logout; keep header clean */}
-        </motion.div>
+  const displayName = profile?.name || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'User';
 
-        {/* Tabs */}
-        <div className="flex gap-4 mb-8 border-b border-cyan-600/20">
+  return (
+    <div className="min-h-screen bg-base pt-12 flex">
+      {/* Sidebar: 64px collapsed, 240px expanded */}
+      <aside
+        className="fixed left-0 top-12 bottom-0 z-30 flex flex-col border-r border-[var(--border-subtle)] bg-raised transition-[width] duration-300 ease-out overflow-hidden"
+        style={{ width: sidebarExpanded ? 240 : 64 }}
+        onMouseEnter={() => setSidebarExpanded(true)}
+        onMouseLeave={() => setSidebarExpanded(false)}
+      >
+        <Link
+          to="/"
+          className="flex items-center gap-3 h-12 px-3 text-zinc-400 hover:text-white hover:bg-overlay transition-colors shrink-0"
+        >
+          <Home className="w-5 h-5 shrink-0" />
+          {sidebarExpanded && <span className="text-sm whitespace-nowrap">Home</span>}
+        </Link>
+        {SIDEBAR_ITEMS.map((item) => (
           <button
-            onClick={() => setActiveTab('start')}
-            className={`px-6 py-3 font-medium transition ${
-              activeTab === 'start'
-                ? 'text-cyan-400 border-b-2 border-cyan-400'
-                : 'text-gray-400 hover:text-white'
+            key={item.id}
+            type="button"
+            onClick={() => setActiveTab(item.id)}
+            className={`flex items-center gap-3 h-12 px-3 transition-colors shrink-0 ${
+              activeTab === item.id ? 'text-cyan-400 bg-overlay' : 'text-zinc-400 hover:text-white hover:bg-overlay'
             }`}
+            title={item.label}
           >
-            Start New Interview
+            <item.icon className="w-5 h-5 shrink-0" />
+            {sidebarExpanded && <span className="text-sm whitespace-nowrap">{item.label}</span>}
           </button>
-          <button
-            onClick={() => setActiveTab('resume')}
-            className={`px-6 py-3 font-medium transition ${
-              activeTab === 'resume'
-                ? 'text-cyan-400 border-b-2 border-cyan-400'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Resume Viewer
-          </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`px-6 py-3 font-medium transition ${
-              activeTab === 'history'
-                ? 'text-cyan-400 border-b-2 border-cyan-400'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Previous Interviews ({previousInterviews.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('account')}
-            className={`px-6 py-3 font-medium transition ${
-              activeTab === 'account'
-                ? 'text-cyan-400 border-b-2 border-cyan-400'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Account & Profile
-          </button>
+        ))}
+      </aside>
+
+      <main className="flex-1 ml-16 min-h-0 flex flex-col">
+        {/* Top bar: greeting + clock */}
+        <div className="h-14 px-6 flex items-center justify-between border-b border-[var(--border-subtle)] shrink-0">
+          <p className="text-sm text-zinc-400">
+            {getGreeting()}, <span className="text-white font-medium">{displayName}</span>
+          </p>
+          <p className="text-sm font-mono text-zinc-500 tabular-nums" aria-live="polite">
+            {clock.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </p>
         </div>
 
-        {activeTab === 'start' && (
-          <StartTab
-            currentUser={currentUser}
-            interviewTypes={interviewTypes}
-            interviewType={interviewType}
-            setInterviewType={setInterviewType}
-            customRole={customRole}
-            setCustomRole={setCustomRole}
-            difficulty={difficulty}
-            setDifficulty={setDifficulty}
-            yearsExperience={yearsExperience}
-            setYearsExperience={setYearsExperience}
-            handleStartInterview={handleStartInterview}
-          />
-        )}
-
-        {activeTab === 'resume' && (
-          <ResumeTab
-            parsedResume={parsedResume}
-            file={file}
-            uploadingResume={uploadingResume}
-            handleFileChange={handleFileChange}
-            handleUploadResume={handleUploadResume}
-            handleDeleteResume={handleDeleteResume}
-          />
-        )}
-
-        {activeTab === 'history' && (
-          <HistoryTab
-            loadingInterviews={loadingInterviews}
-            previousInterviews={previousInterviews}
-            expandedInterviewId={expandedInterviewId}
-            deletingInterviewId={deletingInterviewId}
-            fetchHistory={fetchHistory}
-            handleToggleDetails={handleToggleDetails}
-            handleDeleteInterview={handleDeleteInterview}
-            formatDate={formatDate}
-            setActiveTab={setActiveTab}
-          />
-        )}
-
-        {activeTab === 'account' && (
-          <AccountTab
-            currentUser={currentUser}
-            profileName={profileName}
-            setProfileName={setProfileName}
-            profilePhoto={profilePhoto}
-            setProfilePhoto={setProfilePhoto}
-            savingProfile={savingProfile}
-            setSavingProfile={setSavingProfile}
-            sendVerification={sendVerification}
-            resetPassword={resetPassword}
-            updateProfileInfo={updateProfileInfo}
-            refreshUser={refreshUser}
-            deletingAccountState={deletingAccountState}
-            setDeletingAccountState={setDeletingAccountState}
-            api={api}
-            deleteAccount={deleteAccount}
-            navigate={navigate}
-          />
-        )}
-      </div>
+        <div className="flex-1 overflow-auto p-6">
+          <AnimatePresence mode="wait">
+            {activeTab === 'start' && (
+              <motion.div
+                key="start"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+              >
+                <StartTab
+                  currentUser={currentUser}
+                  interviewTypes={interviewTypes}
+                  interviewType={interviewType}
+                  setInterviewType={setInterviewType}
+                  customRole={customRole}
+                  setCustomRole={setCustomRole}
+                  difficulty={difficulty}
+                  setDifficulty={setDifficulty}
+                  yearsExperience={yearsExperience}
+                  setYearsExperience={setYearsExperience}
+                  handleStartInterview={handleStartInterview}
+                />
+              </motion.div>
+            )}
+            {activeTab === 'resume' && (
+              <motion.div
+                key="resume"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+              >
+                <ResumeTab
+                  parsedResume={parsedResume}
+                  file={file}
+                  uploadingResume={uploadingResume}
+                  handleFileChange={handleFileChange}
+                  handleUploadResume={handleUploadResume}
+                  handleDeleteResume={handleDeleteResume}
+                />
+              </motion.div>
+            )}
+            {activeTab === 'history' && (
+              <motion.div
+                key="history"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+              >
+                <HistoryTab
+                  loadingInterviews={loadingInterviews}
+                  previousInterviews={previousInterviews}
+                  expandedInterviewId={expandedInterviewId}
+                  deletingInterviewId={deletingInterviewId}
+                  fetchHistory={fetchHistory}
+                  handleToggleDetails={handleToggleDetails}
+                  handleDeleteInterview={handleDeleteInterview}
+                  formatDate={formatDate}
+                  setActiveTab={setActiveTab}
+                />
+              </motion.div>
+            )}
+            {activeTab === 'account' && (
+              <motion.div
+                key="account"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+              >
+                <AccountTab
+                  currentUser={currentUser}
+                  profileName={profileName}
+                  setProfileName={setProfileName}
+                  profilePhoto={profilePhoto}
+                  setProfilePhoto={setProfilePhoto}
+                  savingProfile={savingProfile}
+                  setSavingProfile={setSavingProfile}
+                  sendVerification={sendVerification}
+                  resetPassword={resetPassword}
+                  updateProfileInfo={updateProfileInfo}
+                  refreshUser={refreshUser}
+                  deletingAccountState={deletingAccountState}
+                  setDeletingAccountState={setDeletingAccountState}
+                  api={api}
+                  deleteAccount={deleteAccount}
+                  navigate={navigate}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </main>
     </div>
   );
 };

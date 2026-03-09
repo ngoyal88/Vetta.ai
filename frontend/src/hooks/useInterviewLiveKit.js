@@ -4,22 +4,18 @@ import { api } from '../services/api';
 import toast from 'react-hot-toast';
 
 /**
- * Custom hook for LiveKit-powered interview
- * Replaces the custom WebSocket implementation
+ * LiveKit-powered interview hook (voice assistant, room context).
  */
 export const useInterviewLiveKit = (sessionId) => {
-  // LiveKit hooks
   const room = useRoomContext();
   const assistant = useVoiceAssistant();
-  
-  // Interview state
+
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [phase, setPhase] = useState('greeting');
   const [feedback, setFeedback] = useState(null);
   const [transcript, setTranscript] = useState('');
   const [isAISpeaking, setIsAISpeaking] = useState(false);
-  
-  // Connection state
+
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
   

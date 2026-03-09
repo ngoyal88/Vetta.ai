@@ -11,7 +11,36 @@ export default function ResumeTab({
   handleDeleteResume,
 }) {
   // Backward-compatible: older stored values might be { data: {...}, meta: {...} }
-  const resume = parsedResume?.data && typeof parsedResume.data === 'object' ? parsedResume.data : parsedResume;
+  const resume =
+    parsedResume?.data && typeof parsedResume.data === 'object' ? parsedResume.data : parsedResume;
+
+  // Detect old Affinda-style vs new LLM ResumeProfile shape
+  const isAffindaStyle = Array.isArray(resume?.skills);
+
+  const displayName = isAffindaStyle ? resume?.name?.raw : resume?.name || resume?.contact?.name;
+  const primaryEmail = isAffindaStyle ? resume?.emails?.[0] : resume?.contact?.email;
+  const primaryPhone = isAffindaStyle ? resume?.phoneNumbers?.[0] : resume?.contact?.phone;
+
+  const flatSkills = (() => {
+    if (!resume) return [];
+    if (isAffindaStyle) {
+      return (resume.skills || []).map((s) => s.name).filter(Boolean);
+    }
+    const s = resume.skills || {};
+    return [
+      ...(s.languages || []),
+      ...(s.frameworks || []),
+      ...(s.databases || []),
+      ...(s.cloud || []),
+      ...(s.tools || []),
+      ...(s.ml_ai || []),
+      ...(s.other || []),
+    ].filter(Boolean);
+  })();
+
+  const experienceEntries = isAffindaStyle
+    ? resume?.workExperience || []
+    : resume?.work_experience || [];
 
   return (
     <motion.div
@@ -76,16 +105,16 @@ export default function ResumeTab({
               <div className="grid sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-gray-400">Name</div>
-                  <div className="text-white">{resume?.name?.raw || 'N/A'}</div>
+                  <div className="text-white">{displayName || 'N/A'}</div>
                 </div>
                 <div>
                   <div className="text-gray-400">Email</div>
-                  <div className="text-white">{resume?.emails?.[0] || 'N/A'}</div>
+                  <div className="text-white">{primaryEmail || 'N/A'}</div>
                 </div>
                 <div className="sm:col-span-2">
                   <div className="text-gray-400">Skills</div>
                   <div className="text-white">
-                    {resume?.skills?.map((s) => s.name).join(', ') || 'None detected'}
+                    {flatSkills.length ? flatSkills.join(', ') : 'None detected'}
                   </div>
                 </div>
               </div>
@@ -104,15 +133,15 @@ export default function ResumeTab({
             <div className="space-y-4">
               <div className="p-4 bg-black/40 border border-cyan-600/20 rounded-lg">
                 <h3 className="text-lg font-semibold text-cyan-300 mb-2">Contact</h3>
-                <p className="text-gray-200">{resume?.name?.raw || 'Name not detected'}</p>
-                <p className="text-gray-400">{resume?.emails?.[0] || 'Email not detected'}</p>
-                <p className="text-gray-400">{resume?.phoneNumbers?.[0] || 'Phone not detected'}</p>
+                <p className="text-gray-200">{displayName || 'Name not detected'}</p>
+                <p className="text-gray-400">{primaryEmail || 'Email not detected'}</p>
+                <p className="text-gray-400">{primaryPhone || 'Phone not detected'}</p>
               </div>
 
               <div className="p-4 bg-black/40 border border-cyan-600/20 rounded-lg">
                 <h3 className="text-lg font-semibold text-cyan-300 mb-2">Skills</h3>
                 <p className="text-gray-200 break-words">
-                  {resume?.skills?.length ? resume.skills.map((s) => s.name).join(', ') : 'No skills detected'}
+                  {flatSkills.length ? flatSkills.join(', ') : 'No skills detected'}
                 </p>
               </div>
             </div>
@@ -121,14 +150,23 @@ export default function ResumeTab({
               <div className="p-4 bg-black/40 border border-cyan-600/20 rounded-lg">
                 <h3 className="text-lg font-semibold text-cyan-300 mb-2">Experience</h3>
                 <div className="space-y-3 text-sm text-gray-200 max-h-64 overflow-auto custom-scrollbar">
-                  {resume?.workExperience?.length ? (
-                    resume.workExperience.map((exp, idx) => (
+                  {experienceEntries.length ? (
+                    experienceEntries.map((exp, idx) => (
                       <div key={idx} className="border-b border-cyan-600/10 pb-2 last:border-0 last:pb-0">
-                        <div className="font-semibold text-white">{exp.jobTitle || 'Role'}</div>
-                        <div className="text-gray-400">
-                          {exp.organization || 'Company'}{exp.dates ? ` • ${exp.dates}` : ''}
+                        <div className="font-semibold text-white">
+                          {exp.jobTitle || exp.title || 'Role'}
                         </div>
-                        <div className="text-gray-500 mt-1 whitespace-pre-line">{exp.jobDescription || ''}</div>
+                        <div className="text-gray-400">
+                          {(exp.organization || exp.company || 'Company') +
+                            (exp.dates || exp.start_date || exp.end_date
+                              ? ` • ${exp.dates || `${exp.start_date || ''}${
+                                  exp.end_date ? ` - ${exp.end_date}` : ''
+                                }`}`
+                              : '')}
+                        </div>
+                        <div className="text-gray-500 mt-1 whitespace-pre-line">
+                          {exp.jobDescription || (exp.responsibilities || []).join('\n')}
+                        </div>
                       </div>
                     ))
                   ) : (
@@ -146,7 +184,11 @@ export default function ResumeTab({
                         <div className="font-semibold text-white">{edu.institution || 'Institution'}</div>
                         <div className="text-gray-400">
                           {edu.degree || 'Degree'}
-                          {edu.dates ? ` • ${edu.dates}` : ''}
+                          {edu.dates || edu.start_date || edu.end_date
+                            ? ` • ${edu.dates || `${edu.start_date || ''}${
+                                edu.end_date ? ` - ${edu.end_date}` : ''
+                              }`}`
+                            : ''}
                         </div>
                         {edu.cgpa && <div className="text-gray-500 mt-1 whitespace-pre-line">{edu.cgpa}</div>}
                       </div>
@@ -164,8 +206,10 @@ export default function ResumeTab({
                     resume.projects.map((p, idx) => (
                       <div key={idx} className="border-b border-cyan-600/10 pb-2 last:border-0 last:pb-0">
                         <div className="font-semibold text-white">{p.name || 'Project'}</div>
-                        {p.technologies?.length ? (
-                          <div className="text-gray-400">{p.technologies.join(', ')}</div>
+                        {p.technologies?.length || p.tech_stack?.length ? (
+                          <div className="text-gray-400">
+                            {(p.technologies || p.tech_stack || []).join(', ')}
+                          </div>
                         ) : null}
                         {p.description ? <div className="text-gray-500 mt-1 whitespace-pre-line">{p.description}</div> : null}
                       </div>

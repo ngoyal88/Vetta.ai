@@ -1,14 +1,19 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
-import { Mic, MicOff, Send, SkipForward, LogOut, Code } from "lucide-react";
 
+import { useConfirmDialog } from "../context/ConfirmDialogContext";
 import { useInterviewWebSocket } from "../hooks/useInterviewWebSocket";
 import AudioVisualizer from "../components/AudioVisualizer";
 import Subtitles from "../components/Subtitles";
 import CodeEditor from "../components/CodeEditor";
 import DSAQuestionDisplay from "../components/DSAQuestionDisplay";
+import InterviewRoomHeader from "../components/InterviewRoomHeader";
+import VoiceControlBar from "../components/VoiceControlBar";
+import FeedbackCard from "../components/FeedbackCard";
+import DSASplitLayout from "../components/DSASplitLayout";
+import { fadeInUp, slidePhase } from "../utils/animations";
 
 const InterviewRoom = () => {
   const { sessionId } = useParams();
@@ -23,6 +28,9 @@ const InterviewRoom = () => {
 };
 
 const InterviewRoomWSContent = ({ sessionId, onBack }) => {
+  const { confirmDialog } = useConfirmDialog();
+  const storedType = sessionStorage.getItem(`interview_type_${sessionId}`);
+  const initialPhase = storedType === 'dsa' ? 'dsa' : 'behavioral';
   const {
     connected,
     error,
@@ -42,276 +50,216 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
     submitAnswer,
     toggleMicrophone,
     skipQuestion,
+    requestNextDSAQuestion,
+    loadingNextProblem,
     endInterview,
     audioLevel
-  } = useInterviewWebSocket(sessionId);
+  } = useInterviewWebSocket(sessionId, initialPhase);
 
   useEffect(() => {
     if (error) toast.error(error);
   }, [error]);
 
-  const handleEndInterview = async () => {
-    if (window.confirm("Are you sure you want to end the interview?")) {
-      endInterview();
-      setTimeout(() => onBack(), 2000);
+  // DSA session timer — starts when the first question arrives
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const timerRef = useRef(null);
+  const timerStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (phase === 'dsa' && currentQuestion && !timerStartedRef.current) {
+      timerStartedRef.current = true;
+      timerRef.current = setInterval(() => {
+        setElapsedSeconds(s => s + 1);
+      }, 1000);
     }
+    return () => {
+      if (phase !== 'dsa') {
+        clearInterval(timerRef.current);
+        timerStartedRef.current = false;
+        setElapsedSeconds(0);
+      }
+    };
+  }, [phase, currentQuestion]);
+
+  useEffect(() => {
+    return () => clearInterval(timerRef.current);
+  }, []);
+
+  const formatTimer = (secs) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
   };
 
-  return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-black via-gray-900 to-black overflow-hidden">
-      {/* Header */}
-      <header className="relative z-10 px-6 py-4 bg-black/80 backdrop-blur-md border-b border-cyan-600/20">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          {/* Left: Status */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <div className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-cyan-400 animate-pulse' : 'bg-red-500'}`} />
-              <span className="text-sm font-medium text-gray-300">
-                {connected ? 'CONNECTED' : 'CONNECTING...'}
-              </span>
-            </div>
-            
-            <div className="h-6 w-px bg-cyan-600/30" />
-            
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
-              {phase === 'dsa' ? <Code className="w-4 h-4 text-cyan-400" /> : <Mic className="w-4 h-4 text-cyan-400" />}
-              <span className="text-sm font-medium text-cyan-400">
-                {phase === 'dsa' ? 'Coding Phase' : 'Interview Phase'}
-              </span>
-            </div>
-          </div>
+  // Accessibility: announce errors to screen readers
+  const errorAnnouncer = error ? (
+    <div role="alert" aria-live="assertive" className="sr-only">
+      {error}
+    </div>
+  ) : null;
 
-          {/* Right: Actions */}
-          <div className="flex items-center gap-3">
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={skipQuestion}
-              className="px-4 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-400 hover:bg-yellow-500/20 transition text-sm font-medium flex items-center gap-2"
-            >
-              <SkipForward className="w-4 h-4" />
-              Skip
-            </motion.button>
-            
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handleEndInterview}
-              className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 hover:bg-red-500/20 transition text-sm font-medium flex items-center gap-2"
-            >
-              <LogOut className="w-4 h-4" />
-              End Interview
-            </motion.button>
+  const [interviewEnded, setInterviewEnded] = useState(false);
+
+  const handleEndInterview = () => {
+    confirmDialog({
+      title: 'End interview',
+      message: 'Are you sure you want to end the interview?',
+      destructive: true,
+      onConfirm: () => {
+        setInterviewEnded(true);
+        endInterview();
+      },
+    });
+  };
+
+  const handleBackAfterFeedback = () => {
+    onBack();
+  };
+
+  // Post-interview view: scrollable feedback + sticky "Back to Dashboard"
+  if (interviewEnded) {
+    return (
+      <div className="h-screen flex flex-col bg-base overflow-hidden">
+        {errorAnnouncer}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="p-6 sm:p-8 max-w-3xl mx-auto w-full">
+            <h1 className="text-2xl font-bold text-white mb-2">Thank you for completing the interview</h1>
+            <p className="text-zinc-500 mb-6">
+              {feedback ? 'Here is your feedback.' : 'Generating your feedback...'}
+            </p>
+            {feedback ? (
+              <FeedbackCard
+                feedback={typeof feedback === 'string' ? feedback : (feedback?.feedback ?? '')}
+                scores={typeof feedback === 'object' && feedback?.full?.scores ? feedback.full.scores : undefined}
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-4 py-8">
+                <div className="h-10 w-10 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" aria-hidden />
+                <p className="text-zinc-500 text-sm">This may take a moment.</p>
+              </div>
+            )}
           </div>
         </div>
-      </header>
-
-      {/* Main Content */}
-      <div className="flex-1 overflow-hidden">
-        {phase === 'dsa' ? (
-          // DSA Mode: Split view with question and code editor
-          <div className="h-full p-6">
-            <div className="max-w-7xl mx-auto h-full flex gap-6">
-              {/* Question Panel */}
-              <div className="w-1/2 overflow-y-auto custom-scrollbar">
-                <DSAQuestionDisplay question={currentQuestion} />
-              </div>
-              
-              {/* Code Editor Panel */}
-              <div className="w-1/2 overflow-hidden">
-                <CodeEditor sessionId={sessionId} question={currentQuestion} />
-              </div>
-            </div>
+        <footer className="flex-shrink-0 p-6 border-t border-[var(--border-subtle)] bg-raised">
+          <div className="max-w-3xl mx-auto w-full">
+            <button
+              type="button"
+              onClick={handleBackAfterFeedback}
+              className="w-full h-10 px-6 rounded-lg bg-overlay border border-cyan-500 text-white font-medium hover:border-cyan-400 transition-colors"
+            >
+              {feedback ? 'Back to Dashboard' : 'Back to Dashboard without waiting'}
+            </button>
           </div>
-        ) : (
-          // Interview Mode: Visualizer + Transcript
-          <div className="h-full flex flex-col">
-            {/* Visualizer Section */}
-            <div className="flex-1 flex items-center justify-center p-6">
-              <div className="w-full max-w-3xl">
-                {/* 3D Audio Visualizer */}
-                <div className="relative h-[400px] rounded-2xl overflow-hidden border border-cyan-600/20 bg-black/40 backdrop-blur-sm">
-                  <AudioVisualizer 
-                    isSpeaking={aiSpeaking} 
-                    audioLevel={audioLevel}
-                  />
-                  
-                  {/* Status Badge */}
-                  <div className="absolute top-4 left-4 px-4 py-2 bg-black/60 backdrop-blur-md rounded-full border border-cyan-500/30">
-                    <span className="text-sm font-medium text-cyan-400">
-                      {aiSpeaking ? '🗣️ AI Speaking...' : '👂 Listening...'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* AI Label */}
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="text-center mt-4"
-                >
-                  <h2 className="text-xl font-bold text-white">AI Interviewer</h2>
-                  <p className="text-sm text-gray-400 mt-1">
-                    {aiSpeaking ? 'Speaking now...' : isRecording ? 'Recording your response...' : 'Ready to listen'}
-                  </p>
-                </motion.div>
-              </div>
-            </div>
-
-            {/* Transcript Section */}
-            <div className="px-6 pb-6 space-y-4 max-w-5xl mx-auto w-full">
-              {/* AI Subtitles */}
-              <AnimatePresence>
-                {(aiFullText || aiText) && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                  >
-                    <Subtitles 
-                      text={aiFullText || aiText} 
-                      isSpeaking={aiSpeaking} 
-                      wpm={aiSpeechWpm || 180}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* User Transcript */}
-              <AnimatePresence>
-                {(transcriptFinal || transcriptInterim) && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    className="bg-blue-500/10 border border-blue-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-xs font-bold text-blue-400 uppercase mt-1">You</span>
-                      <p className="flex-1 text-sm text-blue-100 leading-relaxed">
-                        {transcriptFinal}
-                        {transcriptInterim && <span className="opacity-60"> {transcriptInterim}</span>}
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Feedback */}
-              <AnimatePresence>
-                {feedback && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    className="bg-green-500/10 border border-green-500/30 backdrop-blur-md px-6 py-4 rounded-2xl"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-xs font-bold text-green-400 uppercase mt-1">Feedback</span>
-                      <p className="flex-1 text-sm text-green-100 whitespace-pre-wrap">{feedback}</p>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-        )}
+        </footer>
       </div>
+    );
+  }
 
-      {/* Control Bar - Only show in interview mode */}
-      {phase !== 'dsa' && (
-        <div className="relative z-10 px-6 py-4 bg-black/80 backdrop-blur-md border-t border-cyan-600/20">
-          <div className="max-w-3xl mx-auto flex items-center justify-center gap-4">
-            {/* Mic Toggle */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => toggleMicrophone(!micEnabled)}
-              className={`p-4 rounded-xl border-2 transition ${
-                micEnabled
-                  ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
-                  : 'bg-gray-700/50 border-gray-600 text-gray-400'
-              }`}
-            >
-              {micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-            </motion.button>
+  return (
+    <div className="h-screen flex flex-col bg-base overflow-hidden">
+      {errorAnnouncer}
+      <InterviewRoomHeader
+        connected={connected}
+        phase={phase}
+        onSkip={phase === 'dsa' ? requestNextDSAQuestion : skipQuestion}
+        onEndInterview={handleEndInterview}
+        loadingNextProblem={loadingNextProblem}
+        timer={phase === 'dsa' ? formatTimer(elapsedSeconds) : null}
+        difficulty={currentQuestion?.difficulty || null}
+      />
 
-            {/* Record/Pause */}
-            {!isRecording ? (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={startRecording}
-                disabled={!micEnabled || aiSpeaking}
-                className="px-8 py-4 bg-cyan-600 rounded-xl text-white font-medium hover:bg-cyan-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Start Talking
-              </motion.button>
-            ) : (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={stopRecording}
-                className="px-8 py-4 bg-gray-600 rounded-xl text-white font-medium hover:bg-gray-500 transition"
-              >
-                Pause
-              </motion.button>
-            )}
-
-            {/* Submit Answer */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={submitAnswer}
-              disabled={aiSpeaking}
-              className={`px-8 py-4 rounded-xl font-medium transition flex items-center gap-2 ${
-                aiSpeaking
-                  ? 'bg-gray-700/50 text-gray-400 cursor-not-allowed'
-                  : 'bg-green-600 text-white hover:bg-green-500'
-              }`}
-              title={aiSpeaking ? 'Wait for AI to finish speaking' : 'Submit your answer'}
-            >
-              <Send className="w-5 h-5" />
-              I'm Done
-            </motion.button>
-          </div>
-
-          {/* Audio Level Indicator */}
-          {isRecording && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="mt-3 max-w-3xl mx-auto"
-            >
-              <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
-                <motion.div
-                  className="h-full bg-cyan-400"
-                  style={{ width: `${Math.min(audioLevel * 100, 100)}%` }}
-                  transition={{ duration: 0.1 }}
-                />
+      <div className="flex-1 overflow-hidden min-h-0">
+        <AnimatePresence mode="wait">
+          {phase === 'dsa' ? (
+            <motion.div key="dsa" {...slidePhase.dsa} className="h-full">
+              <DSASplitLayout
+                questionPanel={
+                  currentQuestion
+                    ? <DSAQuestionDisplay question={currentQuestion} />
+                    : (
+                        <div className="bg-overlay p-6 rounded-xl border border-[var(--border-subtle)] animate-pulse space-y-4 h-full">
+                          <div className="flex justify-between items-center">
+                            <div className="h-6 bg-raised rounded w-2/3" />
+                            <div className="h-5 bg-raised rounded w-16" />
+                          </div>
+                          <div className="space-y-2">
+                            <div className="h-4 bg-raised rounded w-full" />
+                            <div className="h-4 bg-raised rounded w-5/6" />
+                            <div className="h-4 bg-raised rounded w-4/6" />
+                          </div>
+                          <div className="h-4 bg-raised rounded w-1/3 mt-4" />
+                          <div className="space-y-2">
+                            <div className="h-3 bg-raised rounded w-full" />
+                            <div className="h-3 bg-raised rounded w-3/4" />
+                          </div>
+                          <p className="text-xs text-zinc-500 pt-2">
+                            {loadingNextProblem ? 'Loading next problem...' : 'Loading problem...'}
+                          </p>
+                        </div>
+                      )
+                }
+                codePanel={
+                  <CodeEditor
+                    sessionId={sessionId}
+                    question={currentQuestion}
+                    onRequestNextQuestion={requestNextDSAQuestion}
+                    loadingNextProblem={loadingNextProblem}
+                  />
+                }
+              />
+            </motion.div>
+          ) : (
+            <motion.div key="voice" {...slidePhase.voice} className="h-full flex flex-col">
+              <div className="flex-1 flex flex-col items-center justify-center p-6 min-h-0">
+                <div className="w-full max-w-2xl flex flex-col items-center">
+                  <div className="relative w-full aspect-square max-h-[320px] flex items-center justify-center">
+                    <AudioVisualizer isSpeaking={aiSpeaking} audioLevel={audioLevel} />
+                  </div>
+                  <p className="text-sm font-medium text-white mt-4">AI Interviewer</p>
+                  <p className="text-sm text-zinc-500 mt-1">
+                    {aiSpeaking ? 'Speaking...' : 'Listening...'}
+                  </p>
+                </div>
+              </div>
+              <Subtitles text={aiFullText || aiText} isSpeaking={aiSpeaking} wpm={aiSpeechWpm || 180} />
+              <div className="absolute left-1/2 -translate-x-1/2 text-center w-full max-w-[600px] px-4 pointer-events-none z-10" style={{ bottom: 'calc(30% - 3rem)' }}>
+                {(transcriptFinal || transcriptInterim) && (
+                  <p className="text-sm text-cyan-500/90">
+                    You: {transcriptFinal}
+                    {transcriptInterim && <span className="opacity-70"> {transcriptInterim}</span>}
+                  </p>
+                )}
+              </div>
+              <div className="px-6 pb-32 max-w-3xl mx-auto w-full">
+                <AnimatePresence>
+                  {feedback && (
+                    <motion.div {...fadeInUp}>
+                      <FeedbackCard
+                        feedback={typeof feedback === 'string' ? feedback : (feedback?.feedback ?? '')}
+                        scores={typeof feedback === 'object' && feedback?.full?.scores ? feedback.full.scores : undefined}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </motion.div>
           )}
-        </div>
+        </AnimatePresence>
+      </div>
+
+      {phase !== 'dsa' && (
+        <VoiceControlBar
+          micEnabled={micEnabled}
+          isRecording={isRecording}
+          aiSpeaking={aiSpeaking}
+          audioLevel={audioLevel}
+          onToggleMic={toggleMicrophone}
+          onStartRecording={startRecording}
+          onStopRecording={stopRecording}
+          onSubmitAnswer={submitAnswer}
+        />
       )}
 
-      {/* Custom CSS for scrollbar */}
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: rgba(0, 0, 0, 0.2);
-          border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(6, 182, 212, 0.3);
-          border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(6, 182, 212, 0.5);
-        }
-      `}</style>
     </div>
   );
 };

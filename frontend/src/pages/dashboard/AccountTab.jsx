@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, Image, Mail, ShieldCheck, User2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useConfirmDialog } from '../../context/ConfirmDialogContext';
 
 export default function AccountTab({
   currentUser,
@@ -21,6 +22,8 @@ export default function AccountTab({
   deleteAccount,
   navigate,
 }) {
+  const { confirmDialog } = useConfirmDialog();
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -146,23 +149,26 @@ export default function AccountTab({
               Delete your account and all interview history. This action cannot be undone.
             </p>
             <button
-              onClick={async () => {
-                const confirmDelete = window.confirm(
-                  'Delete your account and all interview data? This cannot be undone.'
-                );
-                if (!confirmDelete) return;
-                try {
-                  setDeletingAccountState(true);
-                  await api.deleteAccountData();
-                  await deleteAccount();
-                  toast.success('Account deleted');
-                  navigate('/');
-                } catch (err) {
-                  console.error(err);
-                  toast.error('Failed to delete account');
-                } finally {
-                  setDeletingAccountState(false);
-                }
+              onClick={() => {
+                confirmDialog({
+                  title: 'Delete account',
+                  message: 'Delete your account and all interview data? This cannot be undone.',
+                  destructive: true,
+                  onConfirm: async () => {
+                    try {
+                      setDeletingAccountState(true);
+                      await api.deleteAccountData();
+                      await deleteAccount();
+                      toast.success('Account deleted');
+                      navigate('/');
+                    } catch (err) {
+                      console.error(err);
+                      toast.error('Failed to delete account');
+                    } finally {
+                      setDeletingAccountState(false);
+                    }
+                  },
+                });
               }}
               disabled={deletingAccountState}
               className="w-full px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-500 disabled:opacity-60"

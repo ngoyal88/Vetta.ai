@@ -1,14 +1,7 @@
-"""backend/services/edge_tts_service.py
+"""
+Edge TTS (neural voices via Microsoft Edge).
 
-Edge TTS Service (free-ish neural voices via Microsoft Edge)
-
-Why this exists:
-- ElevenLabs quota can be hit quickly.
-- Edge neural voices are high quality and often work without an API key.
-
-Notes:
-- This relies on the `edge-tts` Python package.
-- Output is MP3 bytes suitable for base64 transport to the frontend.
+Uses edge-tts package; output is MP3 bytes for base64 transport.
 """
 
 from __future__ import annotations

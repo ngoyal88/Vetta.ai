@@ -1,8 +1,16 @@
 import re
+import json
+from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+
 from PyPDF2 import PdfReader
 import docx
+from docx.oxml.ns import qn
+
+from firebase_config import db
+from models.resume import ParsedResumeResponse, ResumeProfile
+from services.groq_service import GroqService
 
 def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     """
@@ -50,12 +58,284 @@ def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         }
     }
 
+
+async def parse_resume_llm(file_bytes: bytes, filename: str, uid: str) -> ParsedResumeResponse:
+    """
+    LLM-powered resume parser.
+    - Extracts raw text.
+    - Calls Groq llama-3.1-8b-instant in JSON mode.
+    - Validates against ResumeProfile.
+    - Drops hallucinated skills/projects/experience entries not present in the raw text.
+    - Writes the parsed profile to Firestore under users/{uid}/profiles/resume_parsed.
+    """
+    raw_text = extract_text(file_bytes, filename)
+    raw_text = (raw_text or "").replace("\x00", "").strip()
+    if len(raw_text) < 20:
+        raise ValueError(
+            "No readable text could be extracted from the file. "
+            "If this is a scanned/image PDF, please upload a text-based PDF or a DOCX."
+        )
+
+    system_prompt = (
+        "You are an extraction engine for technical resumes. "
+        "Return ONLY a JSON object matching this schema (no extra keys, no comments):\n"
+        "{\n"
+        '  "profile": {\n'
+        '    "name": string or null,\n'
+        '    "contact": {\n'
+        '      "email": string or null,\n'
+        '      "phone": string or null,\n'
+        '      "location": string or null,\n'
+        '      "links": {\n'
+        '        "github": string or null,\n'
+        '        "linkedin": string or null,\n'
+        '        "portfolio": string or null,\n'
+        '        "other": string array\n'
+        "      }\n"
+        "    },\n"
+        '    "summary": string or null,\n'
+        '    "years_experience": number or null,\n'
+        '    "seniority_level": "junior" | "mid" | "senior" | "lead" | "principal" | "unknown",\n'
+        '    "skills": {\n'
+        '      "languages": string array,\n'
+        '      "frameworks": string array,\n'
+        '      "databases": string array,\n'
+        '      "cloud": string array,\n'
+        '      "tools": string array,\n'
+        '      "ml_ai": string array,\n'
+        '      "other": string array\n'
+        "    },\n"
+        '    "education": [\n'
+        "      {\n"
+        '        "degree": string or null,\n'
+        '        "field": string or null,\n'
+        '        "institution": string or null,\n'
+        '        "start_date": string or null,\n'
+        '        "end_date": string or null,\n'
+        '        "cgpa": string or null,\n'
+        '        "location": string or null\n'
+        "      }\n"
+        "    ],\n"
+        '    "work_experience": [\n'
+        "      {\n"
+        '        "title": string or null,\n'
+        '        "company": string or null,\n'
+        '        "location": string or null,\n'
+        '        "start_date": string or null,\n'
+        '        "end_date": string or null,\n'
+        '        "employment_type": string or null,\n'
+        '        "responsibilities": string array,\n'
+        '        "tech_stack": string array,\n'
+        '        "impact": string array\n'
+        "      }\n"
+        "    ],\n"
+        '    "projects": [\n'
+        "      {\n"
+        '        "name": string or null,\n'
+        '        "description": string or null,\n'
+        '        "tech_stack": string array,\n'
+        '        "role": string or null,\n'
+        '        "scale": string or null,\n'
+        '        "start_date": string or null,\n'
+        '        "end_date": string or null,\n'
+        '        "link": string or null\n'
+        "      }\n"
+        "    ],\n"
+        '    "achievements": [ { "title": string, "description": string or null, "date": string or null } ],\n'
+        '    "publications": [ { "title": string, "venue": string or null, "year": string or null, "link": string or null } ],\n'
+        '    "weak_areas": string array,\n'
+        '    "raw_text": string or null\n'
+        "  },\n"
+        '  "meta": { "uid": string, "source": string, "model": string, "parsed_at": string, "version": string }\n'
+        "}\n\n"
+        "STRICT RULES:\n"
+        "- Only include skills, tools, frameworks, projects, experience entries, achievements, and publications that are EXPLICITLY mentioned in the resume text.\n"
+        "- Do NOT guess or infer technologies or companies that are not clearly present.\n"
+        "- Keep strings concise; do not paraphrase entire paragraphs.\n"
+    )
+
+    truncated_text = raw_text[:12000]
+    user_prompt = f"Resume text (UTF-8):\\n\\n{truncated_text}"
+
+    groq = GroqService()
+    json_str = await groq.json_completion(system_prompt, user_prompt)
+
+    try:
+        payload = json.loads(json_str or "{}")
+    except json.JSONDecodeError:
+        raise ValueError("LLM returned invalid JSON")
+
+    profile_data = payload.get("profile") or {}
+    # Attach raw_text so downstream has full context, but we will still use it for validation.
+    profile_data.setdefault("raw_text", raw_text)
+    # Some models may emit null for list fields; normalize to empty lists so
+    # pydantic's non-optional List[str] fields validate correctly.
+    if profile_data.get("weak_areas") is None:
+        profile_data["weak_areas"] = []
+
+    profile = ResumeProfile(**profile_data)
+
+    # Validation / de-hallucination layer
+    def _in_text(value: Optional[str], text_norm: str) -> bool:
+        if not value:
+            return False
+        v = value.strip().lower()
+        if not v:
+            return False
+        return v in text_norm
+
+    text_norm = raw_text.lower()
+
+    # Filter skills by category
+    def _filter_list(values: List[str]) -> List[str]:
+        return [v for v in values if _in_text(v, text_norm)]
+
+    profile.skills.languages = _filter_list(profile.skills.languages)
+    profile.skills.frameworks = _filter_list(profile.skills.frameworks)
+    profile.skills.databases = _filter_list(profile.skills.databases)
+    profile.skills.cloud = _filter_list(profile.skills.cloud)
+    profile.skills.tools = _filter_list(profile.skills.tools)
+    profile.skills.ml_ai = _filter_list(profile.skills.ml_ai)
+    profile.skills.other = _filter_list(profile.skills.other)
+
+    # Filter projects: require name or a key phrase from description to appear
+    filtered_projects = []
+    for p in profile.projects:
+        keep = False
+        if _in_text(p.name, text_norm):
+            keep = True
+        elif p.description:
+            snippet = p.description[:64]
+            keep = _in_text(snippet, text_norm)
+        if keep:
+            filtered_projects.append(p)
+    profile.projects = filtered_projects
+
+    # Filter work experience: require company or title to appear
+    filtered_experience = []
+    for w in profile.work_experience:
+        if _in_text(w.company, text_norm) or _in_text(w.title, text_norm):
+            filtered_experience.append(w)
+    profile.work_experience = filtered_experience
+
+    # Filter achievements and publications by title
+    profile.achievements = [
+        a for a in profile.achievements if _in_text(a.title, text_norm)
+    ]
+    profile.publications = [
+        p for p in profile.publications if _in_text(p.title, text_norm)
+    ]
+
+    # Normalize years_experience / seniority if clearly invalid
+    if profile.years_experience is not None and profile.years_experience < 0:
+        profile.years_experience = None
+    if profile.seniority_level not in {"junior", "mid", "senior", "lead", "principal", "unknown"}:
+        profile.seniority_level = "unknown"
+
+    meta = {
+        "uid": uid,
+        "source": "groq_llm_resume_parser",
+        "model": "groq/llama-3.1-8b-instant",
+        "parsed_at": datetime.now(timezone.utc).isoformat(),
+        "version": "v1",
+    }
+
+    # Persist to Firestore (best-effort)
+    try:
+        doc_ref = (
+            db.collection("users")
+            .document(uid)
+            .collection("profiles")
+            .document("resume_parsed")
+        )
+        doc_ref.set({"profile": profile.dict(), "meta": meta}, merge=True)
+    except Exception:
+        # Do not fail the request solely due to Firestore issues
+        pass
+
+    return ParsedResumeResponse(profile=profile, meta=meta)
+
+
+def _element_text(el) -> str:
+    """Collect all text from an XML element and its descendants (e.g. w:r or w:hyperlink)."""
+    return "".join((t.text or "") for t in el.iter() if hasattr(t, "text") and (t.text or ""))
+
+
+def _paragraph_text_with_hyperlink_urls(doc: "docx.Document") -> str:
+    """Build paragraph text, replacing hyperlink anchor text with the actual URL."""
+    lines = []
+    for paragraph in doc.paragraphs:
+        parts = []
+        for el in paragraph._p:
+            tag = el.tag.split("}")[-1] if "}" in el.tag else el.tag
+            if tag == "hyperlink":
+                r_id = el.get(qn("r:id"))
+                url = ""
+                if r_id and hasattr(doc.part, "rels") and doc.part.rels:
+                    try:
+                        rel = doc.part.rels[r_id]
+                        url = getattr(rel, "target_ref", None) or getattr(rel, "_target", "") or ""
+                    except (KeyError, TypeError, AttributeError):
+                        pass
+                if url:
+                    parts.append(url)
+                else:
+                    parts.append(_element_text(el))
+            elif tag == "r":
+                parts.append(_element_text(el))
+        line = "".join(parts).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _pdf_link_uris(reader: "PdfReader") -> List[str]:
+    """Extract all URI links from PDF page annotations."""
+    uris: List[str] = []
+    for page in reader.pages:
+        try:
+            annots = page.get("/Annots")
+            if not annots:
+                continue
+            for ref in annots if isinstance(annots, list) else [annots]:
+                try:
+                    obj = ref.get_object() if hasattr(ref, "get_object") else ref
+                    if not isinstance(obj, dict) or obj.get("/Subtype") != "/Link":
+                        continue
+                    a = obj.get("/A")
+                    if not a:
+                        continue
+                    if hasattr(a, "get_object"):
+                        a = a.get_object()
+                    if not isinstance(a, dict):
+                        continue
+                    uri = a.get("/URI")
+                    if uri is None:
+                        continue
+                    if hasattr(uri, "get_object"):
+                        uri = uri.get_object()
+                    if isinstance(uri, bytes):
+                        uri = uri.decode("utf-8", errors="replace")
+                    s = str(uri).strip()
+                    if s and s not in uris:
+                        uris.append(s)
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return uris
+
+
 def extract_text(file_bytes: bytes, filename: str) -> str:
     fn = filename.lower()
     if fn.endswith('.pdf'):
         try:
             reader = PdfReader(BytesIO(file_bytes))
-            return "\n".join([page.extract_text() or "" for page in reader.pages])
+            text = "\n".join([page.extract_text() or "" for page in reader.pages])
+            link_uris = _pdf_link_uris(reader)
+            if link_uris:
+                text = text.rstrip() + "\n\n[Links: " + ", ".join(link_uris) + "]"
+            return text
         except Exception as exc:
             raise ValueError(f"Failed to read PDF: {exc}") from exc
 
@@ -63,7 +343,7 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
     elif fn.endswith('.docx'):
         try:
             doc = docx.Document(BytesIO(file_bytes))
-            return "\n".join(paragraph.text for paragraph in doc.paragraphs)
+            return _paragraph_text_with_hyperlink_urls(doc)
         except Exception as exc:
             raise ValueError(f"Failed to read DOCX: {exc}") from exc
 

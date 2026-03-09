@@ -1,8 +1,3 @@
-
-# ========================================
-# 2. models/interview.py - Enhanced models
-# ========================================
-
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -16,7 +11,7 @@ class InterviewType(str, Enum):
     CORE_CS = "core"
     BEHAVIORAL = "behavioral"
     RESUME_BASED = "resume"
-    CUSTOM = "custom"  # New: Custom role
+    CUSTOM = "custom"
 
 
 class DifficultyLevel(str, Enum):

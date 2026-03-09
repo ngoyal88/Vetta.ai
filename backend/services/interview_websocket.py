@@ -1,10 +1,5 @@
-# backend/services/interview_websocket.py
 """
-FIXED: WebSocket Handler with proper audio processing
-Changes:
-1. Removed blocking conditions
-2. Added detailed logging
-3. Fixed audio flow
+WebSocket handler for real-time interview (audio, STT, TTS, LLM).
 """
 import asyncio
 import json
@@ -12,25 +7,24 @@ import base64
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any
-import re
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from services.deepgram_service import DeepgramSTTService
 from services.edge_tts_service import EdgeTTSService
-# If you want to switch back to ElevenLabs later:
-# from services.elevenlabs_service import ElevenLabsTTSService
 from services.elevenlabs_service import TTSCache
 from services.interview_service import InterviewService
 from models.interview import InterviewType, DifficultyLevel
 from utils.redis_client import get_session, update_session
 from utils.logger import get_logger
+from utils.feedback_parser import parse_scores_from_feedback
 from config import get_settings
 from firebase_config import db
 from firebase_admin import firestore
 
 logger = get_logger("InterviewWebSocket")
 settings = get_settings()
+SESSION_TTL = getattr(settings, "interview_session_ttl_seconds", 7200)
 
 
 class InterviewPhase(str, Enum):
@@ -44,23 +38,18 @@ class InterviewPhase(str, Enum):
 
 
 class InterviewWebSocketHandler:
-    """FIXED: WebSocket handler with proper audio flow"""
-    
+    """Handles interview flow over WebSocket."""
+
     def __init__(self, websocket: WebSocket, session_id: str, user_id: Optional[str] = None):
         self.websocket = websocket
         self.session_id = session_id
         self.session_key = f"interview:{session_id}"
         self.user_id = user_id
-        
-        # Services
+
         self.stt_service: Optional[DeepgramSTTService] = None
-        # TTS provider: Edge TTS by default (free-ish).
-        # Switch back to ElevenLabs later by setting `tts_provider` to "elevenlabs"
-        # and replacing the below with: `self.tts_service = ElevenLabsTTSService()`
+        # TTS: Edge by default. Use TTS_PROVIDER=elevenlabs and ElevenLabsTTSService() to switch.
         tts_provider = (getattr(settings, "tts_provider", "edge") or "edge").strip().lower()
         if tts_provider == "elevenlabs":
-            # self.tts_service = ElevenLabsTTSService()  # requires ELEVENLABS_API_KEY
-            # Keeping Edge as runtime default for now.
             self.tts_service = EdgeTTSService(
                 voice=getattr(settings, "edge_tts_voice", "en-US-JennyNeural"),
                 rate=getattr(settings, "edge_tts_rate", "+0%"),
@@ -74,8 +63,7 @@ class InterviewWebSocketHandler:
             )
         self.interview_service = InterviewService()
         self.tts_cache = TTSCache()
-        
-        # State
+
         self.current_phase = InterviewPhase.GREETING
         self.is_processing = False
         self.is_ai_speaking = False
@@ -84,40 +72,18 @@ class InterviewWebSocketHandler:
         self.latest_interim_transcript: str = ""
         self.awaiting_response = False
 
-        # Greeting flow
         self._first_question: Optional[Dict[str, Any]] = None
-        
-        # Locks
+        self._session_started_at: Optional[datetime] = None  # For max duration enforcement
+
         self.processing_lock = asyncio.Lock()
         self.speech_lock = asyncio.Lock()
-        
-        # Monitoring
+
         self.last_activity = datetime.now(timezone.utc)
         self.heartbeat_task = None
         self.audio_chunks_received = 0
         
         logger.info(f"✅ WebSocket handler initialized for session: {session_id}")
 
-    def _parse_scores_from_feedback(self, feedback_text: Optional[str]) -> Dict[str, float]:
-        if not feedback_text:
-            return {}
-
-        scores = {}
-        tech_match = re.search(r"TECHNICAL SKILLS:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
-        comm_match = re.search(r"COMMUNICATION:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
-        overall_match = re.search(r"SCORE:\s*(\d+(?:\.\d+)?)/10", feedback_text, re.IGNORECASE)
-
-        if tech_match:
-            scores["technical"] = float(tech_match.group(1))
-        if comm_match:
-            scores["communication"] = float(comm_match.group(1))
-        if overall_match:
-            scores["overall"] = float(overall_match.group(1))
-        elif scores:
-            scores["overall"] = sum(scores.values()) / len(scores)
-
-        return scores
-    
     async def handle_connection(self):
         """Main connection handler"""
         try:
@@ -130,6 +96,18 @@ class InterviewWebSocketHandler:
             if not session_data:
                 await self.send_error("Session not found")
                 return
+            
+            # Set session start for max duration enforcement
+            started_at_raw = session_data.get("started_at")
+            if isinstance(started_at_raw, str):
+                try:
+                    self._session_started_at = datetime.fromisoformat(started_at_raw.replace("Z", "+00:00"))
+                except Exception:
+                    self._session_started_at = datetime.now(timezone.utc)
+            elif isinstance(started_at_raw, datetime):
+                self._session_started_at = started_at_raw if started_at_raw.tzinfo else started_at_raw.replace(tzinfo=timezone.utc)
+            else:
+                self._session_started_at = datetime.now(timezone.utc)
             
             logger.info(f"📋 Session loaded: {session_data.get('interview_type')}")
             
@@ -250,22 +228,63 @@ class InterviewWebSocketHandler:
         
         elif msg_type == "ping":
             await self.send_message({"type": "pong"})
-    
+
+        elif msg_type == "dsa_next_question":
+            await self._handle_dsa_next_question()
+
+    async def _handle_dsa_next_question(self):
+        """Generate and send next DSA question (no TTS)."""
+        try:
+            session_data = await get_session(self.session_key)
+            if not session_data:
+                await self.send_error("Session not found")
+                return
+            questions = session_data.get("questions", []) or []
+            current_q_index = int(session_data.get("current_question_index", 0))
+            try:
+                difficulty = DifficultyLevel(session_data.get("difficulty", "medium"))
+            except Exception:
+                difficulty = DifficultyLevel.MEDIUM
+            context = self.interview_service._build_context(
+                InterviewType.DSA,
+                session_data.get("resume_data"),
+                session_data.get("custom_role"),
+                session_data.get("years_experience"),
+            )
+            next_question_raw = await self.interview_service._generate_dsa_question(difficulty, context)
+            next_question_obj = {
+                "question": next_question_raw,
+                "type": "coding",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            questions.append(next_question_obj)
+            session_data["questions"] = questions
+            session_data["current_question_index"] = current_q_index + 1
+            session_data["last_updated"] = datetime.now(timezone.utc).isoformat()
+            await update_session(self.session_key, session_data, expire_seconds=SESSION_TTL)
+            self.current_phase = InterviewPhase.DSA_CODING
+            await self.send_message({"type": "phase_change", "phase": "dsa"})
+            await self.send_message({
+                "type": "question",
+                "question": next_question_raw,
+                "phase": "dsa",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            logger.info("📤 Sent next DSA question (no audio)")
+        except Exception as e:
+            logger.error(f"❌ dsa_next_question error: {e}", exc_info=True)
+            await self.send_error("Failed to load next question")
+
     async def _handle_audio(self, audio_bytes: bytes):
-        """
-        FIXED: Handle audio without blocking
-        """
+        """Process incoming audio; echo prevention when AI is speaking."""
         self.audio_chunks_received += 1
-        
-        # Log every 10th chunk
+
         if self.audio_chunks_received % 10 == 0:
             logger.info(
                 f"🎵 Received {self.audio_chunks_received} audio chunks ({len(audio_bytes)} bytes) "
                 f"ai_speaking={self.is_ai_speaking}"
             )
-        
-        # CRITICAL FIX: Don't block on is_processing!
-        # Only check if AI is speaking (echo prevention)
+
         if self.is_ai_speaking:
             logger.debug("⏸️ Ignoring audio - AI speaking (echo prevention)")
             return
@@ -326,14 +345,31 @@ class InterviewWebSocketHandler:
             logger.info("⚠️ No answer text to process")
             await self.send_error("No answer captured yet. Please speak a bit more.")
             return
+        max_answer_length = 10_000
+        if len(complete_text) > max_answer_length:
+            logger.warning(f"Answer too long ({len(complete_text)} chars) for session {self.session_id}")
+            await self.send_error("Answer is too long. Please summarize.")
+            return
 
         if self.processing_lock.locked():
             logger.warning("⚠️ Already processing; ignoring answer_complete")
             return
 
+        if self.current_phase == InterviewPhase.DSA_CODING:
+            logger.info("⏭️ Ignoring answer_complete in DSA phase — use REST /submit-code")
+            return
+
         async with self.processing_lock:
             self.is_processing = True
             try:
+                # Enforce max interview duration
+                max_duration_min = getattr(settings, "max_interview_duration_minutes", 60)
+                if self._session_started_at and max_duration_min > 0:
+                    elapsed_min = (datetime.now(timezone.utc) - self._session_started_at).total_seconds() / 60
+                    if elapsed_min >= max_duration_min:
+                        logger.info(f"Max interview duration ({max_duration_min} min) reached for {self.session_id}")
+                        await self._end_interview()
+                        return
                 # Special-case: greeting phase expects a short intro from the candidate.
                 # Do NOT advance question index here; just store intro and ask the first real question.
                 if self.current_phase == InterviewPhase.GREETING:
@@ -341,7 +377,7 @@ class InterviewWebSocketHandler:
                     session_data = await get_session(self.session_key)
                     if session_data is not None:
                         session_data["candidate_intro"] = complete_text
-                        await update_session(self.session_key, session_data)
+                        await update_session(self.session_key, session_data, expire_seconds=SESSION_TTL)
 
                     first_question = None
                     if self._first_question is not None:
@@ -395,13 +431,56 @@ class InterviewWebSocketHandler:
         await self.send_status("listening")
         await self.send_message({"type": "interrupted"})
     
+    def _is_dsa_session(self, session_data: Dict[str, Any]) -> bool:
+        """True if this session is a DSA (coding) interview."""
+        it = session_data.get("interview_type") or ""
+        return str(it).lower() == "dsa"
+    
+    def _get_dsa_inner_question(self, payload: Any) -> Optional[Dict[str, Any]]:
+        """Return the inner DSA object from a wrapper or the payload itself if already inner."""
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("type") == "coding" and isinstance(payload.get("question"), dict):
+            return payload["question"]
+        if isinstance(payload.get("title"), str) and "test_cases" in payload:
+            return payload
+        return None
+    
     async def _start_greeting(self, session_data: Dict[str, Any]):
-        """Send initial greeting"""
+        """Send initial greeting, or for DSA go straight to first coding question."""
         try:
             logger.info("👋 Starting greeting...")
             
-            self.current_phase = InterviewPhase.GREETING
+            questions = session_data.get("questions", [])
+            first_question = questions[0] if questions else None
             
+            if not first_question:
+                await self.send_error("No questions available")
+                return
+            
+            # DSA: skip voice greeting, send phase_change then question (inner, no audio)
+            if self._is_dsa_session(session_data):
+                inner = self._get_dsa_inner_question(first_question) or first_question
+                test_cases = inner.get("test_cases") if isinstance(inner, dict) else []
+                if not test_cases or not isinstance(test_cases, list):
+                    await self.send_error("No valid coding question available")
+                    return
+                self._first_question = first_question
+                self.current_phase = InterviewPhase.DSA_CODING
+                await self.send_message({"type": "phase_change", "phase": "dsa"})
+                await self.send_message({
+                    "type": "question",
+                    "question": inner,
+                    "phase": "dsa",
+                    "audio": None,
+                    "spoken_text": None,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+                logger.info("✅ DSA: sent phase_change + first question (no audio)")
+                return
+            
+            # Non-DSA: voice greeting, then wait for answer_complete to send first question
+            self.current_phase = InterviewPhase.GREETING
             user_name = session_data.get("candidate_name") or (
                 (session_data.get("resume_data", {}) or {}).get("name", {}).get("raw")
                 if isinstance(session_data.get("resume_data"), dict) else None
@@ -410,24 +489,10 @@ class InterviewWebSocketHandler:
             custom_role = session_data.get("custom_role")
             role = custom_role or interview_type
             
-            # Generate greeting
             greeting = await self.interview_service.generate_greeting(user_name, role)
             logger.info(f"✅ Greeting: {greeting}")
-            
-            # Get first question
-            questions = session_data.get("questions", [])
-            first_question = questions[0] if questions else None
-            
-            if not first_question:
-                await self.send_error("No questions available")
-                return
-
-            # Save for after the candidate intro.
             self._first_question = first_question
-            
             logger.info(f"✅ First question ready: {first_question}")
-            
-            # Send greeting only; wait for candidate intro before sending Q1.
             await self._speak_response(greeting)
             logger.info("✅ Greeting sent; awaiting candidate intro")
             
@@ -479,19 +544,20 @@ class InterviewWebSocketHandler:
                 
                 if not audio_data:
                     logger.error("❌ No audio generated")
-                    # Still send the text so UI doesn't go silent
+                    inner = self._get_dsa_inner_question(response) or response
                     await self.send_message({
                         "type": "question",
-                        "question": response,
+                        "question": inner,
                         "phase": self.current_phase.value,
                         "audio": None,
+                        "spoken_text": speak_text,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                     await self.send_error("TTS failed: no audio generated")
                     self.is_ai_speaking = False
                     return
                 
-                # Send to client
+                # Send to client (inner object used inside send_question for DSA)
                 await self.send_question(response, audio_data, speak_text)
                 
                 # Client will notify when done playing
@@ -556,7 +622,6 @@ class InterviewWebSocketHandler:
                 })
 
             # Generate next question
-            # TODO: Re-enable DSA question generation post-deploy
             if interview_type == InterviewType.DSA:
                 context = self.interview_service._build_context(
                     interview_type,
@@ -584,14 +649,23 @@ class InterviewWebSocketHandler:
             session_data["current_question_index"] = current_q_index + 1
             session_data["last_updated"] = datetime.now(timezone.utc).isoformat()
 
-            await update_session(self.session_key, session_data)
+            await update_session(self.session_key, session_data, expire_seconds=SESSION_TTL)
 
-            # TODO: Re-enable DSA phase switch post-deploy
             if next_question_obj.get("type") == "coding":
                 self.current_phase = InterviewPhase.DSA_CODING
                 await self.send_message({"type": "phase_change", "phase": "dsa"})
-
-            await self._speak_response(next_question_obj)
+                inner = self._get_dsa_inner_question(next_question_obj) or next_question_obj
+                await self.send_message({
+                    "type": "question",
+                    "question": inner,
+                    "phase": "dsa",
+                    "audio": None,
+                    "spoken_text": None,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+                logger.info("📤 Sent skipped DSA question (no audio)")
+            else:
+                await self._speak_response(next_question_obj)
 
         except Exception as e:
             logger.error(f"❌ Skip question error: {e}", exc_info=True)
@@ -636,7 +710,7 @@ class InterviewWebSocketHandler:
             }
 
             final_feedback = await self.interview_service.generate_final_feedback(feedback_payload)
-            scores = self._parse_scores_from_feedback(final_feedback.get("feedback") if isinstance(final_feedback, dict) else None)
+            scores = parse_scores_from_feedback(final_feedback.get("feedback") if isinstance(final_feedback, dict) else None)
 
             # Update session state
             completion_reason = "ended_early" if session_data.get("status") != "completed" else "completed"
@@ -651,7 +725,7 @@ class InterviewWebSocketHandler:
             session_data["questions_answered"] = len(session_data.get("responses", []))
             session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
 
-            await update_session(self.session_key, session_data)
+            await update_session(self.session_key, session_data, expire_seconds=SESSION_TTL)
 
             # Persist to Firestore (best effort)
             try:
@@ -705,19 +779,23 @@ class InterviewWebSocketHandler:
     
     # Message senders
     
-    async def send_question(self, question: Dict[str, Any], audio: bytes, spoken_text: Optional[str] = None):
-        """Send question with audio"""
+    async def send_question(self, question: Dict[str, Any], audio: Optional[bytes], spoken_text: Optional[str] = None):
+        """Send question (with or without audio). For DSA/coding, normalizes to inner object so client gets correct shape."""
+        inner = self._get_dsa_inner_question(question) or question
         message = {
             "type": "question",
-            "question": question,
+            "question": inner,
             "phase": self.current_phase.value,
             "spoken_text": spoken_text,
-            "audio": base64.b64encode(audio).decode("utf-8"),
-            "audio_content_type": "audio/mpeg",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        if audio:
+            message["audio"] = base64.b64encode(audio).decode("utf-8")
+            message["audio_content_type"] = "audio/mpeg"
+        else:
+            message["audio"] = None
         await self.send_message(message)
-        logger.info("📤 Sent question with audio")
+        logger.info("📤 Sent question" + (" with audio" if audio else " (no audio)"))
     
     async def send_transcript(self, text: str, is_final: bool):
         """Send transcript"""
