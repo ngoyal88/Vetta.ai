@@ -1,5 +1,7 @@
 # services/groq_service.py
-from typing import List, Dict, Optional
+import asyncio
+import threading
+from typing import AsyncGenerator, List, Dict, Optional
 from groq import Groq
 from config import get_settings
 from utils.logger import get_logger
@@ -65,6 +67,53 @@ class GroqService:
         except Exception as e:
             logger.error(f"Groq chat error: {e}", exc_info=True)
             return f"Error in chat: {str(e)}"
+
+    async def generate_text_stream(
+        self,
+        prompt: str,
+        temperature: Optional[float] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream text tokens from Groq without blocking the event loop."""
+        if not self.client:
+            yield "LLM service not configured"
+            return
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[object] = asyncio.Queue()
+        sentinel = object()
+
+        def _run_stream() -> None:
+            try:
+                stream = self.client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=self.model,
+                    temperature=(temperature if temperature is not None else self.temperature),
+                    max_tokens=self.max_tokens,
+                    stream=True,
+                )
+                for chunk in stream:
+                    try:
+                        delta = chunk.choices[0].delta.content
+                    except Exception:
+                        delta = None
+                    if delta:
+                        loop.call_soon_threadsafe(queue.put_nowait, delta)
+            except Exception as e:
+                logger.error(f"Groq streaming error: {e}", exc_info=True)
+                loop.call_soon_threadsafe(queue.put_nowait, e)
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+        threading.Thread(target=_run_stream, daemon=True).start()
+
+        while True:
+            item = await queue.get()
+            if item is sentinel:
+                break
+            if isinstance(item, Exception):
+                yield f"Error generating response: {item}"
+                break
+            yield str(item)
 
     async def json_completion(self, system_prompt: str, user_prompt: str) -> str:
         """
