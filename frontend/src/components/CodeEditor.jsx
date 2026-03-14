@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import Editor from "@monaco-editor/react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { Play, ChevronRight, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Play, ChevronRight, CheckCircle, XCircle, Clock, AlertCircle, Zap, WifiOff } from "lucide-react";
 import { api } from "../services/api";
 
 // Language IDs must match backend code_execution_service (Judge0)
@@ -33,10 +33,99 @@ function getInitialCode(question, language) {
   return defaultCode[language] || "";
 }
 
-const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextProblem }) => {
+function getErrorDisplay(result) {
+  if (!result?.error_type) return null;
+  const types = {
+    time_limit_exceeded: {
+      icon: Clock,
+      label: "Time limit exceeded",
+      color: "text-amber-400",
+      bg: "bg-amber-500/10 border-amber-500/30",
+      message: result.error_message || "Your code took too long to run.",
+      showCode: false,
+    },
+    compilation_error: {
+      icon: AlertCircle,
+      label: "Compilation error",
+      color: "text-red-400",
+      bg: "bg-red-500/10 border-red-500/30",
+      message: result.error_message || "Your code did not compile.",
+      showCode: true,
+    },
+    runtime_error: {
+      icon: Zap,
+      label: "Runtime error",
+      color: "text-red-400",
+      bg: "bg-red-500/10 border-red-500/30",
+      message: result.error_message || "Your code crashed at runtime.",
+      showCode: true,
+    },
+    judge0_timeout: {
+      icon: Clock,
+      label: "Execution timeout",
+      color: "text-amber-400",
+      bg: "bg-amber-500/10 border-amber-500/30",
+      message: result.error_message || "The runner timed out. Try again.",
+      showCode: false,
+    },
+    judge0_unavailable: {
+      icon: WifiOff,
+      label: "Runner unavailable",
+      color: "text-amber-400",
+      bg: "bg-amber-500/10 border-amber-500/30",
+      message: result.error_message || "Code execution is temporarily unavailable. Try again in a moment.",
+      showCode: false,
+    },
+    wrong_answer: {
+      icon: XCircle,
+      label: "Wrong answer",
+      color: "text-red-400",
+      bg: "bg-red-500/10 border-red-500/30",
+      message: result.error_message || "Output does not match expected.",
+      showCode: true,
+    },
+  };
+  return types[result.error_type] || {
+    icon: AlertCircle,
+    label: "Error",
+    color: "text-red-400",
+    bg: "bg-red-500/10 border-red-500/30",
+    message: result.error_message || result.error || "Something went wrong.",
+    showCode: true,
+  };
+}
+
+function buildExecutionSummary(result, fallbackError = "") {
+  if (fallbackError) return fallbackError;
+  if (result?.result?.error_message) return result.result.error_message;
+  if (result?.result?.error) return result.result.error;
+
+  const testResults = Array.isArray(result?.result?.test_results) ? result.result.test_results : [];
+  const firstFailure = testResults.find((entry) => entry?.error || entry?.status !== "Accepted" || !entry?.passed);
+  if (firstFailure?.error) return firstFailure.error;
+  if (firstFailure?.output) return String(firstFailure.output);
+  if (firstFailure?.status) return String(firstFailure.status);
+  if (testResults.length > 0) {
+    return testResults
+      .map((entry, index) => `Case ${index + 1}: ${entry?.passed ? "passed" : entry?.status || "failed"}`)
+      .join("\n");
+  }
+  return result?.passed ? "Execution completed successfully." : "";
+}
+
+const CodeEditor = forwardRef(({
+  sessionId,
+  question,
+  onRequestNextQuestion,
+  loadingNextProblem,
+  onControlMessage,
+}, ref) => {
   const [language, setLanguage] = useState("python");
   const [code, setCode] = useState(() => getInitialCode(question, "python"));
   const [loading, setLoading] = useState(false);
+  const latestQuestionIdRef = useRef(question?.question_id || null);
+  const lastCodeLengthRef = useRef(0);
+  const lastCodeChangeTimeRef = useRef(Date.now());
 
   // Test case panel state
   const [activeTestTab, setActiveTestTab] = useState("case-0");
@@ -44,6 +133,13 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
   const [runError, setRunError] = useState(null);
   const [lastPassCount, setLastPassCount] = useState(null);
   const [lastTotalCount, setLastTotalCount] = useState(null);
+
+  useImperativeHandle(ref, () => ({
+    getValue: () => code,
+    setValue: (v) => setCode(v != null ? String(v) : ""),
+    getLanguage: () => language,
+    setLanguage: (lang) => { if (lang) setLanguage(lang); },
+  }), [code, language]);
 
   const visibleCases = Array.isArray(question?.test_cases)
     ? question.test_cases.filter(tc => !tc.is_hidden)
@@ -53,11 +149,32 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
     const initial = getInitialCode(question, language);
     setCode(initial);
     setTestResults(null);
+    lastCodeLengthRef.current = (initial || "").length;
+    lastCodeChangeTimeRef.current = Date.now();
     setRunError(null);
     setLastPassCount(null);
     setLastTotalCount(null);
     setActiveTestTab("case-0");
   }, [question, language]);
+
+  useEffect(() => {
+    latestQuestionIdRef.current = question?.question_id || null;
+  }, [question?.question_id]);
+
+  useEffect(() => {
+    if (typeof onControlMessage !== "function" || !latestQuestionIdRef.current) return undefined;
+
+    const timeoutId = setTimeout(() => {
+      onControlMessage({
+        type: "code_update",
+        code,
+        language,
+        timestamp: Date.now(),
+      });
+    }, 800);
+
+    return () => clearTimeout(timeoutId);
+  }, [code, language, onControlMessage]);
 
   const handleLanguageChange = (newLang) => {
     setLanguage(newLang);
@@ -80,6 +197,12 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
       setTestResults(null);
 
       const result = await api.submitCode(sessionId, question.question_id, language, code);
+      const executionSummary = buildExecutionSummary(result);
+      const hasErrors = Boolean(
+        result?.result?.error_message ||
+        result?.result?.error ||
+        !result?.passed
+      );
 
       setLastPassCount(result.tests_passed ?? 0);
       setLastTotalCount(result.total_tests ?? 0);
@@ -89,12 +212,30 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
         setTestResults([]);
         setActiveTestTab("result");
         toast.error("Code execution unavailable");
+        if (typeof onControlMessage === "function") {
+          onControlMessage({
+            type: "execution_result",
+            output: executionSummary,
+            has_errors: true,
+            judge0_unavailable: true,
+            timestamp: Date.now(),
+          });
+        }
         return;
       }
 
       if (result?.result?.error) {
         setRunError(result.result.error);
         setActiveTestTab("result");
+        if (typeof onControlMessage === "function") {
+          onControlMessage({
+            type: "execution_result",
+            output: executionSummary,
+            has_errors: true,
+            judge0_unavailable: false,
+            timestamp: Date.now(),
+          });
+        }
         return;
       }
 
@@ -112,13 +253,25 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
       }
 
       setTestResults(rawResults);
+      const hasJudge0Issue = rawResults.some(
+        (r) => r.error_type === "judge0_unavailable" || r.error_type === "judge0_timeout"
+      );
+      if (typeof onControlMessage === "function") {
+        onControlMessage({
+          type: "execution_result",
+          output: executionSummary,
+          has_errors: hasErrors,
+          judge0_unavailable: hasJudge0Issue,
+          timestamp: Date.now(),
+        });
+      }
       // When execution service is unavailable, all results have the same error — show it on Result tab
-      const firstError = rawResults[0]?.error;
-      if (firstError && rawResults.every((r) => r.error === firstError)) {
+      const firstError = rawResults[0]?.error_message ?? rawResults[0]?.error;
+      if (firstError && rawResults.every((r) => (r.error_message ?? r.error) === firstError)) {
         setRunError(firstError);
       }
       // Switch to first failing case, or result tab if all pass
-      const firstFail = rawResults.findIndex(r => !r.passed && !r.hidden);
+      const firstFail = rawResults.findIndex((r) => !r.passed && !r.hidden);
       if (firstFail >= 0) {
         setActiveTestTab(`case-${firstFail}`);
       } else {
@@ -129,6 +282,14 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
       toast.error("Code execution failed");
       setRunError(err.message);
       setActiveTestTab("result");
+      if (typeof onControlMessage === "function") {
+        onControlMessage({
+          type: "execution_result",
+          output: buildExecutionSummary(null, err.message),
+          has_errors: true,
+          timestamp: Date.now(),
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -208,7 +369,20 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
           height="100%"
           language={language}
           value={code}
-          onChange={(value) => setCode(value || "")}
+          onChange={(value) => {
+            const newCode = value || "";
+            const now = Date.now();
+            const prevLen = lastCodeLengthRef.current;
+            const prevTime = lastCodeChangeTimeRef.current;
+            lastCodeLengthRef.current = newCode.length;
+            lastCodeChangeTimeRef.current = now;
+            const charDelta = newCode.length - prevLen;
+            const timeDelta = now - prevTime;
+            if (charDelta > 200 && timeDelta < 1000 && typeof onControlMessage === "function") {
+              onControlMessage({ type: "paste_detected", chars_added: charDelta, timestamp: now });
+            }
+            setCode(newCode);
+          }}
           theme="vs-dark"
           options={{
             fontSize: 14,
@@ -321,22 +495,40 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
                     {tc.output != null ? String(tc.output) : tc.expected_output != null ? String(tc.expected_output) : <span className="text-zinc-500 italic">Not available</span>}
                   </pre>
                 </div>
-                {result && (
-                  <div>
-                    <span className={`font-sans font-medium text-xs ${result.passed ? 'text-green-400' : 'text-red-400'}`}>
-                      Your Output {result.passed ? '✓' : '✗'}
-                    </span>
-                    {result.error ? (
-                      <pre className="mt-1 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap text-xs bg-red-900/30 text-red-300">
-                        {result.error}
-                      </pre>
-                    ) : (
-                      <pre className={`mt-1 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap text-xs ${result.passed ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
-                        {result.output != null ? String(result.output) : <span className="italic opacity-60">No output</span>}
-                      </pre>
-                    )}
-                  </div>
-                )}
+                {result && (() => {
+                  const errDisplay = getErrorDisplay(result);
+                  return (
+                    <div>
+                      <span className={`font-sans font-medium text-xs ${result.passed ? "text-green-400" : "text-red-400"}`}>
+                        Your Output {result.passed ? "✓" : "✗"}
+                      </span>
+                      {errDisplay ? (
+                        <div className={`mt-1 rounded-lg border px-3 py-2 ${errDisplay.bg}`}>
+                          <div className={`flex items-center gap-2 font-sans font-medium text-xs ${errDisplay.color}`}>
+                            {React.createElement(errDisplay.icon, { className: "w-3.5 h-3.5 flex-shrink-0" })}
+                            {errDisplay.label}
+                          </div>
+                          <pre className="mt-1 text-xs text-zinc-300 whitespace-pre-wrap font-mono overflow-x-auto">
+                            {errDisplay.message}
+                          </pre>
+                          {errDisplay.showCode && (result.output != null || result.error_message) && (
+                            <pre className="mt-2 text-xs text-zinc-400 whitespace-pre-wrap font-mono overflow-x-auto border-t border-[var(--border-subtle)] pt-2">
+                              {result.output != null ? String(result.output) : result.error_message || ""}
+                            </pre>
+                          )}
+                        </div>
+                      ) : result.error || result.error_message ? (
+                        <pre className="mt-1 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap text-xs bg-red-900/30 text-red-300">
+                          {result.error_message ?? result.error}
+                        </pre>
+                      ) : (
+                        <pre className={`mt-1 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap text-xs ${result.passed ? "bg-green-900/30 text-green-300" : "bg-red-900/30 text-red-300"}`}>
+                          {result.output != null ? String(result.output) : <span className="italic opacity-60">No output</span>}
+                        </pre>
+                      )}
+                    </div>
+                  );
+                })()}
                 {!result && (
                   <p className="text-zinc-500 text-xs italic font-sans">Run your code to see output.</p>
                 )}
@@ -383,6 +575,8 @@ const CodeEditor = ({ sessionId, question, onRequestNextQuestion, loadingNextPro
       )}
     </div>
   );
-};
+});
+
+CodeEditor.displayName = "CodeEditor";
 
 export default CodeEditor;

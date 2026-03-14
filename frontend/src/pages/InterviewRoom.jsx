@@ -166,6 +166,7 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
         loadingNextProblem={loadingNextProblem}
         timer={phase === 'dsa' ? formatTimer(elapsedSeconds) : null}
         difficulty={currentQuestion?.difficulty || null}
+        transport="WebSocket"
       />
 
       <div className="flex-1 overflow-hidden min-h-0">

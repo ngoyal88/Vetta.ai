@@ -10,10 +10,8 @@ from typing import Optional, Dict, Any
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from services.deepgram_service import DeepgramSTTService
-from services.edge_tts_service import EdgeTTSService
-from services.elevenlabs_service import TTSCache
-from services.interview_service import InterviewService
+from services.integrations import DeepgramSTTService, EdgeTTSService, TTSCache
+from services.interview.interview_service import InterviewService
 from models.interview import InterviewType, DifficultyLevel
 from utils.redis_client import get_session, update_session
 from utils.logger import get_logger
@@ -274,7 +272,7 @@ class InterviewWebSocketHandler:
         except Exception as e:
             logger.error(f"❌ dsa_next_question error: {e}", exc_info=True)
             await self.send_error("Failed to load next question")
-
+    
     async def _handle_audio(self, audio_bytes: bytes):
         """Process incoming audio; echo prevention when AI is speaking."""
         self.audio_chunks_received += 1
@@ -850,3 +848,4 @@ class InterviewWebSocketHandler:
         self.tts_cache.clear()
         
         logger.info(f"✅ Cleanup complete. Received {self.audio_chunks_received} audio chunks total")
+

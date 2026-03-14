@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import resume, interview_session, websocket_routes
+from routes import resume, websocket_routes, livekit
+from routes.interview import router as interview_router
 from config import get_settings
 from utils.logger import setup_logging, get_logger
 from utils.redis_client import test_connection, close_redis
-from services.interview_service import InterviewService
+from services.interview import InterviewService
 
 setup_logging()
 log = get_logger(__name__)
@@ -19,7 +20,7 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,9 +28,10 @@ app.add_middleware(
 
 # Include routers
 app.include_router(resume.router)
-app.include_router(interview_session.router)
 app.include_router(websocket_routes.router)
 app.include_router(websocket_routes.legacy_router)
+app.include_router(livekit.router)
+app.include_router(interview_router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -117,7 +119,9 @@ async def health_check():
     llm_configured = bool(settings.llm_api_key or settings.groq_api_key)
     tts_edge = (getattr(settings, "tts_provider", "edge") or "edge").lower() == "edge"
     eleven_configured = bool(settings.elevenlabs_api_key)
-    livekit_configured = bool(settings.livekit_api_key and settings.livekit_api_secret)
+    livekit_configured = bool(
+        settings.livekit_api_key and settings.livekit_api_secret and settings.livekit_url
+    )
 
     try:
         from firebase_admin import _apps as firebase_apps  # type: ignore

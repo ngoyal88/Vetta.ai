@@ -3,8 +3,6 @@
   "version": "0.2.0",
   "private": true,
   "dependencies": {
-    "@livekit/components-react": "^2.6.3",
-    "@livekit/components-styles": "^1.1.4",
     "@monaco-editor/react": "^4.7.0",
     "@sentry/react": "^8.50.0",
     "@testing-library/dom": "^10.4.0",

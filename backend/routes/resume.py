@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 
-from services.resume_parser import parse_resume_llm
+from services.resume import parse_resume_llm
 from utils.auth import verify_firebase_token
 from utils.logger import get_logger
 

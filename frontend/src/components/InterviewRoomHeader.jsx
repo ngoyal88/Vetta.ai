@@ -9,7 +9,7 @@ const difficultyColors = {
 };
 
 export default function InterviewRoomHeader(props) {
-  const { connected, phase, onSkip, onEndInterview, loadingNextProblem, timer, difficulty } = props;
+  const { connected, phase, onSkip, onEndInterview, loadingNextProblem, timer, difficulty, transport } = props;
   const isDSA = phase === 'dsa';
 
   return (
@@ -23,6 +23,17 @@ export default function InterviewRoomHeader(props) {
             />
             <span className="text-xs text-zinc-500">{connected ? 'Connected' : 'Connecting…'}</span>
           </div>
+          {transport && (
+            <>
+              <div className="h-3 w-px bg-[var(--border-subtle)]" aria-hidden />
+              <span
+                className="text-xs px-2 py-0.5 rounded bg-overlay border border-[var(--border-subtle)] text-zinc-400"
+                title={`Transport: ${transport}`}
+              >
+                {transport}
+              </span>
+            </>
+          )}
           <div className="h-3 w-px bg-[var(--border-subtle)]" aria-hidden />
           <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border-subtle)]" role="status">
             {isDSA ? <Code className="w-3 h-3 text-cyan-500" aria-hidden /> : <Mic className="w-3 h-3 text-cyan-500" aria-hidden />}
