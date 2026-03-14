@@ -24,13 +24,12 @@ google-generativeai
 numpy<2.0.0
 groq
 
-# LiveKit
-livekit>=0.11.0
-livekit-agents>=0.8.0
-livekit-plugins-deepgram>=0.6.0
-livekit-plugins-openai>=0.7.0
-livekit-plugins-elevenlabs>=0.1.0
-deepgram-sdk 
+# LiveKit (transport only; no worker)
+livekit>=0.14.0
+livekit-api>=0.7.0
+
+# Speech: STT (Deepgram) and TTS (Edge, ElevenLabs)
+deepgram-sdk
 elevenlabs
 edge-tts>=6.1.12
 
@@ -45,4 +44,3 @@ tenacity
 
 # Monitoring / Error Tracking
 sentry-sdk[fastapi]>=2.0.0
-sentry_sdk

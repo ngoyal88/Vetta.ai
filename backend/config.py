@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
-    # LiveKit
+    # LiveKit (transport only; no worker)
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     edge_tts_voice: str = "en-US-JennyNeural"
     edge_tts_rate: str = "+0%"
     edge_tts_pitch: str = "+0Hz"
+
+    # Streaming voice interview controls
+    streaming_tts_enabled: bool = True
+    streaming_llm_enabled: bool = True
+    livekit_tts_transport: str = "bytes"  # bytes | packets
+    deepgram_endpointing_ms: int = 500
+    deepgram_utterance_end_ms: int = 2000
+    deepgram_silence_warning_seconds: int = 5
+    deepgram_auto_process_silence_seconds: int = 8
+    deepgram_waiting_for_speech_seconds: int = 15
 
     # Code execution (Judge0)
     judge0_api_key: str = ""
