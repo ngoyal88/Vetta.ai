@@ -15,6 +15,7 @@ import StartTab from './dashboard/StartTab';
 import ResumeTab from './dashboard/ResumeTab';
 import HistoryTab from './dashboard/HistoryTab';
 import AccountTab from './dashboard/AccountTab';
+import { PreSessionCheckerWithBrowserCheck } from '../components/PreSessionChecker';
 
 const SIDEBAR_ITEMS = [
   { id: 'start', label: 'Start', icon: Mic },
@@ -63,6 +64,8 @@ const Dashboard = () => {
   const [profilePhoto, setProfilePhoto] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [deletingAccountState, setDeletingAccountState] = useState(false);
+  const [showPreCheck, setShowPreCheck] = useState(false);
+  const [preCheckSessionId, setPreCheckSessionId] = useState(null);
 
   const resumeStorageKey = useMemo(
     () => (currentUser ? `resume_data_${currentUser.uid}` : 'resume_data'),
@@ -285,7 +288,8 @@ const Dashboard = () => {
           yearsExperience: yearsExperience ? Number(yearsExperience) : null,
         })
       );
-      navigate(`/interview/${sessionId}`);
+      setPreCheckSessionId(sessionId);
+      setShowPreCheck(true);
     } catch (err) {
       console.error(err);
       toast.error('Failed to start interview: ' + err.message);
@@ -307,6 +311,22 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-base pt-12 flex">
+      {showPreCheck && preCheckSessionId && (
+        <PreSessionCheckerWithBrowserCheck
+          sessionId={preCheckSessionId}
+          getAuthToken={() => currentUser?.getIdToken?.()}
+          onAllPassed={() => {
+            const id = preCheckSessionId;
+            setShowPreCheck(false);
+            setPreCheckSessionId(null);
+            navigate(`/interview/${id}`);
+          }}
+          onCancel={() => {
+            setShowPreCheck(false);
+            setPreCheckSessionId(null);
+          }}
+        />
+      )}
       {/* Sidebar: 64px collapsed, 240px expanded */}
       <aside
         className="fixed left-0 top-12 bottom-0 z-30 flex flex-col border-r border-[var(--border-subtle)] bg-raised transition-[width] duration-300 ease-out overflow-hidden"
