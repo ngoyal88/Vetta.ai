@@ -1,6 +1,7 @@
 # services/interview_service.py
+import asyncio
 import json
-from typing import Dict, List, Optional, Any, Union
+from typing import AsyncGenerator, Dict, List, Optional, Any, Union
 from datetime import datetime, timezone
 from services.integrations import GeminiService, GroqService
 from services.interview.leetcode_service import DSA_EXCLUDE_TOPICS, LeetCodeService
@@ -9,6 +10,7 @@ from config import get_settings
 from models.interview import InterviewType, DifficultyLevel
 from utils.logger import get_logger
 from utils.redis_client import get_session, update_session
+from utils.response_validator import process_response
 
 _lc = LeetCodeService()
 
@@ -118,6 +120,150 @@ class InterviewService:
             else:
                 logger.info("LLM provider unset/unknown; using Gemini")
                 self.llm = GeminiService()
+        self.eval_llm = GroqService() if settings.groq_api_key else self.llm
+
+        self._fallback_llm = None
+        if provider == "groq" and getattr(settings, "llm_api_key", None):
+            self._fallback_llm = GeminiService()
+        elif provider == "gemini" and getattr(settings, "groq_api_key", None):
+            self._fallback_llm = GroqService()
+        elif not provider or provider not in ("groq", "gemini"):
+            if settings.groq_api_key and settings.llm_api_key:
+                self._fallback_llm = GeminiService() if self.llm.__class__.__name__ == "GroqService" else GroqService()
+
+    def _is_retryable_error(self, e: Exception) -> bool:
+        code = getattr(e, "status_code", None) or getattr(e, "code", None)
+        if code is not None:
+            return int(code) in (429, 500, 503)
+        msg = (e.args[0] or str(e)) if e.args else str(e)
+        return "429" in msg or "500" in msg or "503" in msg or "timeout" in msg.lower()
+
+    async def _call_llm_with_fallback(
+        self,
+        prompt: str,
+        temperature: float = 0.7,
+        llm: Optional[Any] = None,
+        fallback_llm: Optional[Any] = None,
+    ) -> str:
+        llm = llm if llm is not None else self.llm
+        fallback_llm = fallback_llm if fallback_llm is not None else self._fallback_llm
+        safe_fallback = "I'm having trouble generating a response right now. Could you try rephrasing or continuing?"
+
+        async def _try_one(provider_llm: Any, validate: bool = True) -> Optional[str]:
+            try:
+                raw = await asyncio.wait_for(
+                    provider_llm.generate_text(prompt, temperature=temperature),
+                    15.0,
+                )
+                if not raw:
+                    return None
+                if validate:
+                    return process_response(raw)
+                return raw.strip() or None
+            except asyncio.TimeoutError:
+                logger.warning("LLM call timed out after 15s")
+                return None
+            except Exception as e:
+                if self._is_retryable_error(e):
+                    logger.warning("LLM retryable error: %s", e)
+                else:
+                    logger.error("LLM error: %s", e, exc_info=True)
+                return None
+
+        result = await _try_one(llm)
+        if result:
+            return result
+        if fallback_llm and fallback_llm is not llm:
+            logger.info("Trying fallback LLM provider")
+            result = await _try_one(fallback_llm)
+            if result:
+                return result
+        return safe_fallback
+
+    async def _call_llm_raw_with_fallback(
+        self,
+        prompt: str,
+        temperature: float = 0.0,
+        llm: Optional[Any] = None,
+        fallback_llm: Optional[Any] = None,
+        empty_fallback: str = "{}",
+    ) -> str:
+        """Call LLM with fallback; return raw string (no response validation). For JSON etc."""
+        llm = llm if llm is not None else self.llm
+        fallback_llm = fallback_llm if fallback_llm is not None else self._fallback_llm
+
+        async def _try_one(provider_llm: Any) -> Optional[str]:
+            try:
+                raw = await asyncio.wait_for(
+                    provider_llm.generate_text(prompt, temperature=temperature),
+                    15.0,
+                )
+                return (raw or "").strip() or None
+            except asyncio.TimeoutError:
+                logger.warning("LLM call timed out after 15s")
+                return None
+            except Exception as e:
+                if self._is_retryable_error(e):
+                    logger.warning("LLM retryable error: %s", e)
+                else:
+                    logger.error("LLM error: %s", e, exc_info=True)
+                return None
+
+        result = await _try_one(llm)
+        if result:
+            return result
+        if fallback_llm and fallback_llm is not llm:
+            result = await _try_one(fallback_llm)
+            if result:
+                return result
+        return empty_fallback
+
+    def _build_interviewer_prompt(
+        self,
+        previous_qa: List[Dict],
+        interview_type: InterviewType,
+        llm_context: str = "",
+    ) -> str:
+        last_pairs = previous_qa[-4:]
+        conversation_parts = []
+        for qa in last_pairs:
+            q_entry = qa.get("question", {})
+            q_text = _extract_question_text(q_entry)
+            a_text = qa.get("response", "")
+            conversation_parts.append(f"Interviewer: {q_text}\nCandidate: {a_text[:500]}")
+        conversation = "\n\n".join(conversation_parts) or "Interviewer: Let's begin.\nCandidate: (no response yet)"
+        interview_type_str = interview_type.value if isinstance(interview_type, InterviewType) else str(interview_type)
+        context_block = llm_context.strip() or f"INTERVIEW TYPE: {interview_type_str}\nCONVERSATION SO FAR:\n{conversation}"
+
+        return f"""SYSTEM PROMPT FOR INTERVIEWER LLM:
+
+You are a senior software engineer conducting a real technical interview.
+You are not a question dispenser. You are a person having a conversation.
+
+Your personality:
+- Curious and direct. You ask because you genuinely want to understand.
+- Patient but not passive. If an answer is incomplete, you probe.
+- You push harder when someone is doing well. You back off when they're lost.
+- You occasionally say "hmm" or pause. You're thinking too.
+- You never say "Great answer!" or "Excellent!" - it sounds fake.
+  Instead: "Right.", "Okay, that makes sense.", "Interesting." or nothing.
+- You reference things said earlier. You remember the whole conversation.
+- When the candidate is coding, you acknowledge what you see on screen.
+
+Your one rule:
+Always react to what was JUST said before asking anything new.
+Never jump to the next question without acknowledging the last answer.
+Even a single word ("Right.") is enough. Never skip this.
+
+THE CONTEXT BELOW IS YOUR REALITY. Trust it completely.
+Adapt everything you say to what it tells you about this candidate right now.
+
+{context_block}
+
+RECENT DIALOGUE:
+{conversation}
+
+Now respond as the interviewer. One focused thing at a time."""
 
     async def generate_greeting(self, candidate_name: str, role: str) -> str:
         """Generates a warm, professional intro"""
@@ -129,12 +275,13 @@ Keep it friendly and encouraging. Do NOT ask a technical question yet.
 
 Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited to learn more about your experience today."
 """
-        return await self.llm.generate_text(prompt, temperature=0.7)
+        return await self._call_llm_with_fallback(prompt, temperature=0.7)
 
     async def process_answer_and_generate_followup(
         self,
         session_id: str,
-        user_answer: str
+        user_answer: str,
+        llm_context: str = "",
     ) -> Dict[str, Any]:
         """
         Processes user's answer, stores it, generates a follow-up question, and returns
@@ -147,69 +294,110 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
         }
         """
         try:
-            # 1. Retrieve session
-            session_key = f"interview:{session_id}"
-            session_data = await get_session(session_key)
-            if not session_data:
-                logger.error(f"Session {session_id} not found")
-                return {"question": "I couldn't find your interview session. Let's restart.", "type": "behavioral", "timestamp": datetime.now(timezone.utc).isoformat()}
+            prepared = await self.prepare_followup(session_id, user_answer)
+            if prepared.get("done"):
+                return prepared["response"]
 
-            # 2. Get current question index & list (ensure questions is list)
-            current_q_index = int(session_data.get('current_question_index', 0))
-            questions = session_data.get('questions', []) or []
-
-            if current_q_index >= len(questions):
-                logger.info(f"Max questions reached for {session_id}")
-                return {"question": "Thank you for your responses! That completes our interview for today.", "type": "behavioral", "timestamp": datetime.now(timezone.utc).isoformat()}
-
-            current_question_raw = questions[current_q_index]
-            # Normalize the stored current question for consistent downstream handling
-            interview_type_str = session_data.get('interview_type', 'dsa')
-            # robust parse
-            interview_type = _parse_interview_type(interview_type_str)
-            normalized_current_question = _normalize_question_entry(current_question_raw, default_type=interview_type.value)
-
-            # 3. Store user's response
-            responses = session_data.get('responses', []) or []
-            responses.append({
-                'question_index': current_q_index,
-                'question': normalized_current_question,
-                'response': user_answer,
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            })
-
-            max_questions = get_settings().max_questions_per_interview
-            if len(responses) >= max_questions:
-                session_data['responses'] = responses
-                session_data['current_question_index'] = current_q_index + 1
-                await update_session(session_key, session_data, expire_seconds=SESSION_TTL)
-                logger.info(f"Max questions ({max_questions}) reached for {session_id}")
-                return {"question": "Thank you for your responses! That completes our interview for today.", "type": "behavioral", "timestamp": datetime.now(timezone.utc).isoformat()}
-
-            # 4. Generate follow-up question text (string)
-            next_question_text = await self.generate_follow_up(responses, interview_type)
-
-            # 5. Wrap next question into consistent object
-            next_question_obj = {
-                "question": {"question": next_question_text},
-                "type": interview_type.value,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-
-            # 6. Append new question AND then increment current_question_index
-            questions.append(next_question_obj)
-            session_data['questions'] = questions
-            session_data['responses'] = responses
-            # increment index so next time frontend will read the just-appended question
-            session_data['current_question_index'] = current_q_index + 1
-            await update_session(session_key, session_data, expire_seconds=SESSION_TTL)
-
-            logger.info(f"✅ Stored response for Q{current_q_index} and generated next question.")
-            return next_question_obj
-
+            next_question_text = await self.generate_follow_up(
+                prepared["responses"],
+                prepared["interview_type"],
+                llm_context=llm_context or prepared.get("llm_context", ""),
+            )
+            return await self.persist_followup_question(prepared, next_question_text)
         except Exception as e:
             logger.error(f"❌ Error processing answer: {e}", exc_info=True)
             return {"question": "I encountered an error. Could you please repeat your answer?", "type": "behavioral", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    async def prepare_followup(self, session_id: str, user_answer: str) -> Dict[str, Any]:
+        """Store the current answer and return context for generating the next question."""
+        session_key = f"interview:{session_id}"
+        session_data = await get_session(session_key)
+        if not session_data:
+            logger.error(f"Session {session_id} not found")
+            return {
+                "done": True,
+                "response": {
+                    "question": "I couldn't find your interview session. Let's restart.",
+                    "type": "behavioral",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+
+        current_q_index = int(session_data.get("current_question_index", 0))
+        questions = session_data.get("questions", []) or []
+        if current_q_index >= len(questions):
+            logger.info(f"Max questions reached for {session_id}")
+            return {
+                "done": True,
+                "response": {
+                    "question": "Thank you for your responses! That completes our interview for today.",
+                    "type": "behavioral",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+
+        interview_type = _parse_interview_type(session_data.get("interview_type", "dsa"))
+        normalized_current_question = _normalize_question_entry(
+            questions[current_q_index],
+            default_type=interview_type.value,
+        )
+        responses = session_data.get("responses", []) or []
+        responses.append(
+            {
+                "question_index": current_q_index,
+                "question": normalized_current_question,
+                "response": user_answer,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        max_questions = get_settings().max_questions_per_interview
+        if len(responses) >= max_questions:
+            session_data["responses"] = responses
+            session_data["current_question_index"] = current_q_index + 1
+            await update_session(session_key, session_data, expire_seconds=SESSION_TTL)
+            logger.info(f"Max questions ({max_questions}) reached for {session_id}")
+            return {
+                "done": True,
+                "response": {
+                    "question": "Thank you for your responses! That completes our interview for today.",
+                    "type": "behavioral",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+
+        return {
+            "done": False,
+            "session_key": session_key,
+            "session_data": session_data,
+            "questions": questions,
+            "responses": responses,
+            "current_q_index": current_q_index,
+            "interview_type": interview_type,
+            "current_question": normalized_current_question,
+        }
+
+    async def persist_followup_question(self, prepared: Dict[str, Any], next_question_text: str) -> Dict[str, Any]:
+        """Persist the generated follow-up question and return the wrapped object."""
+        next_question_obj = {
+            "question": {"question": (next_question_text or "").strip()},
+            "type": prepared["interview_type"].value,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        prepared["questions"].append(next_question_obj)
+        prepared["session_data"]["questions"] = prepared["questions"]
+        prepared["session_data"]["responses"] = prepared["responses"]
+        prepared["session_data"]["current_question_index"] = prepared["current_q_index"] + 1
+        await update_session(
+            prepared["session_key"],
+            prepared["session_data"],
+            expire_seconds=SESSION_TTL,
+        )
+        logger.info(
+            "✅ Stored response for Q%s and generated next question.",
+            prepared["current_q_index"],
+        )
+        return next_question_obj
 
     async def generate_first_question(
         self,
@@ -604,34 +792,97 @@ SCORE: X/10"""
     async def generate_follow_up(
         self,
         previous_qa: List[Dict],
-        interview_type: InterviewType
+        interview_type: InterviewType,
+        llm_context: str = "",
     ) -> str:
-        """Generate follow-up question based on conversation (returns plain question text)."""
-        # Get last 2 Q&A pairs for context
-        last_pairs = previous_qa[-2:]
-        conversation_parts = []
-        for qa in last_pairs:
-            q_entry = qa.get('question', {})
-            q_text = _extract_question_text(q_entry)
-            a_text = qa.get('response', '')
-            conversation_parts.append(f"Q: {q_text}\nA: {a_text[:200]}")
-        conversation = "\n\n".join(conversation_parts)
-
-        interview_type_str = interview_type.value if isinstance(interview_type, InterviewType) else str(interview_type)
-
-        prompt = f"""Based on this {interview_type_str} interview conversation:
-
-{conversation}
-
-Generate ONE specific follow-up question that:
-1. Probes deeper into their answer
-2. Tests understanding or problem-solving
-3. Is conversational and natural
-
-Just the question, no preamble."""
-
-        question = await self.llm.generate_text(prompt, temperature=0.8)
+        """Generate the interviewer's next spoken response."""
+        prompt = self._build_interviewer_prompt(previous_qa, interview_type, llm_context=llm_context)
+        question = await self._call_llm_with_fallback(prompt, temperature=0.8)
         return question.strip()
+
+    async def generate_follow_up_stream(
+        self,
+        previous_qa: List[Dict],
+        interview_type: InterviewType,
+        llm_context: str = "",
+    ) -> AsyncGenerator[str, None]:
+        """Stream the interviewer's next spoken response token-by-token."""
+        prompt = self._build_interviewer_prompt(previous_qa, interview_type, llm_context=llm_context)
+
+        if hasattr(self.llm, "generate_text_stream"):
+            async for chunk in self.llm.generate_text_stream(prompt, temperature=0.8):
+                yield chunk
+            return
+
+        yield await self.generate_follow_up(previous_qa, interview_type, llm_context=llm_context)
+
+    async def evaluate_answer(
+        self,
+        question_asked: str,
+        candidate_answer: str,
+        answer_duration: float,
+        code_written: str = "",
+    ) -> Dict[str, Any]:
+        system_prompt = "You are evaluating a candidate's answer in a technical interview."
+        user_prompt = f"""Question asked: {question_asked}
+Candidate answered: {candidate_answer}
+Answer duration: {answer_duration:.2f} seconds
+Code written: {code_written or "none"}
+
+Return JSON only, no other text:
+{{
+  "quality": "strong" | "adequate" | "weak" | "confused" | "no_answer",
+  "completeness": 0.0 to 1.0,
+  "what_was_good": "specific observation or null",
+  "what_was_missing": "specific gap or null",
+  "detected_misconception": "string or null",
+  "confidence_signal": "high" | "medium" | "low",
+  "recommended_action": "probe" | "challenge" | "advance" | "simplify" | "hint"
+}}"""
+        raw = "{}"
+        if hasattr(self.eval_llm, "json_completion"):
+            try:
+                raw = await asyncio.wait_for(
+                    self.eval_llm.json_completion(system_prompt, user_prompt),
+                    15.0,
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                if self._is_retryable_error(e) or isinstance(e, asyncio.TimeoutError):
+                    logger.warning("Eval LLM failed, trying fallback: %s", e)
+                if self._fallback_llm and self._fallback_llm is not self.eval_llm:
+                    raw = await self._call_llm_raw_with_fallback(
+                        f"{system_prompt}\n\n{user_prompt}",
+                        temperature=0.0,
+                        llm=self._fallback_llm,
+                        fallback_llm=None,
+                        empty_fallback="{}",
+                    )
+        else:
+            raw = await self._call_llm_raw_with_fallback(
+                f"{system_prompt}\n\n{user_prompt}",
+                temperature=0.0,
+                llm=self.eval_llm,
+                fallback_llm=self._fallback_llm,
+                empty_fallback="{}",
+            )
+
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            parsed = json.loads(raw[start:end])
+        except Exception:
+            logger.warning("Failed to parse evaluation payload: %s", raw)
+            parsed = {}
+
+        return {
+            "quality": parsed.get("quality") or "adequate",
+            "completeness": float(parsed.get("completeness") or 0.5),
+            "what_was_good": parsed.get("what_was_good"),
+            "what_was_missing": parsed.get("what_was_missing"),
+            "detected_misconception": parsed.get("detected_misconception"),
+            "confidence_signal": parsed.get("confidence_signal") or "medium",
+            "recommended_action": parsed.get("recommended_action") or "probe",
+        }
 
     async def generate_final_feedback(
         self,
@@ -679,7 +930,7 @@ AREAS FOR IMPROVEMENT:
 RECOMMENDATION: [Hire / Strong Maybe / Needs Improvement]
 [One sentence rationale]"""
 
-        feedback = await self.llm.generate_text(prompt, temperature=0.3)
+        feedback = await self._call_llm_with_fallback(prompt, temperature=0.3)
 
         return {
             'feedback': feedback,

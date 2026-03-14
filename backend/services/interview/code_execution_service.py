@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 from typing import Dict, List
 from models.interview import CodeExecutionResult, TestCase
@@ -6,6 +7,22 @@ from utils.logger import get_logger
 
 logger = get_logger("CodeExecutionService")
 settings = get_settings()
+
+# Judge0 status.id -> error_type for resilience/UI (3=Accepted, 4=WrongAnswer, 5=TimeLimit, 6=Compilation, 7+=Runtime)
+JUDGE0_STATUS = {
+    1: "in_queue",
+    2: "processing",
+    3: "accepted",
+    4: "wrong_answer",
+    5: "time_limit_exceeded",
+    6: "compilation_error",
+    7: "runtime_error",
+    8: "runtime_error",
+    9: "runtime_error",
+    10: "runtime_error",
+    11: "runtime_error",
+    12: "runtime_error",
+}
 
 
 def _normalize_output(s: str) -> str:
@@ -45,25 +62,33 @@ class CodeExecutionService:
         language_id: int,
         test_cases: List[TestCase]
     ) -> CodeExecutionResult:
-        """Execute code against multiple test cases"""
-        
+        """Execute code against multiple test cases. One retry if any result is judge0_unavailable."""
         results = []
         passed_count = 0
-        
         for test_case in test_cases:
             result = await self._run_single_test(code, language_id, test_case)
             results.append(result)
-
-            if result.get('passed', False):
+            if result.get("passed", False):
                 passed_count += 1
-        
+
+        if any(r.get("error_type") == "judge0_unavailable" for r in results):
+            logger.info("Judge0 unavailable; retrying once after 2s")
+            await asyncio.sleep(2)
+            results = []
+            passed_count = 0
+            for test_case in test_cases:
+                result = await self._run_single_test(code, language_id, test_case)
+                results.append(result)
+                if result.get("passed", False):
+                    passed_count += 1
+
         return CodeExecutionResult(
             passed_tests=passed_count,
             total_tests=len(results),
-            execution_time=sum(r.get('time', 0) for r in results),
-            memory_used=max(r.get('memory', 0) for r in results),
+            execution_time=sum(r.get("time", 0) for r in results),
+            memory_used=max(r.get("memory", 0) for r in results),
             passed=passed_count == len(results),
-            test_results=results
+            test_results=results,
         )
     
     async def _run_single_test(
@@ -72,78 +97,96 @@ class CodeExecutionService:
         language_id: int,
         test_case: TestCase
     ) -> Dict:
-        """Run code against single test case"""
-        
+        """Run code against single test case. Returns dict with passed, error_type, error_message, output, expected, input, status, time, memory."""
+        base_out = {
+            "passed": False,
+            "error_type": None,
+            "error_message": None,
+            "output": "",
+            "expected": getattr(test_case, "expected_output", "") or "",
+            "input": getattr(test_case, "input", "") or "",
+            "status": "",
+            "time": 0,
+            "memory": 0,
+        }
         if not settings.judge0_api_key:
-            return {
-                'passed': False,
-                'error': 'Judge0 API not configured',
-                'time': 0,
-                'memory': 0
-            }
-        
+            base_out["error_type"] = "judge0_unavailable"
+            base_out["error_message"] = "Judge0 API not configured"
+            return base_out
+
         try:
             payload = {
                 "source_code": code,
                 "language_id": language_id,
                 "stdin": test_case.input,
-                "expected_output": test_case.expected_output.strip()
+                "expected_output": (test_case.expected_output or "").strip(),
             }
-            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"{self.base_url}/submissions?base64_encoded=false&wait=true",
                     json=payload,
-                    headers=self.headers
+                    headers=self.headers,
                 )
-                
-                # Judge0: wait=true returns 200 with full result; wait=false returns 201 with token
-                if response.status_code in (200, 201):
-                    result = response.json()
-                    # If async (201), result may be { token } — we use wait=true so expect full result
-                    if 'token' in result and 'stdout' not in result:
-                        logger.error("Judge0 returned token; expected wait=true with full result")
-                        return {'passed': False, 'error': 'Execution not ready (use wait=true)'}
-                    stdout_raw = (result.get('stdout') or '').strip()
-                    expected_raw = test_case.expected_output.strip()
-                    passed = _outputs_match(stdout_raw, expected_raw)
-                    status_desc = (result.get('status') or {}).get('description', 'Unknown')
-                    if test_case.is_hidden:
-                        return {
-                            'passed': passed,
-                            'hidden': True,
-                            'time': float(result.get('time', 0)),
-                            'memory': float(result.get('memory', 0)),
-                            'status': status_desc,
-                        }
-                    return {
-                        'passed': passed,
-                        'input': test_case.input,
-                        'output': stdout_raw,
-                        'expected': expected_raw,
-                        'time': float(result.get('time', 0)),
-                        'memory': float(result.get('memory', 0)),
-                        'status': status_desc,
-                    }
-                else:
-                    try:
-                        body = response.text[:500] if response.text else response.reason_phrase
-                    except Exception:
-                        body = str(response.status_code)
-                    logger.error("Judge0 error: status=%s body=%s", response.status_code, body)
-                    return {'passed': False, 'error': f'Execution failed ({response.status_code}): {body}'}
-                    
+        except httpx.TimeoutException as e:
+            logger.warning("Judge0 timeout: %s", e)
+            base_out["error_type"] = "judge0_timeout"
+            base_out["error_message"] = "Execution timed out"
+            return base_out
         except Exception as e:
-            logger.error(f"Code execution error: {e}", exc_info=True)
-            if test_case.is_hidden:
-                return {'passed': False, 'hidden': True, 'error': str(e)}
-            return {
-                'passed': False,
-                'input': getattr(test_case, 'input', ''),
-                'expected': getattr(test_case, 'expected_output', ''),
-                'output': '',
-                'error': str(e),
-            }
+            logger.error("Judge0 request error: %s", e, exc_info=True)
+            base_out["error_type"] = "judge0_unavailable"
+            base_out["error_message"] = str(e)
+            return base_out
+
+        if response.status_code not in (200, 201):
+            body = (response.text or response.reason_phrase or str(response.status_code))[:500]
+            logger.error("Judge0 error: status=%s body=%s", response.status_code, body)
+            base_out["error_type"] = "judge0_unavailable"
+            base_out["error_message"] = f"Execution failed ({response.status_code}): {body}"
+            return base_out
+
+        try:
+            result = response.json()
+        except Exception as e:
+            base_out["error_type"] = "judge0_unavailable"
+            base_out["error_message"] = str(e)
+            return base_out
+
+        if "token" in result and "stdout" not in result:
+            base_out["error_type"] = "judge0_unavailable"
+            base_out["error_message"] = "Execution not ready (use wait=true)"
+            return base_out
+
+        status_obj = result.get("status") or {}
+        status_id = status_obj.get("id")
+        status_desc = status_obj.get("description", "Unknown")
+        base_out["status"] = status_desc
+        base_out["time"] = float(result.get("time") or 0)
+        base_out["memory"] = float(result.get("memory") or 0)
+        base_out["output"] = (result.get("stdout") or "").strip()
+        base_out["expected"] = (test_case.expected_output or "").strip()
+
+        error_type = JUDGE0_STATUS.get(status_id, "wrong_answer")
+        if status_id == 3:
+            base_out["passed"] = _outputs_match(base_out["output"], base_out["expected"])
+            base_out["error_type"] = None
+            base_out["error_message"] = None
+        elif status_id == 5:
+            base_out["error_type"] = "time_limit_exceeded"
+            base_out["error_message"] = status_desc or "Time limit exceeded"
+        elif status_id == 6:
+            base_out["error_type"] = "compilation_error"
+            base_out["error_message"] = (result.get("compile_output") or result.get("stderr") or status_desc or "Compilation failed").strip()[:2000]
+        elif status_id in (7, 8, 9, 10, 11, 12):
+            base_out["error_type"] = "runtime_error"
+            base_out["error_message"] = (result.get("stderr") or status_desc or "Runtime error").strip()[:2000]
+        else:
+            base_out["error_type"] = "wrong_answer"
+            base_out["error_message"] = status_desc if status_id != 4 else "Output does not match expected"
+
+        if test_case.is_hidden:
+            base_out["hidden"] = True
+        return base_out
     
     def get_language_id(self, language: str) -> int:
         """Map language name to Judge0 ID"""
