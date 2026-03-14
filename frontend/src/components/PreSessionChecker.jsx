@@ -221,13 +221,13 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
 
   // Run mic permission check once on mount; safe to ignore exhaustive-deps
   // because checkMicPermission does not change between renders in this usage.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Run mic permission check once on mount; checkMicPermission is stable for this usage.
   useEffect(() => {
     checkMicPermission();
     return () => {
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasBlockingFailure =
     checkState.mic_permission === "failed" || checkState.mic_signal === "failed";
