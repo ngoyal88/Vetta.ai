@@ -12,7 +12,8 @@ export class AudioRecorder {
     this.isActive = false;
     this.lastSpeechTime = null;
     this.audioWorkletNode = null;
-    this.scriptProcessor = null;
+    this.vadConfig = null;
+    this.resumeTimer = null;
   }
 
   /**
@@ -27,20 +28,27 @@ export class AudioRecorder {
       onSpeechStart = null,
       onSpeechEnd = null
     } = options;
+    this.vadConfig = {
+      enableVAD,
+      silenceThreshold,
+      silenceDuration,
+      onSilenceDetected,
+      onSpeechStart,
+      onSpeechEnd,
+    };
 
     try {
       console.log('🎤 Starting audio recording...');
       
-      // Get microphone with Deepgram-compatible settings
+      // Get microphone with interview-friendly capture settings.
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
-          // Let the browser pick the native sample rate; we'll resample via AudioContext.
-          // These DSP features can sometimes over-suppress and effectively produce near-zero PCM.
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
-        }
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       });
 
       console.log('✅ Microphone access granted');
@@ -50,7 +58,8 @@ export class AudioRecorder {
         sampleRate: 16000
       });
 
-      console.log(`✅ AudioContext created (sample rate: ${this.audioContext.sampleRate}Hz)`);
+      this._captureSampleRate = this.audioContext.sampleRate;
+      console.log(`✅ AudioContext created (sample rate: ${this._captureSampleRate}Hz)`);
 
       // Some browsers start in "suspended" state until explicitly resumed by a user gesture.
       if (this.audioContext.state === 'suspended') {
@@ -66,47 +75,20 @@ export class AudioRecorder {
       const source = this.audioContext.createMediaStreamSource(this.stream);
       source.connect(this.analyser);
 
-      // ============================================
-      // CRITICAL FIX: Use ScriptProcessor for PCM
-      // ============================================
-      const bufferSize = 4096;
-      this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
-      
-      source.connect(this.scriptProcessor);
-      // Keep the processor alive without playing mic audio to speakers.
-      const zeroGain = this.audioContext.createGain();
-      zeroGain.gain.value = 0;
-      this.scriptProcessor.connect(zeroGain);
-      zeroGain.connect(this.audioContext.destination);
+      await this.audioContext.audioWorklet.addModule('/audio-processor.worklet.js');
+      this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'pcm-extractor');
 
-      // Process audio data and convert to PCM
-      this.scriptProcessor.onaudioprocess = (event) => {
+      this.audioWorkletNode.port.onmessage = (event) => {
         if (!this.isActive) return;
+        const pcmData = event.data;
+        if (!pcmData || !onDataAvailable) return;
 
-        const inputData = event.inputBuffer.getChannelData(0);
-        
-        // Convert Float32Array to Int16Array (PCM 16-bit)
-        const pcmData = this.floatToPCM16(inputData);
-
-        // Debug: occasionally log peak level so we can detect "all zeros" capture.
-        if (!this._debugFrameCount) this._debugFrameCount = 0;
-        this._debugFrameCount++;
-        if (this._debugFrameCount % 50 === 0) {
-          let peak = 0;
-          for (let i = 0; i < inputData.length; i++) {
-            const a = Math.abs(inputData[i]);
-            if (a > peak) peak = a;
-          }
-          console.log('🎚️ Mic peak (Float32):', peak.toFixed(4));
-        }
-        
-        // Send PCM data
-        // NOTE: pcmData is an ArrayBuffer; use byteLength (not length)
-        if (onDataAvailable && pcmData && pcmData.byteLength > 0) {
-          const blob = new Blob([pcmData], { type: 'application/octet-stream' });
-          onDataAvailable(blob);
-        }
+        const view = pcmData instanceof Int16Array ? pcmData : new Int16Array(pcmData);
+        if (!view.byteLength) return;
+        onDataAvailable(new Blob([view.buffer.slice(0)], { type: 'application/octet-stream' }));
       };
+
+      source.connect(this.audioWorkletNode);
 
       this.isActive = true;
 
@@ -137,22 +119,6 @@ export class AudioRecorder {
       
       throw error;
     }
-  }
-
-  /**
-   * Convert Float32Array to PCM 16-bit Int16Array
-   */
-  floatToPCM16(float32Array) {
-    const int16Array = new Int16Array(float32Array.length);
-    
-    for (let i = 0; i < float32Array.length; i++) {
-      // Clamp to [-1, 1]
-      let s = Math.max(-1, Math.min(1, float32Array[i]));
-      // Convert to 16-bit PCM
-      int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    
-    return int16Array.buffer;
   }
 
   /**
@@ -254,11 +220,27 @@ export class AudioRecorder {
   /**
    * Resume recording
    */
-  resume() {
-    if (!this.isActive) {
-      this.isActive = true;
-      console.log('▶️ Recording resumed');
+  resume(delayMs = 0) {
+    if (this.resumeTimer) {
+      clearTimeout(this.resumeTimer);
+      this.resumeTimer = null;
     }
+    const reactivate = () => {
+      if (this.isActive) return;
+      this.isActive = true;
+      if (this.vadConfig?.enableVAD) {
+        this.startVAD(this.vadConfig);
+      }
+      console.log('▶️ Recording resumed');
+    };
+    if (delayMs > 0) {
+      this.resumeTimer = setTimeout(() => {
+        this.resumeTimer = null;
+        reactivate();
+      }, delayMs);
+      return;
+    }
+    reactivate();
   }
 
   /**
@@ -266,10 +248,15 @@ export class AudioRecorder {
    */
   cleanup() {
     this.stopVAD();
+    if (this.resumeTimer) {
+      clearTimeout(this.resumeTimer);
+      this.resumeTimer = null;
+    }
     
-    if (this.scriptProcessor) {
-      this.scriptProcessor.disconnect();
-      this.scriptProcessor = null;
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.port.onmessage = null;
+      this.audioWorkletNode.disconnect();
+      this.audioWorkletNode = null;
     }
     
     if (this.stream) {
@@ -467,6 +454,222 @@ export class AudioPlayer {
   }
 }
 
+export class StreamingAudioPlayer {
+  constructor() {
+    this.audioContext = null;
+    this.currentStreamId = null;
+    this.currentChunkIndex = 0;
+    this.carryBuffer = null;
+    this.decodeChain = Promise.resolve();
+    this.scheduledEndTime = 0;
+    this.activeSources = new Set();
+    this.bufferedChunkCount = 0;
+    this.expectedStartChunks = 3;
+    this.finalized = false;
+    this.stopped = false;
+    this.onStart = null;
+    this.onEnd = null;
+    this.startFired = false;
+    this.finalizeRequested = false;
+  }
+
+  async ensureContext() {
+    if (!this.audioContext || this.audioContext.state === 'closed') {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+  }
+
+  async startStream(streamId, options = {}) {
+    if (!streamId) return;
+    await this.ensureContext();
+    if (this.currentStreamId && this.currentStreamId !== streamId) {
+      this.stop();
+    }
+    this.currentStreamId = streamId;
+    this.currentChunkIndex = 0;
+    this.carryBuffer = null;
+    this.scheduledEndTime = Math.max(this.audioContext.currentTime + 0.05, this.scheduledEndTime || 0);
+    this.bufferedChunkCount = 0;
+    this.expectedStartChunks = options.expectedStartChunks ?? 3;
+    this.finalized = false;
+    this.finalizeRequested = false;
+    this.stopped = false;
+    this.startFired = false;
+    this.onStart = options.onStart ?? null;
+    this.onEnd = options.onEnd ?? null;
+  }
+
+  addChunk(streamId, chunkBytes) {
+    if (!streamId || streamId !== this.currentStreamId || this.stopped) return;
+    const incoming = chunkBytes instanceof Uint8Array ? chunkBytes : new Uint8Array(chunkBytes);
+    this.decodeChain = this.decodeChain.then(() => this.#decodeAndSchedule(streamId, incoming));
+    return this.decodeChain;
+  }
+
+  /**
+   * Find last MP3 frame sync in buffer (0xFF followed by byte with 0xE0 mask).
+   * Returns start index of last sync, or -1 if none.
+   */
+  #findLastMp3Sync(buf) {
+    for (let i = buf.length - 2; i >= 0; i--) {
+      if (buf[i] === 0xff && (buf[i + 1] & 0xe0) === 0xe0) return i;
+    }
+    return -1;
+  }
+
+  async #decodeAndSchedule(streamId, incoming) {
+    await this.ensureContext();
+    if (streamId !== this.currentStreamId || this.stopped) return;
+
+    const combined = this.carryBuffer
+      ? concatUint8Arrays(this.carryBuffer, incoming)
+      : incoming;
+    this.carryBuffer = null;
+
+    const lastSync = this.#findLastMp3Sync(combined);
+    if (lastSync < 0) {
+      this.carryBuffer = combined;
+      if (this.carryBuffer.byteLength > 256000) {
+        console.warn('Streaming decode buffer exceeded threshold, resetting carry buffer');
+        this.carryBuffer = null;
+      }
+      return;
+    }
+
+    const decodable = combined.slice(0, lastSync);
+    const remainder = combined.slice(lastSync);
+    if (decodable.byteLength > 0) {
+      const arrayBuffer = decodable.buffer.slice(
+        decodable.byteOffset,
+        decodable.byteOffset + decodable.byteLength,
+      );
+      try {
+        const decoded = await this.audioContext.decodeAudioData(arrayBuffer);
+        this.bufferedChunkCount += 1;
+        this.#scheduleBuffer(decoded);
+      } catch (error) {
+        this.carryBuffer = combined;
+        if (this.carryBuffer.byteLength > 256000) {
+          console.warn('Streaming decode buffer exceeded threshold, resetting carry buffer');
+          this.carryBuffer = null;
+        }
+        return;
+      }
+    }
+    if (remainder.byteLength > 0) {
+      this.carryBuffer = remainder;
+    }
+  }
+
+  #scheduleBuffer(audioBuffer) {
+    if (!this.audioContext || this.stopped) return;
+    const source = this.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(this.audioContext.destination);
+
+    const startAt = Math.max(this.audioContext.currentTime + 0.03, this.scheduledEndTime || 0);
+    this.scheduledEndTime = startAt + audioBuffer.duration;
+    this.activeSources.add(source);
+
+    if (!this.startFired && this.bufferedChunkCount >= this.expectedStartChunks) {
+      this.startFired = true;
+      if (this.onStart) {
+        this.onStart({ durationSeconds: null });
+      }
+    }
+
+    source.onended = () => {
+      this.activeSources.delete(source);
+      this.#maybeFinish();
+    };
+    source.start(startAt);
+  }
+
+  async finalizeStream(streamId) {
+    if (streamId !== this.currentStreamId) return;
+    this.finalizeRequested = true;
+    try {
+      await this.decodeChain;
+    } catch (error) {
+      console.error('Failed waiting for streaming decode chain', error);
+    }
+    if (this.carryBuffer && !this.stopped) {
+      const carry = this.carryBuffer;
+      this.carryBuffer = null;
+      try {
+        await this.#decodeAndSchedule(streamId, carry);
+      } catch (error) {
+        console.error('Failed to finalize trailing audio chunk', error);
+      }
+      if (this.carryBuffer && !this.stopped) {
+        const trailing = this.carryBuffer;
+        this.carryBuffer = null;
+        try {
+          const ab = trailing.buffer.slice(trailing.byteOffset, trailing.byteOffset + trailing.byteLength);
+          const decoded = await this.audioContext.decodeAudioData(ab);
+          this.bufferedChunkCount += 1;
+          this.#scheduleBuffer(decoded);
+        } catch (err) {
+          console.warn('Could not decode final carry buffer', err);
+        }
+      }
+    }
+    if (!this.startFired && this.bufferedChunkCount > 0 && this.onStart) {
+      this.startFired = true;
+      this.onStart({ durationSeconds: null });
+    }
+    this.finalized = true;
+    this.#maybeFinish();
+  }
+
+  #maybeFinish() {
+    if (!this.finalized || this.stopped) return;
+    if (this.activeSources.size > 0) return;
+    const onEnd = this.onEnd;
+    this.currentStreamId = null;
+    this.currentChunkIndex = 0;
+    this.scheduledEndTime = this.audioContext ? this.audioContext.currentTime : 0;
+    this.bufferedChunkCount = 0;
+    this.finalized = false;
+    this.finalizeRequested = false;
+    this.startFired = false;
+    this.carryBuffer = null;
+    this.onStart = null;
+    this.onEnd = null;
+    if (onEnd) onEnd();
+  }
+
+  stop() {
+    this.stopped = true;
+    this.finalized = false;
+    this.finalizeRequested = false;
+    this.carryBuffer = null;
+    this.currentStreamId = null;
+    this.bufferedChunkCount = 0;
+    this.scheduledEndTime = this.audioContext ? this.audioContext.currentTime : 0;
+    this.activeSources.forEach((source) => {
+      try {
+        source.stop();
+      } catch (error) {
+        // Ignore already-stopped nodes.
+      }
+    });
+    this.activeSources.clear();
+    this.onStart = null;
+    this.onEnd = null;
+  }
+}
+
+function concatUint8Arrays(a, b) {
+  const merged = new Uint8Array(a.byteLength + b.byteLength);
+  merged.set(a, 0);
+  merged.set(b, a.byteLength);
+  return merged;
+}
+
 /**
  * Check if browser supports required features
  */
@@ -474,6 +677,7 @@ export function checkBrowserSupport() {
   const features = {
     mediaDevices: !!navigator.mediaDevices?.getUserMedia,
     audioContext: !!(window.AudioContext || window.webkitAudioContext),
+    audioWorklet: !!window.AudioWorkletNode,
     webSocket: !!window.WebSocket
   };
 

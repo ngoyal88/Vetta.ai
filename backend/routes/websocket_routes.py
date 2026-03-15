@@ -1,6 +1,5 @@
-# backend/routes/websocket_routes.py
 """
-WebSocket routes for real-time interview
+WebSocket routes for real-time interview.
 """
 import asyncio
 import contextlib
@@ -10,8 +9,8 @@ from fastapi import APIRouter, WebSocket
 from firebase_admin import auth as firebase_auth
 
 from config import get_settings
-from services.deepgram_service import DeepgramSTTService
-from services.interview_websocket import InterviewWebSocketHandler
+from services.integrations import DeepgramSTTService
+from services.interview import InterviewWebSocketHandler
 from utils.logger import get_logger
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])

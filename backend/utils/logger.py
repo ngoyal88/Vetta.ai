@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Optional
 import os
 import sys
 from functools import lru_cache
@@ -73,7 +74,7 @@ def setup_logging(force: bool = False) -> None:
 
 
 @lru_cache()
-def get_logger(name: str | None = None) -> logging.Logger:
+def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
     Return a logger with the given name.
     Uses cached setup_logging to avoid reinitializing handlers.

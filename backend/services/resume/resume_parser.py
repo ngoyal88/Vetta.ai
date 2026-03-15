@@ -10,7 +10,7 @@ from docx.oxml.ns import qn
 
 from firebase_config import db
 from models.resume import ParsedResumeResponse, ResumeProfile
-from services.groq_service import GroqService
+from services.integrations.groq_service import GroqService
 
 def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     """

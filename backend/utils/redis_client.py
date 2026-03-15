@@ -4,21 +4,47 @@ from fastapi.encoders import jsonable_encoder
 from redis.asyncio import Redis
 from utils.logger import get_logger
 from config import get_settings
+from services.interview.session_resilience import memory_get, memory_set
 
 log = get_logger(__name__)
 settings = get_settings()
 
-# ------------------------------------------------------------------ #
-# Redis client init
-# ------------------------------------------------------------------ #
-redis = Redis(
-    host=settings.redis_host,
-    port=int(settings.redis_port),
-    password=settings.redis_password or os.getenv("REDIS_PASSWORD"),
-    db=getattr(settings, "redis_db", 0),
-    decode_responses=True,
-    ssl=True,
-)
+# Redis: REDIS_URL (Upstash) or host/port for local
+_redis_url = (os.environ.get("REDIS_URL") or getattr(settings, "redis_url", "") or "").strip()
+
+# redis-py expects rediss:// for TLS, not https://. Upstash often shows https; normalize.
+if _redis_url.lower().startswith("https://"):
+    _redis_url = "rediss://" + _redis_url[8:]
+
+if _redis_url:
+    # Upstash or any Redis via single URL (e.g. rediss://default:PASS@host:6379)
+    # Use Redis (TCP) URL from Upstash dashboard "Redis Connect", not the REST URL.
+    redis = Redis.from_url(
+        _redis_url,
+        decode_responses=True,
+        socket_connect_timeout=10,
+        socket_keepalive=True,
+        health_check_interval=30,
+    )
+else:
+    _redis_host = os.environ.get("REDIS_HOST") or settings.redis_host
+    _redis_port = os.environ.get("REDIS_PORT")
+    _redis_port = int(_redis_port) if _redis_port else settings.redis_port
+    # Default SSL from settings (e.g. .env REDIS_SSL or config); REDIS_SSL env overrides when explicitly set
+    _redis_ssl_env = os.environ.get("REDIS_SSL", "").strip().lower()
+    if _redis_ssl_env:
+        _redis_ssl = _redis_ssl_env in ("1", "true", "yes")
+    else:
+        _redis_ssl = getattr(settings, "redis_ssl", False)
+
+    redis = Redis(
+        host=_redis_host,
+        port=_redis_port,
+        password=settings.redis_password or os.getenv("REDIS_PASSWORD") or None,
+        db=getattr(settings, "redis_db", 0),
+        decode_responses=True,
+        ssl=_redis_ssl,
+    )
 
 
 async def close_redis() -> None:
@@ -42,12 +68,8 @@ async def close_redis() -> None:
             if result is not None:
                 await result
     except Exception:
-        # Don't crash shutdown on cleanup.
-        pass
+        pass  # Don't crash shutdown on cleanup.
 
-# ------------------------------------------------------------------ #
-# Connection test
-# ------------------------------------------------------------------ #
 async def test_connection():
     try:
         pong = await redis.ping()
@@ -56,11 +78,13 @@ async def test_connection():
             return True
     except Exception as e:
         log.error(f"❌ Redis connection failed: {e}", exc_info=True)
+        if "closed by server" in str(e).lower() or "connection" in str(e).lower():
+            log.warning(
+                "If using Upstash: set REDIS_URL to the Redis (TCP) URL from the "
+                "dashboard (Redis Connect), e.g. rediss://default:YOUR_PASSWORD@host:6379 — not the REST URL."
+            )
     return False
 
-# ------------------------------------------------------------------ #
-# Session management (all JSON-based)
-# ------------------------------------------------------------------ #
 async def create_session(session_id: str, data: dict, expire_seconds: int = 3600):
     """Create or overwrite a session (JSON-encoded)."""
     try:
@@ -71,28 +95,39 @@ async def create_session(session_id: str, data: dict, expire_seconds: int = 3600
         log.error(f"Error creating session {session_id}: {e}", exc_info=True)
         raise
 
-async def get_session(session_id: str):
-    """Retrieve a session and decode JSON back to dict."""
+def _session_key_to_id(session_key: str) -> str:
+    return session_key.replace("interview:", "", 1) if session_key.startswith("interview:") else session_key
+
+
+async def get_session(session_key: str):
+    """Retrieve a session and decode JSON back to dict. Write-through to memory on success; on Redis failure fall back to memory."""
+    session_id = _session_key_to_id(session_key)
     try:
-        raw = await redis.get(session_id)
+        raw = await redis.get(session_key)
         if raw:
             data = json.loads(raw)
-            log.info(f"Session {session_id} retrieved.")
+            memory_set(session_id, data)
+            log.info(f"Session {session_key} retrieved.")
             return data
     except Exception as e:
-        log.error(f"Error retrieving session {session_id}: {e}", exc_info=True)
+        log.error(f"Error retrieving session {session_key}: {e}", exc_info=True)
+        fallback = memory_get(session_id)
+        if fallback is not None:
+            log.info(f"Session {session_key} served from memory fallback.")
+            return fallback
         raise
     return None
 
-async def update_session(session_id: str, data: dict, expire_seconds: int = 3600):
-    """Update (replace) session data with fresh JSON."""
+async def update_session(session_key: str, data: dict, expire_seconds: int = 3600):
+    """Update (replace) session data with fresh JSON. Always write to memory first; on Redis failure log and do not raise."""
+    session_id = _session_key_to_id(session_key)
+    memory_set(session_id, data)
     try:
         safe = jsonable_encoder(data)
-        await redis.set(session_id, json.dumps(safe), ex=expire_seconds)
-        log.info(f"Session {session_id} updated.")
+        await redis.set(session_key, json.dumps(safe), ex=expire_seconds)
+        log.info(f"Session {session_key} updated.")
     except Exception as e:
-        log.error(f"Error updating session {session_id}: {e}", exc_info=True)
-        raise
+        log.error(f"Error updating session {session_key} in Redis (memory updated): {e}", exc_info=True)
 
 async def delete_session(session_id: str):
     """Delete a session entirely."""

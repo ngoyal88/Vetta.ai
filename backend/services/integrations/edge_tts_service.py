@@ -7,6 +7,7 @@ Uses edge-tts package; output is MP3 bytes for base64 transport.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import AsyncGenerator
 
 import edge_tts
 
@@ -64,3 +65,26 @@ class EdgeTTSService:
         except Exception as e:
             logger.error(f"❌ [EdgeTTS] TTS generation error: {e}", exc_info=True)
             return b""
+
+    async def text_to_speech_stream(self, text: str) -> AsyncGenerator[bytes, None]:
+        """Yield MP3 chunks as soon as Edge TTS produces them."""
+        clean = (text or "").strip()
+        if not clean:
+            logger.warning("Empty text provided for Edge TTS stream")
+            return
+
+        try:
+            logger.info(f"🗣️ [EdgeTTS] Streaming speech: {clean[:60]}...")
+            communicate = edge_tts.Communicate(
+                text=clean,
+                voice=self._cfg.voice,
+                rate=self._cfg.rate,
+                pitch=self._cfg.pitch,
+            )
+
+            async for chunk in communicate.stream():
+                if chunk.get("type") == "audio" and chunk.get("data"):
+                    yield chunk["data"]
+        except Exception as e:
+            logger.error(f"❌ [EdgeTTS] Streaming error: {e}", exc_info=True)
+
