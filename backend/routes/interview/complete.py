@@ -45,10 +45,8 @@ async def complete_interview(
             "code_submissions": [s.dict() for s in session.code_submissions],
         }
 
-        if session_data.get("final_feedback"):
-            final_feedback = session_data["final_feedback"]
-        else:
-            final_feedback = await interview_service.generate_final_feedback(feedback_data)
+        # Always generate final feedback; session data does not persist it (InterviewSession model has no final_feedback field)
+        final_feedback = await interview_service.generate_final_feedback(feedback_data)
 
         # Update session
         session.status = "completed"

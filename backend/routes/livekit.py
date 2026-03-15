@@ -30,8 +30,15 @@ async def _acquire_bot_lock(session_id: str) -> bool:
     key = BOT_LOCK_KEY.format(session_id=session_id)
     try:
         return await redis.set(key, "1", nx=True, ex=BOT_LOCK_TTL)
-    except Exception:
-        return False
+    except Exception as e:
+        # Distinguish backend/Redis errors from normal lock contention.
+        # Attach handler treats a falsy return as "session already active"
+        # so we raise a 503 here to indicate a dependency failure instead.
+        log.error("Failed to acquire bot lock for %s: %s", session_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Bot lock backend unavailable",
+        )
 
 
 async def _release_bot_lock(session_id: str) -> None:

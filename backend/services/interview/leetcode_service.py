@@ -3,6 +3,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import httpx
+from bs4 import BeautifulSoup
 
 from utils.logger import get_logger
 
@@ -67,12 +68,14 @@ class LeetCodeService:
 
     def clean_content(self, text: str) -> str:
         """
-        Normalize the plain-text content returned by the LeetCode API.
-        The API already returns decoded plain text (not HTML), but it may contain
-        HTML entity remnants and excessive whitespace.
+        Normalize HTML content returned by the LeetCode API into plain text.
+        Strips HTML tags, decodes common HTML entities, and normalizes whitespace.
         """
         if not text:
             return ""
+        # Strip HTML tags and preserve basic line breaks
+        soup = BeautifulSoup(text, "html.parser")
+        text = soup.get_text("\n")
         # Decode any residual HTML entities
         replacements = {
             '&nbsp;': ' ', '&lt;': '<', '&gt;': '>',

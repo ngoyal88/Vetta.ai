@@ -30,8 +30,12 @@ else:
     _redis_host = os.environ.get("REDIS_HOST") or settings.redis_host
     _redis_port = os.environ.get("REDIS_PORT")
     _redis_port = int(_redis_port) if _redis_port else settings.redis_port
-    _redis_ssl_raw = os.environ.get("REDIS_SSL", "").strip().lower()
-    _redis_ssl = _redis_ssl_raw in ("1", "true", "yes")
+    # Default SSL from settings (e.g. .env REDIS_SSL or config); REDIS_SSL env overrides when explicitly set
+    _redis_ssl_env = os.environ.get("REDIS_SSL", "").strip().lower()
+    if _redis_ssl_env:
+        _redis_ssl = _redis_ssl_env in ("1", "true", "yes")
+    else:
+        _redis_ssl = getattr(settings, "redis_ssl", False)
 
     redis = Redis(
         host=_redis_host,
