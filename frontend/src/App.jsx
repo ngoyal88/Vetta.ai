@@ -1,17 +1,17 @@
 import React, { Suspense, lazy } from 'react';
 import { Routes, Route, useSearchParams } from "react-router-dom";
 import { Toaster } from 'react-hot-toast';
-import Navbar from './components/Navbar';
-import ErrorBoundary from './components/ErrorBoundary';
-import Home from "./pages/Home";
-import SignIn from "./pages/SignIn";
-import SignUp from "./pages/SignUp";
-import Dashboard from './pages/Dashboard';
-import PrivateRoute from './components/PrivateRoute';
-import { useBackendHealth } from './context/BackendHealthContext';
+import Navbar from 'shared/components/Navbar';
+import ErrorBoundary from 'shared/components/ErrorBoundary';
+import Home from "shared/pages/Home";
+import SignIn from "features/auth/pages/SignIn";
+import SignUp from "features/auth/pages/SignUp";
+import Dashboard from 'features/dashboard/pages/Dashboard';
+import PrivateRoute from 'shared/components/PrivateRoute';
+import { useBackendHealth } from 'shared/context/BackendHealthContext';
 
-const InterviewRoom = lazy(() => import('./pages/InterviewRoom'));
-const InterviewRoomLiveKit = lazy(() => import('./pages/InterviewRoomLiveKit'));
+const InterviewRoom = lazy(() => import('features/interview/pages/InterviewRoom'));
+const InterviewRoomLiveKit = lazy(() => import('features/interview/pages/InterviewRoomLiveKit'));
 
 function useInterviewTransport() {
   const [searchParams] = useSearchParams();
