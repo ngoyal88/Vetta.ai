@@ -1,0 +1,92 @@
+import React, { useContext, createContext, useState, useEffect } from 'react';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  updateProfile,
+  deleteUser,
+  reload,
+  GoogleAuthProvider
+} from 'firebase/auth';
+import { auth } from 'firebaseConfig';
+
+const AuthContext = createContext();
+
+export const useAuth = () => useContext(AuthContext);
+
+export const AuthProvider = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const signup = (email, password) => {
+    return createUserWithEmailAndPassword(auth, email, password);
+  };
+
+  const signin = (email, password) =>
+    signInWithEmailAndPassword(auth, email, password);
+
+  const signInWithGoogle = () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    return signInWithPopup(auth, provider);
+  };
+
+  const logout = () => signOut(auth);
+
+  const sendVerification = async () => {
+    if (!auth.currentUser) throw new Error('Not signed in');
+    await sendEmailVerification(auth.currentUser);
+  };
+
+  const refreshUser = async () => {
+    if (!auth.currentUser) return null;
+    await reload(auth.currentUser);
+    setCurrentUser(auth.currentUser);
+    return auth.currentUser;
+  };
+
+  const resetPassword = (email) => sendPasswordResetEmail(auth, email);
+
+  const updateProfileInfo = async ({ displayName, photoURL }) => {
+    if (!auth.currentUser) throw new Error('Not signed in');
+    await updateProfile(auth.currentUser, { displayName, photoURL });
+    await refreshUser();
+  };
+
+  const deleteAccount = async () => {
+    if (!auth.currentUser) throw new Error('Not signed in');
+    await deleteUser(auth.currentUser);
+  };
+
+  if (loading) {
+    return (
+      <AuthContext.Provider value={{ currentUser, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount }}>
+        <div className="min-h-screen bg-black flex items-center justify-center" aria-busy="true" aria-live="polite">
+          <div className="flex flex-col items-center gap-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-2 border-cyan-500 border-t-transparent" />
+            <p className="text-gray-400">Checking auth...</p>
+          </div>
+        </div>
+      </AuthContext.Provider>
+    );
+  }
+
+  return (
+    <AuthContext.Provider value={{ currentUser, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};

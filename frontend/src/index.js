@@ -2,9 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
-import { AuthProvider } from "./context/AuthContext";
-import { BackendHealthProvider } from "./context/BackendHealthContext";
-import { ConfirmDialogProvider } from "./context/ConfirmDialogContext";
+import { AuthProvider } from "shared/context/AuthContext";
+import { BackendHealthProvider } from "shared/context/BackendHealthContext";
+import { ConfirmDialogProvider } from "shared/context/ConfirmDialogContext";
 import { BrowserRouter } from "react-router-dom";
 import * as Sentry from "@sentry/react";
 
