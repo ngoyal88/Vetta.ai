@@ -1,12 +1,15 @@
 /**
- * LiveKit interview hook: same public API as useInterviewWebSocket.
- * Transport: LiveKit data channel + optional byte streams. All AI stays in FastAPI.
+ * React hook for a LiveKit-based interview session.
+ *
+ * Connects to a LiveKit room, subscribes to remote audio tracks, sends and
+ * receives control messages via the data channel, and manages microphone
+ * recording lifecycle. Exports the same public API as useInterviewWebSocket
+ * so either hook can be swapped in by App.jsx.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Room, RoomEvent } from 'livekit-client';
+import { Room, RoomEvent, createLocalAudioTrack } from 'livekit-client';
 import {
   AudioRecorder,
-  StreamingAudioPlayer,
   checkBrowserSupport,
 } from 'shared/utils/audioUtils';
 import { api } from 'shared/services/api';
@@ -14,10 +17,6 @@ import { auth } from 'firebaseConfig';
 import toast from 'react-hot-toast';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-const ATTACH_RETRIES = 3;
-const ATTACH_DELAYS = [1000, 2000, 4000];
-const BOT_JOIN_TIMEOUT_MS = 20000;
-const CHUNKED_BUFFER_TIMEOUT_MS = 60000;
 const MIC_RESUME_DELAY_MS = 250;
 const INTERRUPT_ENERGY_THRESHOLD = 0.008;
 const INTERRUPT_HOLD_MS = 180;
@@ -35,19 +34,6 @@ const isEditableElement = (target) => {
     tagName === 'select' ||
     !!target.closest?.('.monaco-editor')
   );
-};
-
-const base64ToUint8Array = (base64) => {
-  try {
-    const bytes = atob(base64 || '');
-    const buffer = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i += 1) {
-      buffer[i] = bytes.charCodeAt(i);
-    }
-    return buffer;
-  } catch {
-    return null;
-  }
 };
 
 export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', options = {}) => {
@@ -77,16 +63,12 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
 
   const roomRef = useRef(null);
   const recorderRef = useRef(null);
-  const playerRef = useRef(null);
+  const localAudioTrackRef = useRef(null);
   const aiTextFullRef = useRef('');
   const aiRevealTimerRef = useRef(null);
   const audioLevelIntervalRef = useRef(null);
-  const chunkedBuffersRef = useRef({});
-  const chunkedTimeoutRef = useRef({});
-  const botJoinTimeoutRef = useRef(null);
   const lastControlReceivedRef = useRef(Date.now());
   const handleMessageRef = useRef(null);
-  const playChunkedAudioRef = useRef(null);
   const encoderRef = useRef(new TextEncoder());
   const decoderRef = useRef(new TextDecoder());
   const aiSpeakingRef = useRef(false);
@@ -103,6 +85,8 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   const tabHiddenAtRef = useRef(null);
   const connectRef = useRef(null);
   const disconnectRef = useRef(null);
+  const remoteAudioElsRef = useRef(new Map());
+  const audioUnlockedRef = useRef(false);
 
   const setAiSpeakingState = useCallback((nextValue) => {
     aiSpeakingRef.current = nextValue;
@@ -116,42 +100,6 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
     }
   }, []);
 
-  const startAiReveal = useCallback((text, durationSeconds = null) => {
-    clearAiReveal();
-    const trimmed = (text || '').trim();
-    aiTextFullRef.current = trimmed;
-    setAiFullText(trimmed);
-    if (!trimmed) {
-      setAiText('');
-      setAiSpeechWpm(180);
-      return;
-    }
-
-    const words = trimmed.split(/\s+/).filter(Boolean);
-    if (words.length <= 1) {
-      setAiText(trimmed);
-      setAiSpeechWpm(180);
-      return;
-    }
-
-    const durSec = Number.isFinite(durationSeconds) && durationSeconds > 0
-      ? durationSeconds
-      : Math.max(1.0, words.length / 2.5);
-    const durationMs = durSec * 1000;
-    setAiSpeechWpm(Math.max(80, Math.min(260, Math.round((words.length * 60) / durSec))));
-    const start = performance.now();
-    setAiText(words[0]);
-
-    aiRevealTimerRef.current = setInterval(() => {
-      const elapsed = performance.now() - start;
-      const frac = Math.max(0, Math.min(1, elapsed / durationMs));
-      const targetCount = Math.max(1, Math.ceil(frac * words.length));
-      setAiText(words.slice(0, targetCount).join(' '));
-      if (frac >= 1) {
-        clearAiReveal();
-      }
-    }, 50);
-  }, [clearAiReveal]);
 
   const scheduleMicResume = useCallback((delayMs = MIC_RESUME_DELAY_MS) => {
     if (!micEnabledRef.current || !recorderRef.current) return;
@@ -169,25 +117,8 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
     }
   }, []);
 
-  const finalizeAiPlayback = useCallback((shouldNotifyBackend = true) => {
-    setAiSpeakingState(false);
-    setStatus('listening');
-    clearAiReveal();
-    if (aiTextFullRef.current) {
-      setAiText(aiTextFullRef.current);
-    }
-    activeTtsStreamIdRef.current = null;
-    aiPlaybackStartedAtRef.current = 0;
-    if (shouldNotifyBackend) {
-      sendControl({ type: 'ai_playback_ended' });
-    }
-    scheduleMicResume();
-  }, [clearAiReveal, scheduleMicResume, sendControl, setAiSpeakingState]);
 
   const stopAiPlaybackLocally = useCallback((messageType = null) => {
-    if (playerRef.current) {
-      playerRef.current.stop();
-    }
     setAiSpeakingState(false);
     setStatus('listening');
     clearAiReveal();
@@ -224,64 +155,6 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
     setAiSpeechWpm(180);
   }, []);
 
-  const startPacketTtsStream = useCallback((streamId) => {
-    if (!playerRef.current?.startStream || !streamId) return;
-    playerRef.current.startStream(streamId, {
-      expectedStartChunks: 3,
-      onStart: ({ durationSeconds } = {}) => {
-        aiPlaybackStartedAtRef.current = Date.now();
-        setAiSpeakingState(true);
-        setStatus('speaking');
-        startAiReveal(aiTextFullRef.current || '', durationSeconds);
-      },
-      onEnd: () => finalizeAiPlayback(true),
-    });
-  }, [finalizeAiPlayback, setAiSpeakingState, startAiReveal]);
-
-  const handleTtsStreamStart = useCallback((message) => {
-    activeTtsStreamIdRef.current = message.stream_id || null;
-    ttsTransportRef.current = message.transport || (supportsByteStreamsRef.current ? 'bytes' : 'packets');
-    applyQuestionMetadata(message);
-    setStatus('thinking');
-
-    if (recorderRef.current && isRecordingRef.current) {
-      recorderRef.current.pause();
-    }
-    if (ttsTransportRef.current !== 'bytes') {
-      startPacketTtsStream(message.stream_id);
-    }
-  }, [applyQuestionMetadata, startPacketTtsStream]);
-
-  const handlePacketTtsChunk = useCallback(async (message) => {
-    if (!message?.stream_id || !message?.data || !playerRef.current?.addChunk) return;
-    const bytes = base64ToUint8Array(message.data);
-    if (!bytes) return;
-    await playerRef.current.addChunk(message.stream_id, bytes);
-    if (message.is_last) {
-      await playerRef.current.finalizeStream(message.stream_id);
-    }
-  }, []);
-
-  const playChunkedAudio = useCallback((qid, base64Full, header) => {
-    if (!playerRef.current?.play || !base64Full) return;
-    setAiSpeakingState(true);
-    if (isRecordingRef.current && recorderRef.current) recorderRef.current.pause();
-    const spokenText = header?.spoken_text || '';
-    aiTextFullRef.current = spokenText;
-    setAiFullText(spokenText);
-
-    playerRef.current.play(base64Full, {
-      onStart: ({ durationSeconds } = {}) => {
-        aiPlaybackStartedAtRef.current = Date.now();
-        setStatus('speaking');
-        startAiReveal(spokenText, durationSeconds);
-      },
-      onEnd: () => finalizeAiPlayback(true),
-    });
-  }, [finalizeAiPlayback, setAiSpeakingState, startAiReveal]);
-
-  playChunkedAudioRef.current = playChunkedAudio;
-
   const ensureRecorderStarted = useCallback(async () => {
     if (!micEnabledRef.current) return false;
     if (roomRef.current?.state !== 'connected') return false;
@@ -297,7 +170,7 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       }
 
       await recorderRef.current.start(
-        (audioChunk) => {
+        () => {
           const room = roomRef.current;
           if (room?.state !== 'connected' || !micEnabledRef.current) return;
 
@@ -329,16 +202,6 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
           }
 
           interruptCandidateSinceRef.current = null;
-          audioChunk.arrayBuffer().then((buffer) => {
-            try {
-              room.localParticipant.publishData(new Uint8Array(buffer), {
-                reliable: false,
-                topic: 'audio',
-              });
-            } catch (e) {
-              if (isDev) console.error('Failed to send LiveKit audio chunk', e);
-            }
-          });
         },
         {
           enableVAD: true,
@@ -391,61 +254,23 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
 
   const handleMessage = useCallback((message) => {
     lastControlReceivedRef.current = Date.now();
-    if (botJoinTimeoutRef.current) {
-      clearTimeout(botJoinTimeoutRef.current);
-      botJoinTimeoutRef.current = null;
-    }
     if (!message?.type) return;
 
     switch (message.type) {
       case 'question': {
         applyQuestionMetadata(message);
         clearAiReveal();
-        if (message.audio && playerRef.current?.play) {
-          setAiSpeakingState(true);
-          if (isRecordingRef.current && recorderRef.current) recorderRef.current.pause();
-          playerRef.current.play(message.audio, {
-            onStart: ({ durationSeconds } = {}) => {
-              aiPlaybackStartedAtRef.current = Date.now();
-              setStatus('speaking');
-              setAiSpeakingState(true);
-              startAiReveal(aiTextFullRef.current || '', durationSeconds);
-            },
-            onEnd: () => finalizeAiPlayback(true),
-          });
-        } else if (aiTextFullRef.current) {
+        if (aiTextFullRef.current) {
           setAiText(aiTextFullRef.current);
         }
         toast.success('New question received');
         break;
       }
 
-      case 'question_chunked': {
-        const qid = message.question_id;
-        if (!qid) break;
-        chunkedBuffersRef.current[qid] = {
-          totalChunks: message.total_chunks || 0,
-          chunks: {},
-          header: {
-            question: message.question,
-            phase: message.phase,
-            spoken_text: message.spoken_text,
-            timestamp: message.timestamp,
-          },
-        };
-        if (chunkedTimeoutRef.current[qid]) clearTimeout(chunkedTimeoutRef.current[qid]);
-        chunkedTimeoutRef.current[qid] = setTimeout(() => {
-          delete chunkedBuffersRef.current[qid];
-          delete chunkedTimeoutRef.current[qid];
-        }, CHUNKED_BUFFER_TIMEOUT_MS);
-        applyQuestionMetadata(message);
-        break;
-      }
-
       case 'transcript': {
         const text = message.text || '';
         if (message.is_final) {
-          setTranscriptFinal((prev) => (text ? `${prev} ${text}`.trim() : prev));
+          setTranscriptFinal(text);
           setTranscriptInterim('');
         } else {
           setTranscriptInterim(text);
@@ -472,6 +297,8 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
 
       case 'interviewer_thinking':
         setStatus('thinking');
+        setTranscriptFinal('');
+        setTranscriptInterim('');
         break;
 
       case 'audio_started':
@@ -491,26 +318,24 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
         if (message.phase === 'dsa') toast.success('Switching to coding challenge!', { duration: 3000 });
         break;
 
-      case 'tts_stream_start':
-        handleTtsStreamStart(message);
-        break;
-
-      case 'tts_chunk':
-        handlePacketTtsChunk(message).catch((err) => {
-          if (isDev) console.error('Failed to handle TTS chunk', err);
-        });
-        break;
-
-      case 'tts_stream_end':
-        playerRef.current?.finalizeStream?.(message.stream_id);
-        break;
-
       case 'tts_stream_cancelled':
       case 'interrupt_ack':
         if (!message.stream_id || message.stream_id === activeTtsStreamIdRef.current) {
           stopAiPlaybackLocally(null);
         }
         break;
+
+      case 'ai_transcript': {
+        const aiTxt = message.text || '';
+        if (aiTxt) {
+          aiTextFullRef.current = aiTxt;
+          setAiFullText(aiTxt);
+          setAiText(aiTxt);
+          setTranscriptInterim('');
+          setTranscriptFinal('');
+        }
+        break;
+      }
 
       case 'utterance_end_detected':
       case 'silence_warning':
@@ -591,50 +416,17 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   }, [
     applyQuestionMetadata,
     clearAiReveal,
-    finalizeAiPlayback,
-    handlePacketTtsChunk,
-    handleTtsStreamStart,
     sessionId,
     setAiSpeakingState,
     setSttFallbackActive,
-    startAiReveal,
     stopAiPlaybackLocally,
   ]);
 
   const registerByteStreamHandlers = useCallback((room) => {
-    if (typeof room.registerByteStreamHandler !== 'function') {
-      ttsTransportRef.current = 'packets';
-      return;
-    }
-    supportsByteStreamsRef.current = true;
-
-    room.registerByteStreamHandler('tts', (reader) => {
-      const info = reader.info || {};
-      const streamId = info.attributes?.stream_id || info.streamId || info.id || `${Date.now()}`;
-      ttsTransportRef.current = 'bytes';
-      activeTtsStreamIdRef.current = streamId;
-
-      playerRef.current?.startStream?.(streamId, {
-        onStart: ({ durationSeconds } = {}) => {
-          aiPlaybackStartedAtRef.current = Date.now();
-          setAiSpeakingState(true);
-          setStatus('speaking');
-          startAiReveal(aiTextFullRef.current || '', durationSeconds);
-        },
-        onEnd: () => finalizeAiPlayback(true),
-      });
-
-      (async () => {
-        for await (const chunk of reader) {
-          await playerRef.current?.addChunk?.(streamId, chunk);
-        }
-        await playerRef.current?.finalizeStream?.(streamId);
-      })().catch((error) => {
-        if (isDev) console.error('TTS byte stream failed', error);
-        stopAiPlaybackLocally(null);
-      });
-    });
-  }, [finalizeAiPlayback, setAiSpeakingState, startAiReveal, stopAiPlaybackLocally]);
+    void room;
+    ttsTransportRef.current = 'packets';
+    supportsByteStreamsRef.current = false;
+  }, []);
 
   const connect = useCallback(async () => {
     if (!sessionId) return;
@@ -665,34 +457,37 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       roomRef.current = room;
       registerByteStreamHandlers(room);
 
-      room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
-        if (topic === 'audio_chunk') {
-          try {
-            const text = typeof payload === 'string' ? payload : decoderRef.current.decode(payload);
-            const msg = JSON.parse(text);
-            const qid = msg.question_id;
-            if (!qid) return;
-            const buf = chunkedBuffersRef.current[qid];
-            if (!buf) return;
-            buf.chunks[msg.chunk_index] = msg.data;
-            const received = Object.keys(buf.chunks).length;
-            if (received >= buf.totalChunks) {
-              const ordered = [];
-              for (let i = 0; i < buf.totalChunks; i += 1) ordered.push(buf.chunks[i] || '');
-              const fullB64 = ordered.join('');
-              delete chunkedBuffersRef.current[qid];
-              if (chunkedTimeoutRef.current[qid]) {
-                clearTimeout(chunkedTimeoutRef.current[qid]);
-                delete chunkedTimeoutRef.current[qid];
-              }
-              playChunkedAudioRef.current?.(qid, fullB64, buf.header);
-            }
-          } catch (e) {
-            if (isDev) console.error('Failed to parse audio_chunk', e);
-          }
-          return;
-        }
+      const attachRemoteAudioTrack = (track, participantIdentity = '') => {
+        if (!track || track.kind !== 'audio') return;
+        const key = `${participantIdentity}:${track.sid || Math.random().toString(36).slice(2)}`;
+        if (remoteAudioElsRef.current.has(key)) return;
+        const el = track.attach();
+        el.autoplay = true;
+        el.playsInline = true;
+        el.muted = false;
+        el.style.display = 'none';
+        document.body.appendChild(el);
+        el.play?.().catch(() => {
+          // Browser may block until user gesture; unlocked handler retries.
+        });
+        remoteAudioElsRef.current.set(key, { el, track });
+      };
 
+      const detachRemoteAudioTrack = (track, participantIdentity = '') => {
+        if (!track || track.kind !== 'audio') return;
+        const key = `${participantIdentity}:${track.sid || ''}`;
+        const entry = remoteAudioElsRef.current.get(key);
+        if (!entry) return;
+        try {
+          entry.track.detach(entry.el);
+        } catch (_) {}
+        try {
+          entry.el.remove();
+        } catch (_) {}
+        remoteAudioElsRef.current.delete(key);
+      };
+
+      room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
         try {
           const text = typeof payload === 'string' ? payload : decoderRef.current.decode(payload);
           const msg = JSON.parse(text);
@@ -704,11 +499,35 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
         }
       });
 
-      let attachWithRetryFn;
       room.on(RoomEvent.ParticipantDisconnected, (participant) => {
         if (participant.identity?.startsWith?.('interview-bot-')) {
-          toast('Interview assistant disconnected. Reconnecting…');
-          attachWithRetryFn?.();
+          toast('Interview assistant disconnected.');
+        }
+      });
+
+      room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        void publication;
+        attachRemoteAudioTrack(track, participant?.identity || '');
+      });
+
+      room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+        void publication;
+        detachRemoteAudioTrack(track, participant?.identity || '');
+      });
+
+      room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+        if (!roomRef.current) return;
+        if (!roomRef.current.canPlaybackAudio) {
+          toast('🔊 Click anywhere on this page to hear your interviewer', {
+            id: 'audio-unlock',
+            duration: Infinity,
+            icon: '🔊',
+          });
+        } else {
+          toast.dismiss('audio-unlock');
+          remoteAudioElsRef.current.forEach(({ el }) => {
+            el.play?.().catch(() => {});
+          });
         }
       });
 
@@ -735,73 +554,44 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       });
 
       await room.connect(wsUrl, lkToken);
+      // Try to unlock the AudioContext immediately. This only works if we are still
+      // within a browser user-gesture window (typically < 1 s after the click that
+      // triggered this connect). If it fails the AudioPlaybackStatusChanged handler
+      // below will catch the blocked state and show a visible prompt.
+      try { await room.startAudio(); } catch (_) {}
       setConnected(true);
       setError(null);
       setNetworkIssue(false);
       toast.success('Connected to LiveKit interview');
-      await ensureRecorderStarted();
-
-      attachWithRetryFn = async () => {
-        const authToken = await auth.currentUser?.getIdToken?.().catch(() => token);
-        const bearerToken = authToken || token;
-        for (let attempt = 0; attempt < ATTACH_RETRIES; attempt += 1) {
-          if (attempt > 0) await new Promise((r) => setTimeout(r, ATTACH_DELAYS[attempt - 1]));
-          try {
-            const attachRes = await fetch(`${API_URL}/livekit/attach`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bearerToken}` },
-              body: JSON.stringify({ session_id: sessionId }),
-            });
-            const body = await attachRes.json().catch(() => ({}));
-            if (attachRes.status === 409 && body?.detail?.error === 'session_already_active') {
-              // Pre-warm already attached the bot; treat as success and continue (no retry, no user error).
-              if (botJoinTimeoutRef.current) clearTimeout(botJoinTimeoutRef.current);
-              botJoinTimeoutRef.current = setTimeout(() => {
-                setError("Interview assistant didn't connect. Try again or use standard connection.");
-                toast.error("Interview assistant didn't connect.");
-              }, BOT_JOIN_TIMEOUT_MS);
-              return;
-            }
-            if (attachRes.ok) {
-              if (botJoinTimeoutRef.current) clearTimeout(botJoinTimeoutRef.current);
-              botJoinTimeoutRef.current = setTimeout(() => {
-                setError("Interview assistant didn't connect. Try again or use standard connection.");
-                toast.error("Interview assistant didn't connect.");
-              }, BOT_JOIN_TIMEOUT_MS);
-              return;
-            }
-            if (attachRes.status >= 400 && attachRes.status < 500) break;
-          } catch (e) {
-            if (isDev) console.warn('Attach attempt failed', e);
-          }
-        }
-        setError('Could not start the interview (LiveKit). Try again or use the standard connection.');
-        toast.error('Could not start interview. Use standard connection?');
-      };
-
-      await attachWithRetryFn();
+      // If audio is already blocked after connecting, show the prompt immediately
+      // so the user has time to click before the greeting starts.
+      if (!room.canPlaybackAudio) {
+        toast('🔊 Click anywhere on this page to hear your interviewer', {
+          id: 'audio-unlock',
+          duration: Infinity,
+          icon: '🔊',
+        });
+      }
     } catch (err) {
       if (isDev) console.error('LiveKit connect failed', err);
       setError(err.message || 'Failed to connect to LiveKit');
       toast.error(err.message || 'LiveKit connection failed');
     }
-  }, [ensureRecorderStarted, registerByteStreamHandlers, sessionId]);
+  }, [registerByteStreamHandlers, sessionId]);
 
   const disconnect = useCallback(() => {
-    if (botJoinTimeoutRef.current) {
-      clearTimeout(botJoinTimeoutRef.current);
-      botJoinTimeoutRef.current = null;
-    }
-    Object.values(chunkedTimeoutRef.current).forEach(clearTimeout);
-    chunkedTimeoutRef.current = {};
-    chunkedBuffersRef.current = {};
+    audioUnlockedRef.current = false;
+    toast.dismiss('audio-unlock');
     clearAiReveal();
     if (recorderRef.current) {
       recorderRef.current.cleanup();
       recorderRef.current = null;
     }
     isRecordingRef.current = false;
-    if (playerRef.current) playerRef.current.stop();
+    if (localAudioTrackRef.current) {
+      localAudioTrackRef.current.stop();
+      localAudioTrackRef.current = null;
+    }
     if (audioLevelIntervalRef.current) {
       clearInterval(audioLevelIntervalRef.current);
       audioLevelIntervalRef.current = null;
@@ -815,6 +605,15 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       roomRef.current.disconnect();
       roomRef.current = null;
     }
+    remoteAudioElsRef.current.forEach(({ el, track }) => {
+      try {
+        track.detach(el);
+      } catch (_) {}
+      try {
+        el.remove();
+      } catch (_) {}
+    });
+    remoteAudioElsRef.current.clear();
     setConnected(false);
     setStatus('disconnected');
     setIsRecording(false);
@@ -846,13 +645,18 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   const toggleMicrophone = useCallback(async (enabled) => {
     micEnabledRef.current = enabled;
     setMicEnabled(enabled);
-    if (!enabled) {
-      await stopRecording();
-    } else {
-      await ensureRecorderStarted();
+    const pubs = roomRef.current?.localParticipant?.getTrackPublications?.() ?? [];
+    for (const pub of pubs) {
+      if (pub.kind === 'audio') {
+        if (enabled) {
+          await pub.unmute();
+        } else {
+          await pub.mute();
+        }
+      }
     }
     toast.success(enabled ? 'Microphone enabled' : 'Microphone muted');
-  }, [ensureRecorderStarted, stopRecording]);
+  }, []);
 
   const interruptAI = useCallback(() => {
     if (!aiSpeakingRef.current) return;
@@ -894,6 +698,83 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  useEffect(() => {
+    if (!connected || !roomRef.current) return undefined;
+
+    let cancelled = false;
+    let publishedTrack = null;
+    let publication = null;
+
+    const publishLocalAudio = async () => {
+      try {
+        const track = await createLocalAudioTrack({
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        });
+        if (cancelled) {
+          track.stop();
+          return;
+        }
+        publishedTrack = track;
+        localAudioTrackRef.current = track;
+        publication = await roomRef.current.localParticipant.publishTrack(track);
+        if (!micEnabledRef.current) {
+          await publication.mute();
+        }
+      } catch (e) {
+        if (isDev) console.error('Failed to publish local audio track', e);
+      }
+    };
+
+    publishLocalAudio();
+
+    return () => {
+      cancelled = true;
+      if (publication) {
+        try {
+          roomRef.current?.localParticipant?.unpublishTrack?.(publishedTrack);
+        } catch (e) {
+          if (isDev) console.warn('Failed to unpublish local audio track', e);
+        }
+      }
+      if (publishedTrack) {
+        publishedTrack.stop();
+      }
+      if (localAudioTrackRef.current === publishedTrack) {
+        localAudioTrackRef.current = null;
+      }
+    };
+  }, [connected]);
+
+  useEffect(() => {
+    if (!connected) return;
+    const unlockAudioAndMic = async () => {
+      if (audioUnlockedRef.current) return;
+      audioUnlockedRef.current = true;
+      // room.startAudio() resumes LiveKit's internal AudioContext and retries
+      // playback on all subscribed remote tracks — the correct fix for autoplay policy.
+      if (roomRef.current) {
+        try { await roomRef.current.startAudio(); } catch (_) {}
+      }
+      toast.dismiss('audio-unlock');
+      remoteAudioElsRef.current.forEach(({ el }) => {
+        el.play?.().catch(() => {});
+      });
+      try {
+        await ensureRecorderStarted();
+      } catch (_) {}
+    };
+    window.addEventListener('pointerdown', unlockAudioAndMic, { once: true });
+    window.addEventListener('keydown', unlockAudioAndMic, { once: true });
+    window.addEventListener('touchstart', unlockAudioAndMic, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudioAndMic);
+      window.removeEventListener('keydown', unlockAudioAndMic);
+      window.removeEventListener('touchstart', unlockAudioAndMic);
+    };
+  }, [connected, ensureRecorderStarted]);
 
   useEffect(() => {
     if (!connected) return;
@@ -987,7 +868,6 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
 
   useEffect(() => {
     if (!sessionId) return;
-    playerRef.current = new StreamingAudioPlayer();
     connectRef.current?.();
     return () => {
       disconnectRef.current?.();
