@@ -1,6 +1,6 @@
-# ========================================
-# 3. services/gemini_service.py - Clean Gemini integration
-# ========================================
+# DEPRECATED: Gemini LLM client used by InterviewService (interview_websocket path).
+# Still imported as a secondary LLM fallback in InterviewService. Can be removed
+# once the project standardises on Groq-only for question/feedback generation.
 
 import google.generativeai as genai
 from config import get_settings

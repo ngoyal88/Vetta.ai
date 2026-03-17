@@ -1,3 +1,5 @@
+# DEPRECATED: ElevenLabs TTS service used by the legacy WebSocket interview handler.
+# Not wired into the LiveKit agent pipeline. Can be deleted.
 """
 ElevenLabs Text-to-Speech: converts AI responses to natural speech.
 """
