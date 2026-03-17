@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class InterviewType(str, Enum):
@@ -41,7 +42,7 @@ class CodingQuestion(BaseModel):
     test_cases: List[TestCase]
     constraints: List[str] = []
     hints: List[str] = []
-    starter_code: Dict[str, str] = {}  # language: code
+    starter_code: Dict[str, str] = {}
 
 
 class CodeSubmission(BaseModel):
@@ -68,14 +69,14 @@ class InterviewSession(BaseModel):
     candidate_name: Optional[str] = None
     years_experience: Optional[int] = None
     interview_type: InterviewType
-    custom_role: Optional[str] = None  # For custom interviews
+    custom_role: Optional[str] = None
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
-    status: str = "active"  # active, paused, completed
+    status: str = "active"
     current_question_index: int = 0
     questions: List[Dict[str, Any]] = []
     responses: List[Dict[str, Any]] = []
     code_submissions: List[CodeSubmission] = []
-    live_transcription: List[Dict[str, str]] = []  # New: For subtitles
+    live_transcription: List[Dict[str, str]] = []
     resume_data: Dict[str, Any] = {}
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -83,7 +84,7 @@ class InterviewSession(BaseModel):
 
 
 class TranscriptionEntry(BaseModel):
-    speaker: str  # "candidate" or "interviewer"
+    speaker: str
     text: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     language: str = "en"

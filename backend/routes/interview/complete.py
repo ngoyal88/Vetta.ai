@@ -4,15 +4,14 @@ from fastapi import Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from firebase_admin import firestore
 
+from firebase_config import db
 from models.interview import InterviewSession
-from services.interview import InterviewService
 from utils.auth import verify_firebase_token
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.rate_limit import check_rate_limit
 from utils.redis_client import get_session, update_session
-from firebase_config import db
 
-from . import router, logger, interview_service, SESSION_TTL
+from . import SESSION_TTL, interview_service, logger, router
 
 
 @router.post("/complete")
@@ -32,11 +31,8 @@ async def complete_interview(
             raise HTTPException(403, "Not authorized for this session")
 
         session = InterviewSession(**session_data)
-
-        # Calculate duration
         duration = (datetime.now(timezone.utc) - session.started_at).total_seconds() / 60
 
-        # Generate final feedback
         feedback_data = {
             "interview_type": session.interview_type.value,
             "custom_role": session.custom_role,
@@ -44,21 +40,12 @@ async def complete_interview(
             "responses": session.responses,
             "code_submissions": [s.dict() for s in session.code_submissions],
         }
-
-        # Always generate final feedback; session data does not persist it (InterviewSession model has no final_feedback field)
         final_feedback = await interview_service.generate_final_feedback(feedback_data)
 
-        # Update session
         session.status = "completed"
         session.completed_at = datetime.now(timezone.utc)
+        await update_session(f"interview:{session_id}", session.dict(), expire_seconds=SESSION_TTL)
 
-        await update_session(
-            f"interview:{session_id}",
-            session.dict(),
-            expire_seconds=SESSION_TTL,
-        )
-
-        # Firestore update
         try:
             scores = parse_scores_from_feedback(final_feedback.get("feedback"))
             payload = jsonable_encoder(
@@ -82,19 +69,16 @@ async def complete_interview(
                     "pass": scores.get("overall", 0) >= 6,
                 }
             )
-
-            # Ensure start timestamps exist if initial write failed
             payload.setdefault("started_at", session.started_at)
             payload.setdefault("created_at", session.started_at)
             payload["last_updated"] = firestore.SERVER_TIMESTAMP
-            # Replace timestamp fields after encoding to preserve Firestore sentinel values
             payload["completed_at"] = firestore.SERVER_TIMESTAMP
-            if "scores" in payload and not payload["scores"]:
+            if not payload.get("scores"):
                 payload.pop("scores", None)
 
             db.collection("interviews").document(session_id).set(payload, merge=True)
         except Exception as e:
-            logger.warning(f"Failed to persist interview completion to Firestore: {e}")
+            logger.warning("Failed to persist interview completion to Firestore: %s", e)
 
         return {
             "message": "Interview completed",
@@ -113,4 +97,3 @@ async def complete_interview(
             exc_info=True,
         )
         raise HTTPException(500, str(e))
-

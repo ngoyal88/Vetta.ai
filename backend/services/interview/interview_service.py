@@ -1,4 +1,4 @@
-# services/interview_service.py
+"""Core interview orchestration: question generation, evaluation, and feedback."""
 import asyncio
 import json
 from typing import AsyncGenerator, Dict, List, Optional, Any, Union
@@ -19,15 +19,13 @@ SESSION_TTL = getattr(get_settings(), "interview_session_ttl_seconds", 7200)
 
 
 def _parse_interview_type(val: Optional[str]) -> InterviewType:
-    """Robustly parse InterviewType from string (case-insensitive; supports name or value)."""
+    """Parse InterviewType from string, case-insensitive. Defaults to DSA on failure."""
     if not val:
         return InterviewType.DSA
-    # direct try
     try:
         return InterviewType(val)
     except Exception:
         pass
-    # try by name ignoring case
     v = val.strip().lower()
     for it in InterviewType:
         try:
@@ -35,54 +33,42 @@ def _parse_interview_type(val: Optional[str]) -> InterviewType:
                 return it
         except Exception:
             continue
-    logger.warning(f"Unknown InterviewType '{val}', defaulting to DSA")
+    logger.warning("Unknown InterviewType %r, defaulting to DSA", val)
     return InterviewType.DSA
 
 
 def _normalize_question_entry(q: Union[str, Dict], default_type: str = "behavioral") -> Dict:
-    """
-    Ensure every questions[] entry has a consistent dict shape:
-    {
-      "question": { ... } or "question": "plain text",
-      "type": "<type string>",
-      "timestamp": ...
-    }
+    """Normalise a questions[] entry to the canonical shape.
+
+    Returns: {"question": <obj or str>, "type": <str>, "timestamp": <iso>}
     """
     if isinstance(q, dict):
-        # If the dict already seems like a question object, keep it
         if "question" in q or "title" in q or "description" in q:
-            # keep as-is but ensure top-level 'type' and 'timestamp' if missing
             out = q.copy()
             if "type" not in out:
                 out["type"] = default_type
             return out
-        else:
-            # assume it's already a wrapped entry (question object)
-            return {
-                "question": q,
-                "type": q.get("type", default_type),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-    else:
-        # plain string -> wrap
         return {
-            "question": {"question": str(q)},
-            "type": default_type,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "question": q,
+            "type": q.get("type", default_type),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+    return {
+        "question": {"question": str(q)},
+        "type": default_type,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def _extract_question_text(q_entry: Union[str, Dict]) -> str:
-    """Return a human-readable question text given an entry that may be string or dict."""
+    """Return human-readable question text from an entry that may be a string or dict."""
     if isinstance(q_entry, str):
         return q_entry
     if isinstance(q_entry, dict):
-        # q_entry might be a wrapped entry {'question': {...}, 'type': '...'} or a plain question dict
         q = q_entry.get("question") if "question" in q_entry else q_entry
         if isinstance(q, dict):
-            # prefer 'question' field, fallback to 'title' or full JSON string
             return q.get("question") or q.get("title") or json.dumps(q)
-        elif isinstance(q, str):
+        if isinstance(q, str):
             return q
     return str(q_entry)
 
@@ -97,28 +83,23 @@ class InterviewService:
 
         if provider == "groq":
             if settings.groq_api_key:
-                logger.info("Using Groq LLM provider")
                 self.llm = GroqService()
             else:
                 logger.warning("groq selected but GROQ_API_KEY missing; falling back to Gemini")
                 self.llm = GeminiService()
         elif provider == "gemini":
-            # If Gemini is selected but its key is missing, auto-fallback to Groq when available
             if settings.llm_api_key:
                 self.llm = GeminiService()
             elif settings.groq_api_key:
-                logger.info("Gemini selected but key missing; auto-falling back to Groq")
+                logger.info("Gemini key missing; falling back to Groq")
                 self.llm = GroqService()
             else:
-                logger.warning("No LLM keys configured; Gemini client will be unconfigured")
+                logger.warning("No LLM keys configured")
                 self.llm = GeminiService()
         else:
-            # Provider unset or unknown: prefer Groq if available, else Gemini
             if settings.groq_api_key:
-                logger.info("LLM provider unset/unknown; preferring Groq (key present)")
                 self.llm = GroqService()
             else:
-                logger.info("LLM provider unset/unknown; using Gemini")
                 self.llm = GeminiService()
         self.eval_llm = GroqService() if settings.groq_api_key else self.llm
 
@@ -127,9 +108,10 @@ class InterviewService:
             self._fallback_llm = GeminiService()
         elif provider == "gemini" and getattr(settings, "groq_api_key", None):
             self._fallback_llm = GroqService()
-        elif not provider or provider not in ("groq", "gemini"):
-            if settings.groq_api_key and settings.llm_api_key:
-                self._fallback_llm = GeminiService() if self.llm.__class__.__name__ == "GroqService" else GroqService()
+        elif provider not in ("groq", "gemini") and settings.groq_api_key and settings.llm_api_key:
+            self._fallback_llm = (
+                GeminiService() if self.llm.__class__.__name__ == "GroqService" else GroqService()
+            )
 
     def _is_retryable_error(self, e: Exception) -> bool:
         code = getattr(e, "status_code", None) or getattr(e, "code", None)

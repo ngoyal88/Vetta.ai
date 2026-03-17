@@ -1,3 +1,6 @@
+# DEPRECATED: Manual WebSocket interview handler (STT/LLM/TTS in FastAPI).
+# Superseded by services/interview/agent.py (livekit-agents AgentSession pipeline).
+# The /ws/interview endpoint is no longer the active code path. Can be deleted.
 """
 WebSocket handler for real-time interview (audio, STT, TTS, LLM).
 """

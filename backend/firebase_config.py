@@ -1,38 +1,42 @@
-import os
-import json
+"""Firebase Admin SDK initialisation and Firestore client."""
 import base64
+import json
+import logging
+import os
+
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-def get_firebase_credentials():
-    """
-    Load credentials from:
-    1. Base64 environment variable (Production/Render)
-    2. Local file (Development)
-    """
-    # 1. Try Base64 Env Var (Render)
-    if os.getenv("FIREBASE_CREDENTIALS_BASE64"):
-        try:
-            encoded_creds = os.getenv("FIREBASE_CREDENTIALS_BASE64")
-            decoded_json = base64.b64decode(encoded_creds).decode("utf-8")
-            cred_dict = json.loads(decoded_json)
-            return credentials.Certificate(cred_dict)
-        except Exception as e:
-            print(f"❌ Failed to decode FIREBASE_CREDENTIALS_BASE64: {e}")
-    
-    # 2. Fallback to local file (Localhost)
-    # Check if file exists to prevent crash if missing in prod
-    if os.path.exists("serviceAccount.json"):
-        return credentials.Certificate("serviceAccount.json")
-    
-    # 3. Try finding it in the backend folder specifically (Docker pathing fix)
-    if os.path.exists("backend/serviceAccount.json"):
-        return credentials.Certificate("backend/serviceAccount.json")
+_log = logging.getLogger(__name__)
 
-    raise ValueError("❌ No Firebase credentials found! Set FIREBASE_CREDENTIALS_BASE64 or provide serviceAccount.json")
+
+def _get_credentials() -> credentials.Certificate:
+    """Load service-account credentials from env or local file.
+
+    Resolution order:
+    1. FIREBASE_CREDENTIALS_BASE64 environment variable (production / Render).
+    2. serviceAccount.json in the working directory.
+    3. backend/serviceAccount.json (Docker path).
+    """
+    encoded = os.getenv("FIREBASE_CREDENTIALS_BASE64")
+    if encoded:
+        try:
+            cred_dict = json.loads(base64.b64decode(encoded).decode("utf-8"))
+            return credentials.Certificate(cred_dict)
+        except Exception as exc:
+            _log.error("Failed to decode FIREBASE_CREDENTIALS_BASE64: %s", exc)
+
+    for path in ("serviceAccount.json", "backend/serviceAccount.json"):
+        if os.path.exists(path):
+            return credentials.Certificate(path)
+
+    raise ValueError(
+        "No Firebase credentials found. "
+        "Set FIREBASE_CREDENTIALS_BASE64 or provide serviceAccount.json."
+    )
+
 
 if not firebase_admin._apps:
-    cred = get_firebase_credentials()
-    firebase_admin.initialize_app(cred)
+    firebase_admin.initialize_app(_get_credentials())
 
 db = firestore.client()
