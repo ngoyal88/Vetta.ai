@@ -1,18 +1,15 @@
+"""Logging setup with optional Rich console or JSON output."""
 from __future__ import annotations
 
 import logging
-from typing import Optional
-import os
 import sys
 from functools import lru_cache
+from typing import Optional
 
 from config import get_settings
-settings = get_settings()
-log_level = settings.log_level.upper()
 
-# ---------------------------- #
-# Build handlers based on environment settings
-# ---------------------------- #
+settings = get_settings()
+_LOG_LEVEL = settings.log_level.upper()
 
 
 def _console_handler() -> logging.Handler:
@@ -28,7 +25,6 @@ def _console_handler() -> logging.Handler:
             rich_tracebacks=True,
         )
     except ModuleNotFoundError:
-        # fallback to default stream handler if rich is not installed
         return logging.StreamHandler(sys.stdout)
 
 
@@ -37,8 +33,7 @@ def _json_handler() -> logging.Handler:
         from pythonjsonlogger import jsonlogger
     except ModuleNotFoundError:
         raise SystemExit(
-            "LOG_FORMAT=json but package python-json-logger not installed.\n"
-            "Run: pip install python-json-logger"
+            "LOG_FORMAT=json requires python-json-logger. Run: pip install python-json-logger"
         )
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(jsonlogger.JsonFormatter())
@@ -46,38 +41,25 @@ def _json_handler() -> logging.Handler:
 
 
 def setup_logging(force: bool = False) -> None:
-    """
-    Set up logging based on environment configuration.
-    If 'force' is True, reconfigure even if handlers exist.
-    """
+    """Configure root logger and uvicorn loggers from settings."""
     root = logging.getLogger()
-
     if root.handlers and not force:
         return
 
-    # Clear existing handlers
     for h in list(root.handlers):
         root.removeHandler(h)
 
-    # Set log level from settings, fallback to INFO if not set
-    root.setLevel(log_level)
-
-    # Choose handler type based on settings
+    root.setLevel(_LOG_LEVEL)
     handler = _json_handler() if settings.log_format.lower() == "json" else _console_handler()
     root.addHandler(handler)
 
-    # Ensure uvicorn logs use the same handler and level
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        logger = logging.getLogger(name)
-        logger.handlers = [handler]
-        logger.setLevel(log_level)
+        lg = logging.getLogger(name)
+        lg.handlers = [handler]
+        lg.setLevel(_LOG_LEVEL)
 
 
 @lru_cache()
 def get_logger(name: Optional[str] = None) -> logging.Logger:
-    """
-    Return a logger with the given name.
-    Uses cached setup_logging to avoid reinitializing handlers.
-    """
     setup_logging()
     return logging.getLogger(name or "vetta-ai")

@@ -1,4 +1,4 @@
-# utils/response_validator.py — sanitize and validate LLM text responses
+"""Sanitise and validate LLM text responses."""
 import re
 from typing import Optional
 
