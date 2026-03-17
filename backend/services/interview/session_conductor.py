@@ -1,3 +1,4 @@
+"""Interview session state machine: tracks transcript, code, and turn signals."""
 import random
 import time
 from dataclasses import dataclass, field
@@ -151,7 +152,7 @@ class SessionConductor:
         return choice
 
     def build_llm_context(self) -> str:
-        recent_turns = self.transcript_history[-4:]
+        recent_turns = self.transcript_history[-3:]
         conversation_lines = []
         for turn in recent_turns:
             role = "Candidate" if turn.get("role") == "candidate" else "Interviewer"
@@ -167,10 +168,11 @@ class SessionConductor:
         code_block = ""
         if self.session_phase == "dsa":
             age_seconds = max(0, int(_now() - self.last_code_change_at)) if self.last_code_change_at else 0
+            preview = self.current_code[:150] + ("..." if len(self.current_code) > 150 else "")
             code_block = (
                 f"\nCANDIDATE'S CODE RIGHT NOW:\n"
                 f"```{self.current_language}\n"
-                f"{self.current_code or '(no code written yet)'}\n"
+                f"{preview or '(no code written yet)'}\n"
                 f"```\n"
                 f"Last run: {self.last_execution_output or 'not executed'}\n"
                 f"Errors: {'yes' if self.code_has_errors else 'no'}\n"
@@ -243,8 +245,10 @@ class SessionConductor:
 
     @classmethod
     def load(cls, data: Optional[Dict[str, Any]]) -> "SessionConductor":
+        if data is None:
+            return cls()
         if not isinstance(data, dict):
-            logger.warning("SessionConductor.load: data is not a dict")
+            logger.warning("SessionConductor.load: data is not a dict (got %r)", type(data))
             return cls()
         try:
             turn_count = int(data.get("turn_count") or 0)
