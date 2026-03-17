@@ -1,4 +1,5 @@
-# services/interview/session_resilience.py — in-memory session fallback when Redis is unavailable
+# DEPRECATED: In-memory Redis fallback used by the legacy livekit_room_handler and redis_client.
+# redis_client.py no longer imports this module. Can be deleted.
 import threading
 import time
 from typing import Any, Dict, Optional

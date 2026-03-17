@@ -1,4 +1,7 @@
-# services/groq_service.py
+# DEPRECATED: Direct Groq HTTP client used by InterviewService (interview_websocket path).
+# The agent uses livekit.plugins.groq directly. Can be deleted once interview_service.py
+# no longer falls back to this for the WebSocket flow.
+# NOTE: InterviewService still imports this for fallback question/feedback generation.
 import asyncio
 import threading
 from typing import AsyncGenerator, List, Dict, Optional

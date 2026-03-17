@@ -1,3 +1,7 @@
+// DEPRECATED: WebSocket-based interview hook.
+// Superseded by useInterviewLiveKit.js. Only rendered when LiveKit is unavailable
+// (REACT_APP_USE_LIVEKIT=false or transport=ws query param). Can be deleted.
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AudioRecorder, AudioPlayer, checkBrowserSupport } from 'shared/utils/audioUtils';
 import { api } from 'shared/services/api';

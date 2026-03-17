@@ -1,3 +1,7 @@
+# DEPRECATED: WebSocket interview routes backed by interview_websocket.py.
+# The /ws/interview endpoint is superseded by the LiveKit agent pipeline.
+# The /ws/stt endpoint is a dev-only debug tool.
+# This file is not mounted in main.py and can be deleted.
 """
 WebSocket routes for real-time interview.
 """

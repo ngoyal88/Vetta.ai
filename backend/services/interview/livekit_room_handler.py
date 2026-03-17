@@ -1,3 +1,6 @@
+# DEPRECATED: Pre-agent bot-as-participant LiveKit handler.
+# Superseded by services/interview/agent.py (livekit-agents AgentSession pipeline).
+# This file is not loaded when USE_AGENT_WORKER_V2=true and can be deleted.
 """
 LiveKit room handler: bot joins as participant, same interview state machine as WebSocket.
 All AI (STT, LLM, TTS) stays in FastAPI; LiveKit is transport only.
@@ -312,7 +315,7 @@ class InterviewLiveKitHandler:
 
         if is_first_segment:
             return (
-                (sentence_end and len(clean) > 40)
+                (sentence_end and len(clean) > 15)
                 or (clause_end and len(clean) > 100)
                 or len(clean) > 150
             )
@@ -494,7 +497,7 @@ class InterviewLiveKitHandler:
             return
         try:
             await asyncio.gather(
-                self._run_confirm_sleep(0.3),
+                self._run_confirm_sleep(0.15),
                 self._ensure_prebuilt_context(),
             )
             if (

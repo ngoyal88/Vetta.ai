@@ -1,3 +1,5 @@
+# DEPRECATED: Raw-WebSocket Deepgram client used by the legacy interview_websocket handler.
+# Deepgram is now consumed via livekit.plugins.deepgram inside the AgentSession. Can be deleted.
 """
 Lean Deepgram realtime STT client using raw WebSocket via aiohttp.
 

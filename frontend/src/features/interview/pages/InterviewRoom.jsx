@@ -1,3 +1,6 @@
+// DEPRECATED: WebSocket-based interview room page.
+// Superseded by InterviewRoomLiveKit.jsx. Only rendered when LiveKit is unavailable. Can be deleted.
+
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";

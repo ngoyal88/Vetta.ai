@@ -1,3 +1,5 @@
+# DEPRECATED: Edge TTS service that outputs base64 MP3 for WebSocket transport.
+# Superseded by services/interview/agent_tts_plugin.py (LiveKit AudioEmitter API). Can be deleted.
 """
 Edge TTS (neural voices via Microsoft Edge).
 
