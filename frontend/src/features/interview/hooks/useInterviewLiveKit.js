@@ -458,8 +458,8 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       registerByteStreamHandlers(room);
 
       const attachRemoteAudioTrack = (track, participantIdentity = '') => {
-        if (!track || track.kind !== 'audio') return;
-        const key = `${participantIdentity}:${track.sid || Math.random().toString(36).slice(2)}`;
+        if (!track || track.kind !== 'audio' || !track.sid) return;
+        const key = `${participantIdentity}:${track.sid}`;
         if (remoteAudioElsRef.current.has(key)) return;
         const el = track.attach();
         el.autoplay = true;
@@ -474,8 +474,8 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       };
 
       const detachRemoteAudioTrack = (track, participantIdentity = '') => {
-        if (!track || track.kind !== 'audio') return;
-        const key = `${participantIdentity}:${track.sid || ''}`;
+        if (!track || track.kind !== 'audio' || !track.sid) return;
+        const key = `${participantIdentity}:${track.sid}`;
         const entry = remoteAudioElsRef.current.get(key);
         if (!entry) return;
         try {
