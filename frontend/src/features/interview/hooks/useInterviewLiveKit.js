@@ -270,7 +270,10 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       case 'transcript': {
         const text = message.text || '';
         if (message.is_final) {
-          setTranscriptFinal(text);
+          setTranscriptFinal((prev) => {
+            if (!text) return prev;
+            return prev ? `${prev} ${text}` : text;
+          });
           setTranscriptInterim('');
         } else {
           setTranscriptInterim(text);

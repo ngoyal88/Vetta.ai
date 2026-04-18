@@ -21,16 +21,16 @@ def _mp3_to_pcm(mp3_bytes: bytes) -> bytes:
     alignment padding that PyAV may append, which would manifest as crackling.
     """
     buf = io.BytesIO(mp3_bytes)
-    container = av.open(buf, format="mp3")
     resampler = av.AudioResampler(format="s16", layout="mono", rate=24000)
     parts: List[bytes] = []
 
-    for frame in container.decode(audio=0):
-        for resampled in resampler.resample(frame):
-            parts.append(bytes(resampled.planes[0])[: resampled.samples * 2])
+    with av.open(buf, format="mp3") as container:
+        for frame in container.decode(audio=0):
+            for resampled in resampler.resample(frame):
+                parts.append(bytes(resampled.planes[0])[: resampled.samples * 2])
 
-    for resampled in resampler.resample(None):
-        parts.append(bytes(resampled.planes[0])[: resampled.samples * 2])
+        for resampled in resampler.resample(None):
+            parts.append(bytes(resampled.planes[0])[: resampled.samples * 2])
 
     return b"".join(parts)
 

@@ -274,6 +274,20 @@ async def _handle_agent_turn(session_id: str, text: str) -> None:
     await _update_session(session_key, session_data)
 
 
+def _is_session_active(session: AgentSession) -> bool:
+    """Return False when the session is no longer running, using defensive attribute access."""
+    session_closed = getattr(session, "closed", None)
+    if session_closed is True:
+        return False
+    session_running = getattr(session, "running", None)
+    if session_running is False:
+        return False
+    if session_closed is None and session_running is None and getattr(session, "_activity", None) is None:
+        # All public and fallback private signals are absent — treat as inactive (e.g. older SDK version).
+        return False
+    return True
+
+
 async def _silence_watchdog(
     session: AgentSession,
     session_id: str,
@@ -286,7 +300,7 @@ async def _silence_watchdog(
     while True:
         await asyncio.sleep(5)
 
-        if session._activity is None:
+        if not _is_session_active(session):
             return
 
         agent_speaking = (
@@ -338,7 +352,7 @@ async def _duration_watchdog(
     while True:
         await asyncio.sleep(60)
 
-        if session._activity is None:
+        if not _is_session_active(session):
             return
 
         elapsed_minutes = int((datetime.now(timezone.utc) - started_at).total_seconds() / 60)
@@ -585,6 +599,9 @@ async def _handle_candidate_disconnect(
     if not session_data:
         return
 
+    if session_data.get("status") in {"ended_early", "completed", "incomplete_exit"}:
+        return
+
     session_data["status"] = "incomplete_exit"
     session_data["completion_reason"] = "candidate_disconnected"
     completed_ts = datetime.now(timezone.utc).isoformat()
@@ -766,8 +783,13 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_error(ev: Any) -> None:
         err = getattr(ev, "error", ev) if hasattr(ev, "error") else ev
         log.error("Agent session error: %s", err, exc_info=False)
+
+        def _log_say_error(t: asyncio.Task) -> None:
+            if not t.cancelled() and t.exception():
+                log.warning("Error in recovery say: %s", t.exception())
+
         try:
-            session.say("I had a small hiccup. Could you repeat that?")
+            asyncio.create_task(session.say("I had a small hiccup. Could you repeat that?")).add_done_callback(_log_say_error)
         except Exception:
             pass
 

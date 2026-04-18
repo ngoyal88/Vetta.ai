@@ -103,6 +103,7 @@ async def update_session(session_key: str, data: dict, expire_seconds: int = 360
         log.info("Session %s updated", session_key)
     except Exception as e:
         log.error("Error updating session %s: %s", session_key, e, exc_info=True)
+        raise
 
 
 async def delete_session(session_id: str) -> bool:
