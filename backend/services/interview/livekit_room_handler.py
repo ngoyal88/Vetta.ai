@@ -19,6 +19,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 from config import get_settings
 from firebase_admin import firestore
 from firebase_config import db
+from services.interview.livekit_transport import LiveKitTransport
 from services.interview.session_conductor import SessionConductor
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
@@ -27,8 +28,6 @@ from utils.redis_client import get_session, update_session, redis as redis_clien
 logger = get_logger("LiveKitRoomHandler")
 settings = get_settings()
 SESSION_TTL = getattr(settings, "interview_session_ttl_seconds", 7200)
-CONTROL_PAYLOAD_MAX = 14000
-AUDIO_CHUNK_PAYLOAD_MAX = 12000
 CODE_PAYLOAD_MAX_LENGTH = 100_000
 
 
@@ -101,6 +100,7 @@ class InterviewLiveKitHandler:
 
         self.stt_service: Optional[DeepgramSTTService] = None
         self.current_phase = InterviewPhase.GREETING
+        self._transport = LiveKitTransport(self.room, lambda: self.current_phase.value)
         self.runtime_state = RuntimeState.LISTENING
         self.is_processing = False
         self.is_ai_speaking = False
@@ -144,7 +144,7 @@ class InterviewLiveKitHandler:
         self._prebuild_context_task: Optional[asyncio.Task] = None
         self._prebuilt_context: Optional[str] = None
         self._audio_started_sent: bool = False
-        self._streaming_tts_enabled = bool(getattr(settings, "streaming_tts_enabled", True))
+        self._streaming_tts_enabled = bool(getattr(settings, "streaming_tts_enabled", False))
         self._speaking_ended_at: Optional[float] = None
         self._streaming_llm_enabled = bool(getattr(settings, "streaming_llm_enabled", True))
         self._tts_transport = (getattr(settings, "livekit_tts_transport", "bytes") or "bytes").strip().lower()
@@ -154,91 +154,25 @@ class InterviewLiveKitHandler:
 
         logger.info("LiveKit handler initialized for session %s", session_id)
 
-    async def _send_message(self, message: Dict[str, Any]) -> None:
-        if not self._room_connected or not self.room or not self.room.local_participant:
-            return
-        try:
-            payload = json.dumps(message).encode("utf-8")
-            if len(payload) <= CONTROL_PAYLOAD_MAX:
-                await self.room.local_participant.publish_data(
-                    payload, reliable=True, topic="control"
-                )
-            else:
-                await self._send_chunked_question(message, payload)
-        except Exception as e:
-            logger.error("Failed to send message: %s", e, exc_info=True)
-
-    async def _send_chunked_question(self, message: Dict[str, Any], raw_payload: bytes) -> None:
-        """Send question with large audio as chunked: header on control + audio_chunk messages."""
-        if message.get("type") != "question" or "audio" not in message:
-            logger.warning("Chunking only supported for question with audio; truncating")
-            await self.room.local_participant.publish_data(
-                raw_payload[:CONTROL_PAYLOAD_MAX], reliable=True, topic="control"
-            )
-            return
-        question_id = str(uuid.uuid4())
-        audio_b64 = message.get("audio") or ""
-        total_chunks = (
-            (len(audio_b64) + AUDIO_CHUNK_PAYLOAD_MAX - 1) // AUDIO_CHUNK_PAYLOAD_MAX
-            if audio_b64
-            else 0
-        )
-        header = {
-            "type": "question_chunked",
-            "question_id": question_id,
-            "total_chunks": total_chunks,
-            "question": message.get("question"),
-            "phase": message.get("phase"),
-            "spoken_text": message.get("spoken_text"),
-            "timestamp": message.get("timestamp"),
-        }
-        header_msg = json.dumps(header).encode("utf-8")
-        await self.room.local_participant.publish_data(header_msg, reliable=True, topic="control")
-
-        for idx, i in enumerate(range(0, len(audio_b64), AUDIO_CHUNK_PAYLOAD_MAX)):
-            chunk_data = audio_b64[i : i + AUDIO_CHUNK_PAYLOAD_MAX]
-            chunk_msg = json.dumps(
-                {
-                    "question_id": question_id,
-                    "chunk_index": idx,
-                    "total_chunks": total_chunks,
-                    "data": chunk_data,
-                }
-            ).encode("utf-8")
-            await self.room.local_participant.publish_data(
-                chunk_msg, reliable=True, topic="audio_chunk"
-            )
-
     async def send_message(self, message: Dict[str, Any]) -> None:
-        await self._send_message(message)
+        if not self._room_connected:
+            return
+        await self._transport.send_message(message)
 
     async def send_transcript(self, text: str, is_final: bool) -> None:
-        await self.send_message(
-            {
-                "type": "transcript",
-                "text": text,
-                "is_final": is_final,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        if not self._room_connected:
+            return
+        await self._transport.send_transcript(text, is_final)
 
     async def send_status(self, status: str) -> None:
-        await self.send_message(
-            {
-                "type": "status",
-                "status": status,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        if not self._room_connected:
+            return
+        await self._transport.send_status(status)
 
     async def send_error(self, error_message: str) -> None:
-        await self.send_message(
-            {
-                "type": "error",
-                "message": error_message,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        if not self._room_connected:
+            return
+        await self._transport.send_error(error_message)
 
     async def send_question(
         self,
@@ -247,22 +181,9 @@ class InterviewLiveKitHandler:
         spoken_text: Optional[str] = None,
         stream_id: Optional[str] = None,
     ) -> None:
-        inner = self._get_dsa_inner_question(question) or question
-        message = {
-            "type": "question",
-            "question": inner,
-            "phase": self.current_phase.value,
-            "spoken_text": spoken_text,
-            "stream_id": stream_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        if audio:
-            message["audio"] = base64.b64encode(audio).decode("utf-8")
-            message["audio_content_type"] = "audio/mpeg"
-        else:
-            message["audio"] = None
-        await self._send_message(message)
-        logger.info("Sent question" + (" with audio" if audio else " (no audio)"))
+        if not self._room_connected:
+            return
+        await self._transport.send_question(question, audio, spoken_text, stream_id=stream_id)
 
     def _set_runtime_state(self, state: RuntimeState) -> None:
         if state == RuntimeState.SPEAKING:
@@ -278,15 +199,6 @@ class InterviewLiveKitHandler:
         if self._speaking_ended_at is None:
             return False
         return (time.time() - self._speaking_ended_at) < 0.5
-
-    def _get_dsa_inner_question(self, payload: Any) -> Optional[Dict[str, Any]]:
-        if not isinstance(payload, dict):
-            return None
-        if payload.get("type") == "coding" and isinstance(payload.get("question"), dict):
-            return payload["question"]
-        if isinstance(payload.get("title"), str) and "test_cases" in payload:
-            return payload
-        return None
 
     def _is_dsa_session(self, session_data: Dict[str, Any]) -> bool:
         it = session_data.get("interview_type") or ""
@@ -855,7 +767,7 @@ class InterviewLiveKitHandler:
             {
                 "type": "tts_stream_start",
                 "stream_id": stream_id,
-                "question": self._get_dsa_inner_question(response) or response,
+                "question": self._transport._get_dsa_inner_question(response) or response,
                 "phase": self.current_phase.value,
                 "spoken_text": spoken_text,
                 "transport": self._tts_transport,
@@ -1203,7 +1115,7 @@ class InterviewLiveKitHandler:
             self._set_conductor_phase(self.current_phase)
             self.conductor.append_turn("interviewer", self._extract_speakable_text(next_question_obj))
             await self.send_message({"type": "phase_change", "phase": "dsa"})
-            inner = self._get_dsa_inner_question(next_question_obj) or next_question_obj
+            inner = self._transport._get_dsa_inner_question(next_question_obj) or next_question_obj
             await self.send_message({"type": "question", "question": inner, "phase": "dsa", "audio": None, "spoken_text": None, "timestamp": datetime.now(timezone.utc).isoformat()})
             asyncio.create_task(self._persist_conductor_state())
         else:
@@ -1483,7 +1395,7 @@ class InterviewLiveKitHandler:
             await self.send_error("No questions available")
             return
         if self._is_dsa_session(session_data):
-            inner = self._get_dsa_inner_question(first_question) or first_question
+            inner = self._transport._get_dsa_inner_question(first_question) or first_question
             test_cases = inner.get("test_cases") if isinstance(inner, dict) else []
             if not test_cases or not isinstance(test_cases, list):
                 await self.send_error("No valid coding question available")
@@ -1507,6 +1419,7 @@ class InterviewLiveKitHandler:
 
     async def cleanup(self) -> None:
         self._room_connected = False
+        self._transport.connected = False
         if self.heartbeat_task:
             self.heartbeat_task.cancel()
             with suppress(asyncio.CancelledError):
