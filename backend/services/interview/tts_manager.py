@@ -27,7 +27,12 @@ class TTSManager:
             return response
         if isinstance(response, dict):
             if response.get("type") == "coding":
-                return f"{response.get('title', '')}. {response.get('description', '')[:200]}..."
+                q = response.get("question")
+                coding_question = q if isinstance(q, dict) else response
+                return (
+                    f"{coding_question.get('title', '')}. "
+                    f"{coding_question.get('description', '')[:200]}..."
+                )
             q = response.get("question")
             if isinstance(q, dict):
                 return q.get("question", "")
