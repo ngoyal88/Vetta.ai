@@ -144,7 +144,7 @@ class InterviewLiveKitHandler:
         self._prebuild_context_task: Optional[asyncio.Task] = None
         self._prebuilt_context: Optional[str] = None
         self._audio_started_sent: bool = False
-        self._streaming_tts_enabled = bool(getattr(settings, "streaming_tts_enabled", False))
+        self._streaming_tts_enabled = bool(getattr(settings, "streaming_tts_enabled", True))
         self._speaking_ended_at: Optional[float] = None
         self._streaming_llm_enabled = bool(getattr(settings, "streaming_llm_enabled", True))
         self._tts_transport = (getattr(settings, "livekit_tts_transport", "bytes") or "bytes").strip().lower()
@@ -767,7 +767,7 @@ class InterviewLiveKitHandler:
             {
                 "type": "tts_stream_start",
                 "stream_id": stream_id,
-                "question": self._transport._get_dsa_inner_question(response) or response,
+                "question": self._transport.get_dsa_inner_question(response) or response,
                 "phase": self.current_phase.value,
                 "spoken_text": spoken_text,
                 "transport": self._tts_transport,
@@ -1115,7 +1115,7 @@ class InterviewLiveKitHandler:
             self._set_conductor_phase(self.current_phase)
             self.conductor.append_turn("interviewer", self._extract_speakable_text(next_question_obj))
             await self.send_message({"type": "phase_change", "phase": "dsa"})
-            inner = self._transport._get_dsa_inner_question(next_question_obj) or next_question_obj
+            inner = self._transport.get_dsa_inner_question(next_question_obj) or next_question_obj
             await self.send_message({"type": "question", "question": inner, "phase": "dsa", "audio": None, "spoken_text": None, "timestamp": datetime.now(timezone.utc).isoformat()})
             asyncio.create_task(self._persist_conductor_state())
         else:
@@ -1395,7 +1395,7 @@ class InterviewLiveKitHandler:
             await self.send_error("No questions available")
             return
         if self._is_dsa_session(session_data):
-            inner = self._transport._get_dsa_inner_question(first_question) or first_question
+            inner = self._transport.get_dsa_inner_question(first_question) or first_question
             test_cases = inner.get("test_cases") if isinstance(inner, dict) else []
             if not test_cases or not isinstance(test_cases, list):
                 await self.send_error("No valid coding question available")

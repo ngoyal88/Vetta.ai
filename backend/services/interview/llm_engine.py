@@ -58,8 +58,11 @@ class LLMEngine:
     def _is_retryable_error(self, e: Exception) -> bool:
         code = getattr(e, "status_code", None) or getattr(e, "code", None)
         if code is not None:
-            return int(code) in (429, 500, 503)
-        msg = (e.args[0] or str(e)) if e.args else str(e)
+            try:
+                return int(code) in (429, 500, 503)
+            except (ValueError, TypeError):
+                pass
+        msg = str(e.args[0]) if e.args else str(e)
         return "429" in msg or "500" in msg or "503" in msg or "timeout" in msg.lower()
 
     async def _call_llm_with_fallback(

@@ -79,7 +79,7 @@ class LiveKitTransport:
         spoken_text: Optional[str] = None,
         stream_id: Optional[str] = None,
     ) -> None:
-        inner = self._get_dsa_inner_question(question) or question
+        inner = self.get_dsa_inner_question(question) or question
         message: Dict[str, Any] = {
             "type": "question",
             "question": inner,
@@ -114,7 +114,7 @@ class LiveKitTransport:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
-    def _get_dsa_inner_question(self, payload: Any) -> Optional[Dict[str, Any]]:
+    def get_dsa_inner_question(self, payload: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(payload, dict):
             return None
         if payload.get("type") == "coding" and isinstance(payload.get("question"), dict):
