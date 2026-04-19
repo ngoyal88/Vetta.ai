@@ -144,3 +144,25 @@ class ResumeProfile(BaseModel):
 class ParsedResumeResponse(BaseModel):
     profile: ResumeProfile
     meta: Dict[str, Any]
+
+
+class ResumeCoverageCounts(BaseModel):
+    skills: int = 0
+    projects: int = 0
+    work_experiences: int = 0
+
+
+class ResumeScorecardMeta(BaseModel):
+    model: str
+    version: str
+    generated_at: str
+    fallback_used: bool = False
+
+
+class ResumeScorecardResponse(BaseModel):
+    score: int = Field(ge=0, le=100)
+    coverage_counts: ResumeCoverageCounts
+    summary_line: str
+    role_hint_text: Optional[str] = None
+    suggestions: List[str] = Field(default_factory=list, max_length=3)
+    meta: ResumeScorecardMeta

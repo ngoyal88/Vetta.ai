@@ -6,6 +6,10 @@ export default function ResumeTab({
   parsedResume,
   file,
   uploadingResume,
+  resumeScorecard,
+  loadingResumeScorecard,
+  resumeScorecardError,
+  onRetryScorecard,
   handleFileChange,
   handleUploadResume,
   handleDeleteResume,
@@ -118,6 +122,70 @@ export default function ResumeTab({
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {resume && (
+            <div className="mt-4 p-4 bg-black/40 border border-cyan-600/20 rounded-lg">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h4 className="text-sm font-semibold text-cyan-300">Resume Scorecard</h4>
+                {loadingResumeScorecard ? (
+                  <span className="text-xs text-gray-400">Calculating...</span>
+                ) : null}
+              </div>
+
+              {loadingResumeScorecard && (
+                <div className="text-sm text-gray-400">Analyzing your parsed resume coverage.</div>
+              )}
+
+              {!loadingResumeScorecard && resumeScorecard && (
+                <div className="space-y-3">
+                  <div className="text-3xl font-bold text-white">
+                    {resumeScorecard.score}
+                    <span className="text-base text-gray-400 font-normal"> / 100</span>
+                  </div>
+                  <div className="text-sm text-gray-300">{resumeScorecard.summary_line}</div>
+                  <div className="grid sm:grid-cols-3 gap-2 text-xs">
+                    <div className="bg-black/30 border border-cyan-600/20 rounded-md p-2 text-gray-300">
+                      Skills: {resumeScorecard.coverage_counts?.skills ?? 0}
+                    </div>
+                    <div className="bg-black/30 border border-cyan-600/20 rounded-md p-2 text-gray-300">
+                      Projects: {resumeScorecard.coverage_counts?.projects ?? 0}
+                    </div>
+                    <div className="bg-black/30 border border-cyan-600/20 rounded-md p-2 text-gray-300">
+                      Experience: {resumeScorecard.coverage_counts?.work_experiences ?? 0}
+                    </div>
+                  </div>
+                  {resumeScorecard.role_hint_text ? (
+                    <div className="text-xs text-cyan-200 bg-cyan-500/10 border border-cyan-500/20 rounded-md p-2">
+                      {resumeScorecard.role_hint_text}
+                    </div>
+                  ) : null}
+                  {!!resumeScorecard.suggestions?.length && (
+                    <div>
+                      <div className="text-xs text-gray-400 mb-1">Suggestions</div>
+                      <ul className="list-disc list-inside text-sm text-gray-300 space-y-1">
+                        {resumeScorecard.suggestions.slice(0, 3).map((suggestion, idx) => (
+                          <li key={`${idx}-${suggestion}`}>{suggestion}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!loadingResumeScorecard && resumeScorecardError && (
+                <div className="space-y-2">
+                  <div className="text-sm text-red-300">{resumeScorecardError}</div>
+                  <button
+                    type="button"
+                    onClick={onRetryScorecard}
+                    className="px-3 py-1.5 text-xs rounded-md border border-cyan-600/30 text-cyan-300 hover:bg-cyan-500/10 transition"
+                  >
+                    Retry scorecard
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

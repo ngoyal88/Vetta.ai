@@ -61,6 +61,10 @@ const Dashboard = () => {
   const [deletingAccountState, setDeletingAccountState] = useState(false);
   const [showPreCheck, setShowPreCheck] = useState(false);
   const [preCheckSessionId, setPreCheckSessionId] = useState(null);
+  const [resumeScorecard, setResumeScorecard] = useState(null);
+  const [loadingResumeScorecard, setLoadingResumeScorecard] = useState(false);
+  const [resumeScorecardError, setResumeScorecardError] = useState('');
+  const [scorecardDirty, setScorecardDirty] = useState(false);
 
   const resumeStorageKey = useMemo(
     () => (currentUser ? `resume_data_${currentUser.uid}` : 'resume_data'),
@@ -76,9 +80,18 @@ const Dashboard = () => {
     setFile(selected);
   };
 
+  const selectedRoleHint = useMemo(() => {
+    if (interviewType === 'custom' && customRole.trim()) return customRole.trim();
+    if (!interviewType || interviewType === 'resume') return null;
+    return interviewType;
+  }, [interviewType, customRole]);
+
   const loadResume = useCallback(async () => {
     if (!currentUser) {
       setParsedResume(null);
+      setResumeScorecard(null);
+      setResumeScorecardError('');
+      setScorecardDirty(false);
       return;
     }
     try {
@@ -89,6 +102,8 @@ const Dashboard = () => {
         if (data?.resume) {
           const normalized = data.resume?.data && typeof data.resume.data === 'object' ? data.resume.data : data.resume;
           setParsedResume(normalized);
+          setResumeScorecard(null);
+          setScorecardDirty(true);
           localStorage.setItem(resumeStorageKey, JSON.stringify(normalized));
           return;
         }
@@ -102,13 +117,41 @@ const Dashboard = () => {
         const parsed = JSON.parse(cached);
         const normalized = parsed?.data && typeof parsed.data === 'object' ? parsed.data : parsed;
         setParsedResume(normalized);
+        setResumeScorecard(null);
+        setScorecardDirty(true);
       } else {
         setParsedResume(null);
+        setResumeScorecard(null);
+        setResumeScorecardError('');
+        setScorecardDirty(false);
       }
     } catch {
       setParsedResume(null);
+      setResumeScorecard(null);
+      setResumeScorecardError('');
+      setScorecardDirty(false);
     }
   }, [currentUser, resumeStorageKey]);
+
+  const fetchResumeScorecard = useCallback(
+    async (force = false) => {
+      if (!currentUser || !parsedResume) return;
+      if (!force && !scorecardDirty) return;
+      try {
+        setLoadingResumeScorecard(true);
+        setResumeScorecardError('');
+        const scorecard = await api.getResumeScorecard(selectedRoleHint);
+        setResumeScorecard(scorecard);
+        setScorecardDirty(false);
+      } catch (err) {
+        console.error(err);
+        setResumeScorecardError(err?.message || 'Failed to load scorecard');
+      } finally {
+        setLoadingResumeScorecard(false);
+      }
+    },
+    [currentUser, parsedResume, scorecardDirty, selectedRoleHint]
+  );
 
   const handleUploadResume = useCallback(async () => {
     if (!currentUser) {
@@ -129,6 +172,9 @@ const Dashboard = () => {
       const parsed = res?.profile ?? res?.data;
       if (!parsed) throw new Error('Resume parser returned empty data');
       setParsedResume(parsed);
+      setResumeScorecard(null);
+      setResumeScorecardError('');
+      setScorecardDirty(true);
       localStorage.setItem(resumeStorageKey, JSON.stringify(parsed));
       await setDoc(
         doc(db, 'users', currentUser.uid),
@@ -153,6 +199,9 @@ const Dashboard = () => {
       onConfirm: async () => {
         try {
           setParsedResume(null);
+          setResumeScorecard(null);
+          setResumeScorecardError('');
+          setScorecardDirty(false);
           setFile(null);
           localStorage.removeItem(resumeStorageKey);
           await setDoc(
@@ -212,6 +261,17 @@ const Dashboard = () => {
     loadResume();
   }, [loadResume]);
   useEffect(() => {
+    if (!parsedResume) {
+      setResumeScorecard(null);
+      setResumeScorecardError('');
+      setScorecardDirty(false);
+    }
+  }, [parsedResume]);
+  useEffect(() => {
+    if (!parsedResume) return;
+    setScorecardDirty(true);
+  }, [selectedRoleHint, parsedResume]);
+  useEffect(() => {
     if (!currentUser) return;
     fetchHistory();
   }, [currentUser, fetchHistory]);
@@ -219,6 +279,12 @@ const Dashboard = () => {
     if (activeTab !== 'history') return;
     fetchHistory();
   }, [activeTab, fetchHistory]);
+  useEffect(() => {
+    if (activeTab !== 'resume') return;
+    if (!parsedResume) return;
+    if (!scorecardDirty) return;
+    fetchResumeScorecard();
+  }, [activeTab, parsedResume, scorecardDirty, fetchResumeScorecard]);
   useEffect(() => {
     setProfileName(profile?.name || currentUser?.displayName || '');
     setProfilePhoto(currentUser?.photoURL || '');
@@ -234,7 +300,11 @@ const Dashboard = () => {
       return;
     }
     try {
-      const candidateName = parsedResume?.name?.raw || profile?.name || currentUser?.displayName || 'Candidate';
+      const candidateName =
+        (typeof parsedResume?.name === 'string' ? parsedResume.name : parsedResume?.name?.raw) ||
+        profile?.name ||
+        currentUser?.displayName ||
+        'Candidate';
       const response = await api.startInterview(
         currentUser.uid,
         interviewType,
@@ -374,6 +444,10 @@ const Dashboard = () => {
                   parsedResume={parsedResume}
                   file={file}
                   uploadingResume={uploadingResume}
+                  resumeScorecard={resumeScorecard}
+                  loadingResumeScorecard={loadingResumeScorecard}
+                  resumeScorecardError={resumeScorecardError}
+                  onRetryScorecard={() => fetchResumeScorecard(true)}
                   handleFileChange={handleFileChange}
                   handleUploadResume={handleUploadResume}
                   handleDeleteResume={handleDeleteResume}
