@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     dsa_time_limit_minutes: int = 45
     interview_session_ttl_seconds: int = 7200
 
+    # LiveKit: when True, TTS is streamed as tts_chunk (requires client handlers). False = single
+    # question message with base64 audio (and optional chunking); works with useInterviewLiveKit AudioPlayer.
+    streaming_tts_enabled: bool = False
+
     log_level: str = "INFO"
     log_format: str = "console"
 

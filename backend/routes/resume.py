@@ -2,7 +2,9 @@ from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 
-from services.resume import parse_resume_llm
+from firebase_config import db
+from models.resume import ResumeScorecardResponse
+from services.resume import parse_resume_llm, build_resume_scorecard
 from utils.auth import verify_firebase_token
 from utils.logger import get_logger
 
@@ -57,3 +59,36 @@ async def upload_resume(
     except Exception as exc:
         logger.exception("Resume parse failed")
         raise HTTPException(500, "Resume parsing failed. Please try again or use a different file.") from exc
+
+
+@router.get("/scorecard", response_model=ResumeScorecardResponse)
+async def get_resume_scorecard(
+    role_hint: Optional[str] = None,
+    uid: str = Depends(verify_firebase_token),
+):
+    try:
+        parsed_ref = (
+            db.collection("users")
+            .document(uid)
+            .collection("profiles")
+            .document("resume_parsed")
+        )
+        parsed_doc = parsed_ref.get()
+    except Exception as exc:
+        logger.exception("Failed to fetch parsed resume for scorecard")
+        raise HTTPException(500, "Failed to load parsed resume.") from exc
+
+    if not parsed_doc.exists:
+        raise HTTPException(404, "No parsed resume found. Please upload your resume first.")
+
+    payload = parsed_doc.to_dict() or {}
+    profile_data = payload.get("profile")
+    if not isinstance(profile_data, dict):
+        raise HTTPException(422, "Parsed resume data is malformed.")
+
+    try:
+        scorecard = await build_resume_scorecard(profile_data=profile_data, role_hint=role_hint)
+        return scorecard
+    except Exception as exc:
+        logger.exception("Resume scorecard generation failed")
+        raise HTTPException(503, "Resume scoring is temporarily unavailable. Please retry.") from exc
