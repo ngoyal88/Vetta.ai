@@ -330,10 +330,21 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       if (question_id == null || total_chunks == null || data == null || chunk_index == null) return;
       const buf = chunkBufferRef.current;
       if (!buf || buf.questionId !== question_id) return;
+      const totalChunks = buf.totalChunks;
+      // Validate chunk_index is an integer within [0, totalChunks) using the buffered header value;
+      // also discard messages whose total_chunks disagrees with the established header.
+      if (!Number.isInteger(chunk_index) || chunk_index < 0 || chunk_index >= totalChunks) {
+        console.warn('[AudioChunk] invalid chunk_index', chunk_index, 'for totalChunks', totalChunks, '— dropping');
+        return;
+      }
+      if (total_chunks !== totalChunks) {
+        console.warn('[AudioChunk] total_chunks mismatch: got', total_chunks, 'expected', totalChunks, '— dropping');
+        return;
+      }
       buf.parts[chunk_index] = data;
       let ok = true;
       const merged = [];
-      for (let i = 0; i < total_chunks; i += 1) {
+      for (let i = 0; i < totalChunks; i += 1) {
         const part = buf.parts[i];
         if (part == null || part === '') {
           ok = false;

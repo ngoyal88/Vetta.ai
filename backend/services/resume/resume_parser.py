@@ -63,7 +63,7 @@ async def parse_resume_llm(file_bytes: bytes, filename: str, uid: str) -> Parsed
     """
     LLM-powered resume parser.
     - Extracts raw text.
-    - Calls Groq llama-3.3-70b-versatile in JSON mode.
+    - Calls Groq llama-3.1-8b-instant in JSON mode (via GroqService.json_completion).
     - Validates against ResumeProfile.
     - Drops hallucinated skills/projects/experience entries not present in the raw text.
     - Writes the parsed profile to Firestore under users/{uid}/profiles/resume_parsed.
@@ -236,7 +236,7 @@ async def parse_resume_llm(file_bytes: bytes, filename: str, uid: str) -> Parsed
     meta = {
         "uid": uid,
         "source": "groq_llm_resume_parser",
-        "model": "groq/llama-3.3-70b-versatile",
+        "model": "groq/llama-3.1-8b-instant",
         "parsed_at": datetime.now(timezone.utc).isoformat(),
         "version": "v1",
     }

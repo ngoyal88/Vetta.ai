@@ -11,7 +11,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 SCORECARD_VERSION = "resume_scorecard_v1"
-SCORECARD_MODEL = "groq/llama-3.3-70b-versatile"
+SCORECARD_MODEL = "groq/llama-3.1-8b-instant"
 
 
 def _safe_str(value: Any) -> str:

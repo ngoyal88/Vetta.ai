@@ -23,6 +23,12 @@ class LiveKitTransport:
         if not self.connected or not self._room or not self._room.local_participant:
             return
         try:
+            # For question messages with audio, check the audio size before performing a full
+            # JSON serialization to avoid allocating a huge string just to confirm chunking.
+            audio_b64 = message.get("audio") if message.get("type") == "question" else None
+            if isinstance(audio_b64, str) and len(audio_b64) > CONTROL_PAYLOAD_MAX:
+                await self._send_chunked_question(message)
+                return
             payload = json.dumps(message).encode("utf-8")
             if len(payload) <= CONTROL_PAYLOAD_MAX:
                 await self._room.local_participant.publish_data(
@@ -33,12 +39,18 @@ class LiveKitTransport:
         except Exception as e:
             logger.error("Failed to send message: %s", e, exc_info=True)
 
-    async def _send_chunked_question(self, message: Dict[str, Any], raw_payload: bytes) -> None:
-        """Send question with large audio as chunked: header on control + audio_chunk messages."""
+    async def _send_chunked_question(self, message: Dict[str, Any], raw_payload: Optional[bytes] = None) -> None:
+        """Send question with large audio as chunked: header on control + audio_chunk messages.
+
+        ``raw_payload`` is the pre-serialized message bytes and is only used in the fallback
+        truncation path (non-question messages).  It may be omitted when calling from the
+        early audio-size check path, which only triggers for question+audio messages.
+        """
         if message.get("type") != "question" or "audio" not in message:
             logger.warning("Chunking only supported for question with audio; truncating")
+            payload = raw_payload or json.dumps(message).encode("utf-8")
             await self._room.local_participant.publish_data(
-                raw_payload[:CONTROL_PAYLOAD_MAX], reliable=True, topic="control"
+                payload[:CONTROL_PAYLOAD_MAX], reliable=True, topic="control"
             )
             return
         question_id = str(uuid.uuid4())
