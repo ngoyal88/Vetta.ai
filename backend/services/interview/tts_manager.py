@@ -48,7 +48,6 @@ class TTSManager:
                     await on_phase_change_fn("behavioral")
 
                 if not speak_text:
-                    self.is_ai_speaking = False
                     return
                 cached = self._tts_cache.get(speak_text)
                 if cached:
@@ -66,10 +65,10 @@ class TTSManager:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                     await self._transport.send_error("TTS failed")
-                    self.is_ai_speaking = False
                     return
                 await self._transport.send_question(response, audio_data, speak_text)
             except Exception as e:
                 logger.error("TTS error: %s", e, exc_info=True)
                 await self._transport.send_error("Failed to generate speech")
+            finally:
                 self.is_ai_speaking = False
