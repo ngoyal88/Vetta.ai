@@ -22,10 +22,10 @@ class GroqService:
         try:
             m = (self.model or "").lower()
             if ("guard" in m) or (not m.strip()):
-                logger.warning(f"Invalid Groq model '{self.model}' for chat; falling back to 'llama-3.1-8b-instant'")
-                self.model = "llama-3.1-8b-instant"
+                logger.warning(f"Invalid Groq model '{self.model}' for chat; falling back to 'llama-3.3-70b-versatile'")
+                self.model = "llama-3.3-70b-versatile"
         except Exception:
-            self.model = "llama-3.1-8b-instant"
+            self.model = "llama-3.3-70b-versatile"
         self.max_tokens = settings.llm_max_tokens
         self.temperature = settings.llm_temperature
         if not settings.groq_api_key:
@@ -120,20 +120,29 @@ class GroqService:
 
     async def json_completion(self, system_prompt: str, user_prompt: str) -> str:
         """
-        Generate a JSON object using Groq Chat Completions with llama-3.1-8b-instant
-        and response_format={"type": "json_object"}.
+        Generate JSON via Groq. Inputs are truncated to stay under free-tier TPM limits.
+        Uses llama-3.1-8b-instant for json_object (smaller context footprint than 70B).
         """
         if not self.client:
             return "{}"
+
+        def _clip(text: str, max_len: int) -> str:
+            if not text:
+                return ""
+            text = text.strip()
+            return text if len(text) <= max_len else text[:max_len]
+
+        sys_c = _clip(system_prompt, 10000)
+        usr_c = _clip(user_prompt, 8000)
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "system", "content": sys_c},
+                    {"role": "user", "content": usr_c},
                 ],
                 model="llama-3.1-8b-instant",
                 temperature=0.0,
-                max_tokens=self.max_tokens,
+                max_tokens=min(2048, int(self.max_tokens or 2048)),
                 stream=False,
                 response_format={"type": "json_object"},
             )

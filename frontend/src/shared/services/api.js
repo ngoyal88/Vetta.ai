@@ -27,6 +27,22 @@ export const api = {
     return response.json();
   },
 
+  getResumeScorecard: async (roleHint = null) => {
+    const query = roleHint ? `?role_hint=${encodeURIComponent(roleHint)}` : '';
+    const response = await fetch(`${API_URL}/resume/scorecard${query}`, {
+      method: 'GET',
+      headers: await getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('No parsed resume found');
+      }
+      throw new Error('Failed to fetch resume scorecard');
+    }
+    return response.json();
+  },
+
   startInterview: async (userId, interviewType, difficulty, resumeData, customRole = null, candidateName = null, yearsExperience = null) => {
     const response = await fetch(`${API_URL}/interview/start`, {
       method: 'POST',

@@ -10,6 +10,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Room, RoomEvent, createLocalAudioTrack } from 'livekit-client';
 import {
   AudioRecorder,
+  AudioPlayer,
   checkBrowserSupport,
 } from 'shared/utils/audioUtils';
 import { api } from 'shared/services/api';
@@ -87,6 +88,9 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   const disconnectRef = useRef(null);
   const remoteAudioElsRef = useRef(new Map());
   const audioUnlockedRef = useRef(false);
+  const playerRef = useRef(null);
+  const chunkBufferRef = useRef(null);
+  const processAudioChunkRef = useRef(null);
 
   const setAiSpeakingState = useCallback((nextValue) => {
     aiSpeakingRef.current = nextValue;
@@ -119,6 +123,9 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
 
 
   const stopAiPlaybackLocally = useCallback((messageType = null) => {
+    try {
+      playerRef.current?.stop();
+    } catch (_) {}
     setAiSpeakingState(false);
     setStatus('listening');
     clearAiReveal();
@@ -252,15 +259,133 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
     }
   }, [sessionId]);
 
+  /** Play MP3 (base64) from backend — same behavior as useInterviewWebSocket (WebSocket transport). */
+  const playInterviewTtsBase64 = useCallback(
+    (base64Audio) => {
+      if (!base64Audio || !playerRef.current) {
+        if (aiTextFullRef.current) setAiText(aiTextFullRef.current);
+        return;
+      }
+      setAiSpeakingState(true);
+      if (isRecordingRef.current && recorderRef.current) {
+        recorderRef.current.pause();
+      }
+      setAiText('');
+      playerRef.current.play(base64Audio, {
+        onStart: ({ durationSeconds } = {}) => {
+          setAiSpeakingState(true);
+          const text = (aiTextFullRef.current || '').trim();
+          if (!text) return;
+          const words = text.split(/\s+/).filter(Boolean);
+          if (words.length <= 1) {
+            setAiText(text);
+            return;
+          }
+          const durSec =
+            Number.isFinite(durationSeconds) && durationSeconds > 0
+              ? durationSeconds
+              : Math.max(1.0, words.length / 2.5);
+          const durationMs = durSec * 1000;
+          if (durSec) {
+            const wpm = Math.max(80, Math.min(260, Math.round((words.length * 60) / durSec)));
+            setAiSpeechWpm(wpm);
+          }
+          const start = performance.now();
+          setAiText(words[0]);
+          aiRevealTimerRef.current = setInterval(() => {
+            const elapsed = performance.now() - start;
+            const frac = Math.max(0, Math.min(1, elapsed / durationMs));
+            const targetCount = Math.max(1, Math.ceil(frac * words.length));
+            setAiText(words.slice(0, targetCount).join(' '));
+            if (frac >= 1) {
+              clearInterval(aiRevealTimerRef.current);
+              aiRevealTimerRef.current = null;
+            }
+          }, 50);
+        },
+        onEnd: () => {
+          setAiSpeakingState(false);
+          try {
+            sendControl({ type: 'ai_playback_ended' });
+          } catch (e) {
+            if (isDev) console.warn('Failed to send ai_playback_ended:', e);
+          }
+          if (aiRevealTimerRef.current) {
+            clearInterval(aiRevealTimerRef.current);
+            aiRevealTimerRef.current = null;
+          }
+          if (aiTextFullRef.current) setAiText(aiTextFullRef.current);
+          if (micEnabledRef.current && recorderRef.current) {
+            recorderRef.current.resume();
+          }
+        },
+      });
+    },
+    [sendControl, setAiSpeakingState]
+  );
+
+  const processAudioChunk = useCallback(
+    (msg) => {
+      const { question_id, chunk_index, total_chunks, data } = msg;
+      if (question_id == null || total_chunks == null || data == null || chunk_index == null) return;
+      const buf = chunkBufferRef.current;
+      if (!buf || buf.questionId !== question_id) return;
+      buf.parts[chunk_index] = data;
+      let ok = true;
+      const merged = [];
+      for (let i = 0; i < total_chunks; i += 1) {
+        const part = buf.parts[i];
+        if (part == null || part === '') {
+          ok = false;
+          break;
+        }
+        merged.push(part);
+      }
+      if (!ok) return;
+      chunkBufferRef.current = null;
+      playInterviewTtsBase64(merged.join(''));
+    },
+    [playInterviewTtsBase64]
+  );
+
   const handleMessage = useCallback((message) => {
     lastControlReceivedRef.current = Date.now();
     if (!message?.type) return;
 
     switch (message.type) {
+      case 'question_chunked': {
+        applyQuestionMetadata({
+          question: message.question,
+          phase: message.phase,
+          spoken_text: message.spoken_text,
+        });
+        clearAiReveal();
+        if (aiTextFullRef.current) {
+          setAiText(aiTextFullRef.current);
+        }
+        const n = message.total_chunks ?? 0;
+        if (n > 0 && message.question_id) {
+          chunkBufferRef.current = {
+            questionId: message.question_id,
+            totalChunks: n,
+            parts: [],
+          };
+        } else {
+          chunkBufferRef.current = null;
+        }
+        toast.success('New question received');
+        break;
+      }
+
       case 'question': {
         applyQuestionMetadata(message);
         clearAiReveal();
         if (aiTextFullRef.current) {
+          setAiText(aiTextFullRef.current);
+        }
+        if (message.audio && playerRef.current) {
+          playInterviewTtsBase64(message.audio);
+        } else if (aiTextFullRef.current) {
           setAiText(aiTextFullRef.current);
         }
         toast.success('New question received');
@@ -419,6 +544,7 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   }, [
     applyQuestionMetadata,
     clearAiReveal,
+    playInterviewTtsBase64,
     sessionId,
     setAiSpeakingState,
     setSttFallbackActive,
@@ -494,6 +620,10 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
         try {
           const text = typeof payload === 'string' ? payload : decoderRef.current.decode(payload);
           const msg = JSON.parse(text);
+          if (topic === 'audio_chunk' || msg.type === 'audio_chunk') {
+            processAudioChunkRef.current?.(msg);
+            return;
+          }
           if (msg && typeof msg.type === 'string') {
             handleMessageRef.current?.(msg);
           }
@@ -583,6 +713,9 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   }, [registerByteStreamHandlers, sessionId]);
 
   const disconnect = useCallback(() => {
+    try {
+      playerRef.current?.stop();
+    } catch (_) {}
     audioUnlockedRef.current = false;
     toast.dismiss('audio-unlock');
     clearAiReveal();
@@ -689,6 +822,17 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   }, [sendControl, sessionId]);
 
   handleMessageRef.current = handleMessage;
+  processAudioChunkRef.current = processAudioChunk;
+
+  useEffect(() => {
+    playerRef.current = new AudioPlayer();
+    return () => {
+      try {
+        playerRef.current?.stop();
+      } catch (_) {}
+      playerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     aiSpeakingRef.current = aiSpeaking;

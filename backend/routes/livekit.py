@@ -2,7 +2,7 @@
 import asyncio
 import json
 from datetime import timedelta
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -57,7 +57,7 @@ async def _release_bot_lock(session_id: str) -> None:
 
 class LiveKitTokenRequest(BaseModel):
     session_id: str
-    user_id: str | None = None
+    user_id: Optional[str] = None
 
 
 class LiveKitTokenResponse(BaseModel):
@@ -68,7 +68,7 @@ class LiveKitTokenResponse(BaseModel):
 
 class LiveKitAttachRequest(BaseModel):
     session_id: str = ""
-    sessionId: str | None = None
+    sessionId: Optional[str] = None
 
 
 async def _resolve_session(session_id: str, uid: str) -> Dict[str, Any]:
