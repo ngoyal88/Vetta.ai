@@ -46,8 +46,7 @@ async def lifespan(app: FastAPI):
         log.warning("LLM check failed: %s", e)
 
     if (
-        settings.use_agent_worker_v2
-        and AgentServer is not None
+        AgentServer is not None
         and settings.livekit_url
         and settings.livekit_api_key
         and settings.livekit_api_secret

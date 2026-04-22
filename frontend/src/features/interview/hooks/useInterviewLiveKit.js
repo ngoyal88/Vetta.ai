@@ -78,8 +78,6 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
   const interruptCandidateSinceRef = useRef(null);
   const lastInterruptAtRef = useRef(0);
   const activeTtsStreamIdRef = useRef(null);
-  const ttsTransportRef = useRef('packets');
-  const supportsByteStreamsRef = useRef(false);
   const aiPlaybackStartedAtRef = useRef(0);
   const lastHeartbeatRef = useRef(0);
   const heartbeatWarningRef = useRef(null);
@@ -562,12 +560,6 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
     stopAiPlaybackLocally,
   ]);
 
-  const registerByteStreamHandlers = useCallback((room) => {
-    void room;
-    ttsTransportRef.current = 'packets';
-    supportsByteStreamsRef.current = false;
-  }, []);
-
   const connect = useCallback(async () => {
     if (!sessionId) return;
     const user = auth.currentUser;
@@ -593,9 +585,22 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       const wsUrl = (lkUrl || process.env.REACT_APP_LIVEKIT_URL || '').trim();
       if (!wsUrl) throw new Error('LiveKit URL is not configured');
 
+      try {
+        const attachRes = await fetch(`${API_URL}/livekit/attach`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        if (!attachRes.ok) {
+          const attachErr = await attachRes.json().catch(() => ({}));
+          if (isDev) console.warn('LiveKit attach failed, continuing', attachErr);
+        }
+      } catch (attachError) {
+        if (isDev) console.warn('LiveKit attach request failed, continuing', attachError);
+      }
+
       const room = new Room();
       roomRef.current = room;
-      registerByteStreamHandlers(room);
 
       const attachRemoteAudioTrack = (track, participantIdentity = '') => {
         if (!track || track.kind !== 'audio' || !track.sid) return;
@@ -721,7 +726,7 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       setError(err.message || 'Failed to connect to LiveKit');
       toast.error(err.message || 'LiveKit connection failed');
     }
-  }, [registerByteStreamHandlers, sessionId]);
+  }, [sessionId]);
 
   const disconnect = useCallback(() => {
     try {
@@ -744,11 +749,6 @@ export const useInterviewLiveKit = (sessionId, initialPhase = 'behavioral', opti
       audioLevelIntervalRef.current = null;
     }
     if (roomRef.current) {
-      try {
-        roomRef.current.unregisterByteStreamHandler?.('tts');
-      } catch (error) {
-        // Ignore missing handler support.
-      }
       roomRef.current.disconnect();
       roomRef.current = null;
     }

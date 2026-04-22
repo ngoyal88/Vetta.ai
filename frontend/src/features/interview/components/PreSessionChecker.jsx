@@ -184,19 +184,6 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
         );
       } else {
         setCheckStateKey("connection", "passed");
-        if (sessionId && typeof getAuthToken === "function") {
-          const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
-          getAuthToken()
-            .then((token) => {
-              if (!token) return;
-              fetch(`${apiUrl}/livekit/prewarm`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ session_id: sessionId }),
-              }).catch((err) => console.warn("Prewarm failed", err));
-            })
-            .catch(() => {});
-        }
       }
       setAllChecksDone(true);
     } catch (err) {

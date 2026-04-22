@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
-    use_agent_worker_v2: bool = False
 
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-2"

@@ -1,6 +1,4 @@
-"""LiveKit HTTP routes: token generation and session attach."""
-import asyncio
-import json
+"""LiveKit HTTP routes: token generation and agent-worker attach."""
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
@@ -10,16 +8,11 @@ from pydantic import BaseModel
 from config import get_settings
 from utils.auth import verify_firebase_token
 from utils.logger import get_logger
-from utils.redis_client import get_session, redis
+from utils.redis_client import get_session
 
 router = APIRouter(prefix="/livekit", tags=["LiveKit"])
 log = get_logger(__name__)
 settings = get_settings()
-
-_BOT_LOCK_KEY = "bot_lock:{session_id}"
-_BOT_LOCK_TTL = 300
-
-ACTIVE_BOT_TASKS: Dict[str, asyncio.Task] = {}
 
 
 def _require_livekit() -> None:
@@ -33,26 +26,6 @@ def _require_livekit() -> None:
 def _livekit_api():
     from livekit import api as lk_api
     return lk_api
-
-
-async def _acquire_bot_lock(session_id: str) -> bool:
-    key = _BOT_LOCK_KEY.format(session_id=session_id)
-    try:
-        return await redis.set(key, "1", nx=True, ex=_BOT_LOCK_TTL)
-    except Exception as e:
-        log.error("Failed to acquire bot lock for %s: %s", session_id, e)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Bot lock backend unavailable",
-        )
-
-
-async def _release_bot_lock(session_id: str) -> None:
-    key = _BOT_LOCK_KEY.format(session_id=session_id)
-    try:
-        await redis.delete(key)
-    except Exception as e:
-        log.warning("Failed to release bot lock for %s: %s", session_id, e)
 
 
 class LiveKitTokenRequest(BaseModel):
@@ -115,7 +88,7 @@ async def livekit_attach(
     body: LiveKitAttachRequest,
     uid: str = Depends(verify_firebase_token),
 ) -> Dict[str, Any]:
-    """Acknowledge room join. In agent-worker mode this is a no-op."""
+    """Acknowledge room join for agent-worker mode."""
     _require_livekit()
 
     session_id = (body.session_id or body.sessionId or "").strip()
@@ -123,67 +96,7 @@ async def livekit_attach(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id is required")
 
     await _resolve_session(session_id, uid)
-
-    if getattr(settings, "use_agent_worker_v2", False):
-        return {"status": "ok", "message": "Agent worker mode; attach skipped"}
-
-    acquired = await _acquire_bot_lock(session_id)
-    if not acquired:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "session_already_active",
-                "message": "Interview is already running in another tab",
-            },
-        )
-
-    from services.interview.livekit_room_handler import run_livekit_room_handler
-
-    task = asyncio.create_task(run_livekit_room_handler(session_id, uid, prewarm=False))
-    ACTIVE_BOT_TASKS[session_id] = task
-
-    def _cleanup(t: asyncio.Task, sid: str = session_id) -> None:
-        asyncio.create_task(_release_bot_lock(sid))
-        if ACTIVE_BOT_TASKS.get(sid) is t:
-            ACTIVE_BOT_TASKS.pop(sid, None)
-
-    task.add_done_callback(_cleanup)
-    return {"status": "ok", "message": "Bot joining room"}
-
-
-@router.post("/prewarm")
-async def livekit_prewarm(
-    body: LiveKitAttachRequest,
-    uid: str = Depends(verify_firebase_token),
-) -> Dict[str, Any]:
-    """Pre-warm the interview bot before the user joins. No-op in agent-worker mode."""
-    _require_livekit()
-
-    session_id = (body.session_id or body.sessionId or "").strip()
-    if not session_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id is required")
-
-    await _resolve_session(session_id, uid)
-
-    if getattr(settings, "use_agent_worker_v2", False):
-        return {"status": "ok", "session_id": session_id, "message": "Agent worker mode; prewarm skipped"}
-
-    acquired = await _acquire_bot_lock(session_id)
-    if not acquired:
-        return {"status": "already_warming", "session_id": session_id}
-
-    from services.interview.livekit_room_handler import run_livekit_room_handler
-
-    task = asyncio.create_task(run_livekit_room_handler(session_id, uid, prewarm=True))
-    ACTIVE_BOT_TASKS[session_id] = task
-
-    def _cleanup(t: asyncio.Task, sid: str = session_id) -> None:
-        asyncio.create_task(_release_bot_lock(sid))
-        if ACTIVE_BOT_TASKS.get(sid) is t:
-            ACTIVE_BOT_TASKS.pop(sid, None)
-
-    task.add_done_callback(_cleanup)
-    return {"status": "warming", "session_id": session_id}
+    return {"status": "ok", "message": "Agent worker active"}
 
 
 @router.get("/health")
