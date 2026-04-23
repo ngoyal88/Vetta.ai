@@ -1,6 +1,6 @@
 import asyncio
 import httpx
-from typing import Dict, List
+from typing import Any, Dict, List
 from models.interview import CodeExecutionResult, TestCase
 from config import get_settings
 from utils.logger import get_logger
@@ -63,42 +63,26 @@ class CodeExecutionService:
         test_cases: List[TestCase]
     ) -> CodeExecutionResult:
         """Execute code against multiple test cases. One retry if any result is judge0_unavailable."""
-        results = []
-        passed_count = 0
-        for test_case in test_cases:
-            result = await self._run_single_test(code, language_id, test_case)
-            results.append(result)
-            if result.get("passed", False):
-                passed_count += 1
+        results = await self._run_batch_tests(code, language_id, test_cases)
+        passed_count = sum(1 for r in results if r.get("passed", False))
 
         if any(r.get("error_type") == "judge0_unavailable" for r in results):
             logger.info("Judge0 unavailable; retrying once after 2s")
             await asyncio.sleep(2)
-            results = []
-            passed_count = 0
-            for test_case in test_cases:
-                result = await self._run_single_test(code, language_id, test_case)
-                results.append(result)
-                if result.get("passed", False):
-                    passed_count += 1
+            results = await self._run_batch_tests(code, language_id, test_cases)
+            passed_count = sum(1 for r in results if r.get("passed", False))
 
         return CodeExecutionResult(
             passed_tests=passed_count,
             total_tests=len(results),
             execution_time=sum(r.get("time", 0) for r in results),
-            memory_used=max(r.get("memory", 0) for r in results),
+            memory_used=max((r.get("memory", 0) for r in results), default=0),
             passed=passed_count == len(results),
             test_results=results,
         )
-    
-    async def _run_single_test(
-        self,
-        code: str,
-        language_id: int,
-        test_case: TestCase
-    ) -> Dict:
-        """Run code against single test case. Returns dict with passed, error_type, error_message, output, expected, input, status, time, memory."""
-        base_out = {
+
+    def _base_result_for_test_case(self, test_case: TestCase) -> Dict[str, Any]:
+        return {
             "passed": False,
             "error_type": None,
             "error_message": None,
@@ -109,6 +93,136 @@ class CodeExecutionService:
             "time": 0,
             "memory": 0,
         }
+
+    def _map_judge0_result(self, test_case: TestCase, result: Dict[str, Any]) -> Dict[str, Any]:
+        base_out = self._base_result_for_test_case(test_case)
+        status_obj = result.get("status") or {}
+        status_id = status_obj.get("id")
+        status_desc = status_obj.get("description", "Unknown")
+        base_out["status"] = status_desc
+        base_out["time"] = float(result.get("time") or 0)
+        base_out["memory"] = float(result.get("memory") or 0)
+        base_out["output"] = (result.get("stdout") or "").strip()
+        base_out["expected"] = (test_case.expected_output or "").strip()
+
+        if status_id == 3:
+            base_out["passed"] = _outputs_match(base_out["output"], base_out["expected"])
+            base_out["error_type"] = None
+            base_out["error_message"] = None
+        elif status_id == 5:
+            base_out["error_type"] = "time_limit_exceeded"
+            base_out["error_message"] = status_desc or "Time limit exceeded"
+        elif status_id == 6:
+            base_out["error_type"] = "compilation_error"
+            base_out["error_message"] = (result.get("compile_output") or result.get("stderr") or status_desc or "Compilation failed").strip()[:2000]
+        elif status_id in (7, 8, 9, 10, 11, 12):
+            base_out["error_type"] = "runtime_error"
+            base_out["error_message"] = (result.get("stderr") or status_desc or "Runtime error").strip()[:2000]
+        else:
+            base_out["error_type"] = JUDGE0_STATUS.get(status_id, "wrong_answer")
+            base_out["error_message"] = status_desc if status_id != 4 else "Output does not match expected"
+
+        if test_case.is_hidden:
+            base_out["hidden"] = True
+        return base_out
+
+    async def _run_batch_tests(
+        self,
+        code: str,
+        language_id: int,
+        test_cases: List[TestCase]
+    ) -> List[Dict[str, Any]]:
+        if not settings.judge0_api_key:
+            out = []
+            for tc in test_cases:
+                item = self._base_result_for_test_case(tc)
+                item["error_type"] = "judge0_unavailable"
+                item["error_message"] = "Judge0 API not configured"
+                out.append(item)
+            return out
+
+        submissions_payload = [
+            {
+                "source_code": code,
+                "language_id": language_id,
+                "stdin": tc.input,
+                "expected_output": (tc.expected_output or "").strip(),
+            }
+            for tc in test_cases
+        ]
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/submissions/batch?base64_encoded=false&wait=true",
+                    json={"submissions": submissions_payload},
+                    headers=self.headers,
+                )
+        except httpx.TimeoutException as e:
+            logger.warning("Judge0 batch timeout: %s", e)
+            return [self._unavailable_for_test_case(tc, "Execution timed out", error_type="judge0_timeout") for tc in test_cases]
+        except Exception as e:
+            logger.error("Judge0 batch request error: %s", e, exc_info=True)
+            return [self._unavailable_for_test_case(tc, str(e)) for tc in test_cases]
+
+        if response.status_code not in (200, 201):
+            body = (response.text or response.reason_phrase or str(response.status_code))[:500]
+            logger.error("Judge0 batch error: status=%s body=%s", response.status_code, body)
+            return [self._unavailable_for_test_case(tc, f"Execution failed ({response.status_code}): {body}") for tc in test_cases]
+
+        try:
+            response_json = response.json()
+        except Exception as e:
+            return [self._unavailable_for_test_case(tc, str(e)) for tc in test_cases]
+
+        entries: List[Dict[str, Any]] = []
+        if isinstance(response_json, dict):
+            maybe_entries = response_json.get("submissions")
+            if isinstance(maybe_entries, list):
+                entries = [x if isinstance(x, dict) else {} for x in maybe_entries]
+        elif isinstance(response_json, list):
+            entries = [x if isinstance(x, dict) else {} for x in response_json]
+
+        if len(entries) != len(test_cases):
+            logger.warning("Judge0 batch returned unexpected result size: got=%d expected=%d", len(entries), len(test_cases))
+            entries = (entries + [{} for _ in range(len(test_cases))])[:len(test_cases)]
+
+        results: List[Dict[str, Any]] = []
+        needs_single_fallback = False
+        for tc, entry in zip(test_cases, entries):
+            if entry.get("token") and "stdout" not in entry and "status" not in entry:
+                needs_single_fallback = True
+                continue
+            results.append(self._map_judge0_result(tc, entry))
+        if needs_single_fallback:
+            logger.info("Judge0 batch wait=true not supported; falling back to per-test execution")
+            fallback_results = []
+            for tc in test_cases:
+                fallback_results.append(await self._run_single_test(code, language_id, tc))
+            return fallback_results
+        return results
+
+    def _unavailable_for_test_case(
+        self,
+        test_case: TestCase,
+        message: str,
+        error_type: str = "judge0_unavailable",
+    ) -> Dict[str, Any]:
+        out = self._base_result_for_test_case(test_case)
+        out["error_type"] = error_type
+        out["error_message"] = message
+        if test_case.is_hidden:
+            out["hidden"] = True
+        return out
+    
+    async def _run_single_test(
+        self,
+        code: str,
+        language_id: int,
+        test_case: TestCase
+    ) -> Dict:
+        """Run code against single test case. Returns dict with passed, error_type, error_message, output, expected, input, status, time, memory."""
+        base_out = self._base_result_for_test_case(test_case)
         if not settings.judge0_api_key:
             base_out["error_type"] = "judge0_unavailable"
             base_out["error_message"] = "Judge0 API not configured"
@@ -157,36 +271,7 @@ class CodeExecutionService:
             base_out["error_message"] = "Execution not ready (use wait=true)"
             return base_out
 
-        status_obj = result.get("status") or {}
-        status_id = status_obj.get("id")
-        status_desc = status_obj.get("description", "Unknown")
-        base_out["status"] = status_desc
-        base_out["time"] = float(result.get("time") or 0)
-        base_out["memory"] = float(result.get("memory") or 0)
-        base_out["output"] = (result.get("stdout") or "").strip()
-        base_out["expected"] = (test_case.expected_output or "").strip()
-
-        error_type = JUDGE0_STATUS.get(status_id, "wrong_answer")
-        if status_id == 3:
-            base_out["passed"] = _outputs_match(base_out["output"], base_out["expected"])
-            base_out["error_type"] = None
-            base_out["error_message"] = None
-        elif status_id == 5:
-            base_out["error_type"] = "time_limit_exceeded"
-            base_out["error_message"] = status_desc or "Time limit exceeded"
-        elif status_id == 6:
-            base_out["error_type"] = "compilation_error"
-            base_out["error_message"] = (result.get("compile_output") or result.get("stderr") or status_desc or "Compilation failed").strip()[:2000]
-        elif status_id in (7, 8, 9, 10, 11, 12):
-            base_out["error_type"] = "runtime_error"
-            base_out["error_message"] = (result.get("stderr") or status_desc or "Runtime error").strip()[:2000]
-        else:
-            base_out["error_type"] = "wrong_answer"
-            base_out["error_message"] = status_desc if status_id != 4 else "Output does not match expected"
-
-        if test_case.is_hidden:
-            base_out["hidden"] = True
-        return base_out
+        return self._map_judge0_result(test_case, result)
     
     def get_language_id(self, language: str) -> int:
         """Map language name to Judge0 ID"""
