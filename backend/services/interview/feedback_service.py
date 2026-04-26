@@ -9,6 +9,32 @@ class FeedbackService:
     def __init__(self, engine:LLMEngine):
         self._engine = engine
 
+    def _is_invalid_feedback_text(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return True
+        markers = (
+            "error generating response",
+            "rate limit",
+            "rate_limit_exceeded",
+            "too many requests",
+            "apiconnectionerror",
+            "failed to generate llm completion",
+            "service not configured",
+        )
+        return any(m in t for m in markers)
+
+    def _fallback_feedback(self, session_data: Dict) -> str:
+        responses = session_data.get("responses", []) or []
+        return (
+            "OVERALL PERFORMANCE:\n"
+            "Thanks for completing the interview. We hit a temporary AI service issue while finalizing detailed feedback.\n\n"
+            f"Questions Answered: {len(responses)}\n"
+            "A detailed report is currently unavailable, but your session progress has been saved.\n\n"
+            "RECOMMENDATION: Needs Review\n"
+            "Please re-run a short follow-up interview to generate complete scoring."
+        )
+
     async def generate_final_feedback(
         self,
         session_data: Dict
@@ -58,6 +84,9 @@ RECOMMENDATION: [Hire / Strong Maybe / Needs Improvement]
 [One sentence rationale]"""
 
         feedback = await self._engine.generate(prompt, 0.3)
+        if self._is_invalid_feedback_text(feedback):
+            logger.warning("Feedback generation returned invalid/provider-error text; using safe fallback")
+            feedback = self._fallback_feedback(session_data)
 
         return {
             'feedback': feedback,
