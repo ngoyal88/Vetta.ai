@@ -33,7 +33,7 @@ export const BackendHealthProvider = ({ children }) => {
         }
         const data = await res.json().catch(() => ({}));
         setHealthError(null);
-        setLivekitAvailable(Boolean(data?.services?.livekit));
+        setLivekitAvailable(Boolean(data?.services?.livekit && data?.services?.agent));
         setLivekitUrl(data?.livekit_url ?? null);
       } catch (e) {
         if (!cancelled) {

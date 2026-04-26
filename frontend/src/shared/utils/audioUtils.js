@@ -11,6 +11,8 @@ export class AudioRecorder {
     this.audioWorkletNode = null;
     this.vadConfig = null;
     this.resumeTimer = null;
+    this.startToken = 0;
+    this.starting = false;
   }
 
   async start(onDataAvailable, options = {}) {
@@ -31,6 +33,10 @@ export class AudioRecorder {
       onSpeechEnd,
     };
 
+    const startToken = ++this.startToken;
+    this.starting = true;
+    const isStale = () => this.startToken !== startToken;
+
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -42,26 +48,63 @@ export class AudioRecorder {
         },
       });
 
+      if (isStale()) {
+        this.stream?.getTracks().forEach((track) => track.stop());
+        this.stream = null;
+        this.starting = false;
+        return false;
+      }
+
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: 16000
       });
 
-      this._captureSampleRate = this.audioContext.sampleRate;
+      const audioContext = this.audioContext;
+      if (!audioContext) {
+        throw new Error('Audio context unavailable.');
+      }
 
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
+      this._captureSampleRate = audioContext.sampleRate;
+
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      if (isStale()) {
+        if (audioContext.state !== 'closed') {
+          audioContext.close();
+        }
+        this.audioContext = null;
+        this.starting = false;
+        return false;
       }
 
       // Create analyser for VAD
-      this.analyser = this.audioContext.createAnalyser();
+      this.analyser = audioContext.createAnalyser();
       this.analyser.fftSize = 2048;
       this.analyser.smoothingTimeConstant = 0.8;
       
-      const source = this.audioContext.createMediaStreamSource(this.stream);
+      const source = audioContext.createMediaStreamSource(this.stream);
       source.connect(this.analyser);
 
-      await this.audioContext.audioWorklet.addModule('/audio-processor.worklet.js');
-      this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'pcm-extractor');
+      if (!audioContext.audioWorklet || typeof AudioWorkletNode === 'undefined') {
+        throw new Error('Audio worklet is not supported in this browser.');
+      }
+
+      await audioContext.audioWorklet.addModule('/audio-processor.worklet.js');
+      if (isStale()) {
+        if (audioContext.state !== 'closed') {
+          audioContext.close();
+        }
+        this.audioContext = null;
+        this.starting = false;
+        return false;
+      }
+      if (this.audioContext !== audioContext || audioContext.state === 'closed') {
+        throw new Error('Audio context closed before initialization completed.');
+      }
+
+      this.audioWorkletNode = new AudioWorkletNode(audioContext, 'pcm-extractor');
 
       this.audioWorkletNode.port.onmessage = (event) => {
         if (!this.isActive) return;
@@ -76,6 +119,7 @@ export class AudioRecorder {
       source.connect(this.audioWorkletNode);
 
       this.isActive = true;
+      this.starting = false;
 
       // Start VAD if enabled
       if (enableVAD) {
@@ -90,6 +134,7 @@ export class AudioRecorder {
 
       return true;
     } catch (error) {
+      this.starting = false;
       console.error('Failed to start recording:', error);
       
       if (error.name === 'NotAllowedError') {
@@ -208,6 +253,8 @@ export class AudioRecorder {
    * Cleanup resources
    */
   cleanup() {
+    this.startToken += 1;
+    this.starting = false;
     this.stopVAD();
     if (this.resumeTimer) {
       clearTimeout(this.resumeTimer);

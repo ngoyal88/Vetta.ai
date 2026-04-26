@@ -74,6 +74,7 @@ const InterviewRoomLiveKitContent = ({ sessionId, onBack }) => {
     requestNextDSAQuestion,
     loadingNextProblem,
     endInterview,
+    disconnect,
     audioLevel,
     sendControl,
     fallbackToWebSocket,
@@ -143,6 +144,7 @@ const InterviewRoomLiveKitContent = ({ sessionId, onBack }) => {
       message: "Are you sure you want to end the interview?",
       destructive: true,
       onConfirm: () => {
+        disconnect();
         setInterviewEnded(true);
         endInterview();
       },
@@ -246,6 +248,7 @@ const InterviewRoomLiveKitContent = ({ sessionId, onBack }) => {
         <ReconnectOverlay
           attempt={reconnectAttempt}
           onGiveUp={() => {
+            disconnect();
             endInterview();
             onBack();
           }}
