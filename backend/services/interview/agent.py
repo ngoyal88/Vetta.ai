@@ -663,7 +663,7 @@ async def _handle_candidate_disconnect(
         log.warning("Firestore persist on disconnect failed: %s", e)
 
 
-@server.rtc_session()
+@server.rtc_session(agent_name=settings.livekit_agent_name or "vetta-interviewer")
 async def entrypoint(ctx: JobContext) -> None:
     """Main agent entrypoint — called once per room by the AgentServer."""
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -716,6 +716,7 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     disconnect_task: Optional[asyncio.Task] = None
+    error_state = {"count": 0, "last_at": 0.0, "ending": False}
 
     def _on_user_state_changed(ev: Any) -> None:
         if getattr(ev, "new_state", None) == "speaking":
@@ -783,12 +784,46 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_error(ev: Any) -> None:
         err = getattr(ev, "error", ev) if hasattr(ev, "error") else ev
         log.error("Agent session error: %s", err, exc_info=False)
+        if error_state["ending"]:
+            return
+
+        now = time.monotonic()
+        # Reset rolling count if the last error was not recent.
+        if now - float(error_state["last_at"]) > 30.0:
+            error_state["count"] = 0
+        error_state["last_at"] = now
+        error_state["count"] = int(error_state["count"]) + 1
+
+        err_text = str(err or "").lower()
+        likely_llm_provider_failure = (
+            "rate limit" in err_text
+            or "429" in err_text
+            or "apiconnectionerror" in err_text
+            or "failed to generate llm completion" in err_text
+        )
+
+        async def _graceful_end_after_error() -> None:
+            try:
+                await _send_control(ctx.room, {"type": "status", "status": "thinking"})
+                await session.say(
+                    "I'm running into a temporary service issue, so I'll end the interview here and share your feedback collected so far. Thank you for your time."
+                )
+            except Exception:
+                pass
+            try:
+                await _handle_end_interview(ctx, session, session_id, interview_service)
+            except Exception:
+                pass
 
         def _log_say_error(t: asyncio.Task) -> None:
             if not t.cancelled() and t.exception():
                 log.warning("Error in recovery say: %s", t.exception())
 
         try:
+            if likely_llm_provider_failure or int(error_state["count"]) >= 2:
+                error_state["ending"] = True
+                asyncio.create_task(_graceful_end_after_error())
+                return
             asyncio.create_task(session.say("I had a small hiccup. Could you repeat that?")).add_done_callback(_log_say_error)
         except Exception:
             pass

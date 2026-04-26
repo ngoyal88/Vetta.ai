@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     livekit_url: str = ""
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
+    livekit_agent_name: str = "vetta-interviewer"
 
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-2"

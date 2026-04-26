@@ -1,4 +1,5 @@
 """LiveKit HTTP routes: token generation and agent-worker attach."""
+import json
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
@@ -31,6 +32,7 @@ def _livekit_api():
 class LiveKitTokenRequest(BaseModel):
     session_id: str
     user_id: Optional[str] = None
+    dispatch_agent: bool = False
 
 
 class LiveKitTokenResponse(BaseModel):
@@ -55,6 +57,14 @@ async def _resolve_session(session_id: str, uid: str) -> Dict[str, Any]:
     return session_data
 
 
+def _agent_name() -> str:
+    return (getattr(settings, "livekit_agent_name", "") or "vetta-interviewer").strip()
+
+
+def _dispatch_metadata(session_id: str, uid: str) -> str:
+    return json.dumps({"session_id": session_id, "user_id": uid})
+
+
 @router.post("/token", response_model=LiveKitTokenResponse)
 async def create_livekit_token(
     body: LiveKitTokenRequest,
@@ -72,13 +82,24 @@ async def create_livekit_token(
     await _resolve_session(room_name, uid)
 
     lk_api = _livekit_api()
-    jwt = (
+    token = (
         lk_api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
         .with_identity(uid)
         .with_grants(lk_api.VideoGrants(room_join=True, room=room_name))
         .with_ttl(timedelta(hours=4))
-        .to_jwt()
     )
+    if body.dispatch_agent:
+        token = token.with_room_config(
+            lk_api.RoomConfiguration(
+                agents=[
+                    lk_api.RoomAgentDispatch(
+                        agent_name=_agent_name(),
+                        metadata=_dispatch_metadata(room_name, uid),
+                    )
+                ]
+            )
+        )
+    jwt = token.to_jwt()
 
     return LiveKitTokenResponse(token=jwt, url=settings.livekit_url, room_name=room_name)
 
@@ -96,7 +117,38 @@ async def livekit_attach(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id is required")
 
     await _resolve_session(session_id, uid)
-    return {"status": "ok", "message": "Agent worker active"}
+
+    lk_api = _livekit_api()
+    agent_name = _agent_name()
+    async with lk_api.LiveKitAPI(
+        settings.livekit_url,
+        settings.livekit_api_key,
+        settings.livekit_api_secret,
+    ) as client:
+        existing = await client.agent_dispatch.list_dispatch(session_id)
+        for dispatch in existing:
+            if getattr(dispatch, "agent_name", "") == agent_name:
+                return {
+                    "status": "ok",
+                    "message": "Agent worker already dispatched",
+                    "dispatch_id": getattr(dispatch, "id", ""),
+                    "agent_name": agent_name,
+                }
+
+        dispatch = await client.agent_dispatch.create_dispatch(
+            lk_api.CreateAgentDispatchRequest(
+                agent_name=agent_name,
+                room=session_id,
+                metadata=_dispatch_metadata(session_id, uid),
+            )
+        )
+
+    return {
+        "status": "ok",
+        "message": "Agent worker dispatched",
+        "dispatch_id": getattr(dispatch, "id", ""),
+        "agent_name": agent_name,
+    }
 
 
 @router.get("/health")
