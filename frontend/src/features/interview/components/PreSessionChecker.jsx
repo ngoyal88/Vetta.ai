@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { Room } from "livekit-client";
 
 const BROWSER_REQUIREMENTS = {
   audioWorklet: !!(typeof window !== "undefined" && window.AudioWorkletNode),
@@ -169,14 +170,47 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
       const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
-      const res = await fetch(`${apiUrl}/livekit/health`, {
+      const healthRes = await fetch(`${apiUrl}/livekit/health`, {
         signal: controller.signal,
       });
+      if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+
+      const token = (await getAuthToken?.()) || null;
+      if (!token) throw new Error("Authentication token unavailable");
+
+      const tokenRes = await fetch(`${apiUrl}/livekit/token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      if (!tokenRes.ok) {
+        const err = await tokenRes.json().catch(() => ({}));
+        throw new Error(err?.detail || `LiveKit token failed (${tokenRes.status})`);
+      }
+      const tokenData = await tokenRes.json();
+      const lkToken = tokenData?.token;
+      const lkUrl = (tokenData?.url || "").trim();
+      if (!lkToken || !lkUrl) {
+        throw new Error("LiveKit token response missing url/token");
+      }
+
+      const room = new Room();
+      try {
+        const connectTimeoutMs = 10000;
+        const connectPromise = room.connect(lkUrl, lkToken);
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("LiveKit connection timed out")), connectTimeoutMs);
+        });
+        await Promise.race([connectPromise, timeoutPromise]);
+      } finally {
+        room.disconnect();
+      }
+
       clearTimeout(timeoutId);
       const latency = Date.now() - start;
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       if (latency > 2000) {
         setCheckStateKey("connection", "warning");
         setConnectionWarning(
@@ -197,11 +231,14 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
           fix: null,
         });
       } else {
-        setCheckStateKey("connection", "warning");
-        setConnectionWarning(
-          "Connection check inconclusive — you can still try to start."
-        );
-        setAllChecksDone(true);
+        setCheckStateKey("connection", "failed");
+        setErrorMessage({
+          title: "LiveKit connection failed",
+          body:
+            err?.message ||
+            "Unable to establish interview room connection. Please try again in a few moments.",
+          fix: null,
+        });
       }
     }
   };

@@ -65,6 +65,21 @@ class LLMEngine:
         msg = str(e.args[0]) if e.args else str(e)
         return "429" in msg or "500" in msg or "503" in msg or "timeout" in msg.lower()
 
+    def _looks_like_provider_error_text(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return True
+        markers = (
+            "error generating response",
+            "rate limit",
+            "rate_limit_exceeded",
+            "too many requests",
+            "apiconnectionerror",
+            "failed to generate llm completion",
+            "service not configured",
+        )
+        return any(m in t for m in markers)
+
     async def _call_llm_with_fallback(
         self,
         prompt: str,
@@ -83,6 +98,9 @@ class LLMEngine:
                     15.0,
                 )
                 if not raw:
+                    return None
+                if self._looks_like_provider_error_text(raw):
+                    logger.warning("LLM returned provider error-like text; trying fallback")
                     return None
                 if validate:
                     return process_response(raw)
@@ -125,6 +143,9 @@ class LLMEngine:
                     provider_llm.generate_text(prompt, temperature=temperature),
                     15.0,
                 )
+                if self._looks_like_provider_error_text(raw or ""):
+                    logger.warning("LLM returned provider error-like text; trying fallback")
+                    return None
                 return (raw or "").strip() or None
             except asyncio.TimeoutError:
                 logger.warning("LLM call timed out after 15s")
