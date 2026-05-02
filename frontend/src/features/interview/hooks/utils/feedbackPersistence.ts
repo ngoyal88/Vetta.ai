@@ -1,12 +1,5 @@
 import { feedbackKey } from "./sessionKeys";
-
-type FeedbackPayload = {
-  feedback?: string;
-  full?: unknown;
-  duration_minutes?: number;
-  questions_answered?: number;
-  code_problems_attempted?: number;
-};
+import type { FeedbackPayload } from "../../types";
 
 export const persistFeedback = (sessionId: string, payload: FeedbackPayload) => {
   if (!sessionId) return false;

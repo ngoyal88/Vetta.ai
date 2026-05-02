@@ -1,11 +1,6 @@
 import { useCallback } from "react";
 import toast from "react-hot-toast";
-
-type BannerOptions = {
-  addBanner?: (type: string, message: string, autoDismissMs?: number | null) => number | null;
-  removeBanner?: (id: number) => void;
-  removeBannerByType?: (type: string) => void;
-};
+import type { BannerOptions } from "../types";
 
 export const useUIEffects = (optionsRef: React.MutableRefObject<BannerOptions | null>) => {
   const addBanner = useCallback(

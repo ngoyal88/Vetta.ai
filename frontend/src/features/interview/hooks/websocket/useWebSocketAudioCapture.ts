@@ -1,15 +1,6 @@
-import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { AudioRecorder } from "shared/utils/audioUtils";
-
-type UseWebSocketAudioCaptureOptions = {
-  sendBinary: (data: ArrayBuffer) => void;
-  sendMessage: (message: unknown) => void;
-  setAudioLevel: (value: number) => void;
-  setIsRecording: (value: boolean) => void;
-  isAiSpeakingRef: MutableRefObject<boolean>;
-  micEnabledRef: MutableRefObject<boolean>;
-  connectedRef: MutableRefObject<boolean>;
-};
+import type { UseWebSocketAudioCaptureOptions } from "../../types";
 
 export const useWebSocketAudioCapture = (options: UseWebSocketAudioCaptureOptions) => {
   const recorderRef = useRef<AudioRecorder | null>(null);

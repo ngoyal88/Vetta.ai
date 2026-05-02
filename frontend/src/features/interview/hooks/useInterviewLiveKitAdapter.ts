@@ -10,6 +10,7 @@ import { useInterviewMessaging } from "./useInterviewMessaging";
 import { useInterruptDetection } from "./useInterruptDetection";
 import { useSessionPersistence } from "./useSessionPersistence";
 import { useUIEffects } from "./useUIEffects";
+import type { LiveKitOptions } from "../types";
 
 const MIC_RESUME_DELAY_MS = 250;
 const INTERRUPT_ENERGY_THRESHOLD = 0.008;
@@ -29,13 +30,6 @@ const isEditableElement = (target: EventTarget | null) => {
     tagName === "select" ||
     !!el.closest?.(".monaco-editor")
   );
-};
-
-type LiveKitOptions = {
-  addBanner?: (type: string, message: string, autoDismissMs?: number | null) => number | null;
-  removeBanner?: (id: number) => void;
-  removeBannerByType?: (type: string) => void;
-  codeEditorRef?: { current?: { getValue?: () => string; setValue?: (value: string) => void; getLanguage?: () => string; setLanguage?: (lang: string) => void } | null };
 };
 
 export const useInterviewLiveKitAdapter = (sessionId: string, initialPhase = "behavioral", options: LiveKitOptions = {}) => {

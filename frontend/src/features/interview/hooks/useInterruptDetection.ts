@@ -1,11 +1,5 @@
 import { useCallback, useRef } from "react";
-
-type InterruptOptions = {
-  energyThreshold: number;
-  holdMs: number;
-  debounceMs: number;
-  minPlaybackMs: number;
-};
+import type { InterruptOptions } from "../types";
 
 export const useInterruptDetection = (options: InterruptOptions) => {
   const interruptCandidateSinceRef = useRef<number | null>(null);

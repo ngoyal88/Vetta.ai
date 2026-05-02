@@ -3,23 +3,7 @@ import toast from "react-hot-toast";
 import { extractSpokenText, normalizeQuestionPayload } from "../utils/questionUtils";
 import { isSilentStatus, isSpeakingStatus, normalizeStatus } from "../utils/statusMapping";
 import { persistFeedback } from "../utils/feedbackPersistence";
-
-type UseWebSocketMessagingOptions = {
-  sessionId: string;
-  setCurrentQuestion: (value: unknown) => void;
-  setLoadingNextProblem: (value: boolean) => void;
-  setPhase: (value: string) => void;
-  setTranscriptInterim: (value: string) => void;
-  setTranscriptFinal: (value: string | ((prev: string) => string)) => void;
-  setAiText: (value: string) => void;
-  setAiSpeaking: (value: boolean) => void;
-  setFeedback: (value: unknown) => void;
-  setError: (value: string | null) => void;
-  setStatus: (value: string | ((prev: string) => string)) => void;
-  setAiTextFull: (value: string) => void;
-  clearReveal: () => void;
-  playQuestionAudio: (audioBase64: string | null) => void;
-};
+import type { UseWebSocketMessagingOptions } from "../../types";
 
 export const useWebSocketMessaging = (options: UseWebSocketMessagingOptions) => {
   const handleMessage = useCallback(

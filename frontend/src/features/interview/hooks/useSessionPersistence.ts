@@ -1,11 +1,7 @@
 import { useCallback, useRef } from "react";
 import { codeBackupKey, codeLangKey } from "./utils/sessionKeys";
 import { persistFeedback } from "./utils/feedbackPersistence";
-
-type OptionsRef = React.MutableRefObject<{
-  addBanner?: (type: string, message: string, autoDismissMs?: number | null) => number | null;
-  codeEditorRef?: { current?: { getValue?: () => string; setValue?: (value: string) => void; getLanguage?: () => string; setLanguage?: (lang: string) => void } | null };
-} | null>;
+import type { FeedbackPayload, OptionsRef } from "../types";
 
 export const useSessionPersistence = (sessionId: string, optionsRef: OptionsRef) => {
   const tabHiddenAtRef = useRef<number | null>(null);
@@ -70,16 +66,7 @@ export const useSessionPersistence = (sessionId: string, optionsRef: OptionsRef)
     [backupCodeFromEditor, optionsRef]
   );
 
-  const persistFeedbackPayload = useCallback(
-    (payload: {
-      feedback?: string;
-      full?: unknown;
-      duration_minutes?: number;
-      questions_answered?: number;
-      code_problems_attempted?: number;
-    }) => persistFeedback(sessionId, payload),
-    [sessionId]
-  );
+  const persistFeedbackPayload = useCallback((payload: FeedbackPayload) => persistFeedback(sessionId, payload), [sessionId]);
 
   return {
     handleVisibilityChange,

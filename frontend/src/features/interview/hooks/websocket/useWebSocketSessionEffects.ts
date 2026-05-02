@@ -1,16 +1,7 @@
-import { useEffect, type MutableRefObject } from "react";
+import { useEffect } from "react";
 import { checkBrowserSupport } from "shared/utils/audioUtils";
 import toast from "react-hot-toast";
-
-type UseWebSocketSessionEffectsOptions = {
-  sessionId: string;
-  isRecording: boolean;
-  micEnabled: boolean;
-  connect: () => void | Promise<void>;
-  disconnect: () => void;
-  recorderRef: MutableRefObject<{ pause: () => void; resume: () => void } | null>;
-  setError: (value: string | null) => void;
-};
+import type { UseWebSocketSessionEffectsOptions } from "../../types";
 
 export const useWebSocketSessionEffects = (options: UseWebSocketSessionEffectsOptions) => {
   const { sessionId, isRecording, micEnabled, connect, disconnect, recorderRef, setError } = options;
