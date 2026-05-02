@@ -12,7 +12,10 @@ const Navbar = () => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
-  if (location.pathname === '/' || location.pathname.includes('/interview')) {
+  if (
+    location.pathname === '/' ||
+    location.pathname.includes('/interview')
+  ) {
     return null;
   }
 
@@ -34,6 +37,10 @@ const Navbar = () => {
             ) : (
               <>
                 <Link to="/dashboard" className="text-sm text-zinc-400 hover:text-white transition-colors">Dashboard</Link>
+                <Link to="/modes" className="text-sm text-zinc-400 hover:text-white transition-colors">Modes</Link>
+                <Link to="/resume-vault" className="text-sm text-zinc-400 hover:text-white transition-colors">Resume Vault</Link>
+                <Link to="/analytics" className="text-sm text-zinc-400 hover:text-white transition-colors">Analytics</Link>
+                <Link to="/profile" className="text-sm text-zinc-400 hover:text-white transition-colors">Profile</Link>
                 <button onClick={logout} className="text-sm text-zinc-400 hover:text-red-400 transition-colors">Logout</button>
               </>
             )}
@@ -67,6 +74,10 @@ const Navbar = () => {
             ) : (
               <>
                 <Link to="/dashboard" className="block py-2 text-sm text-zinc-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>Dashboard</Link>
+                <Link to="/modes" className="block py-2 text-sm text-zinc-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>Modes</Link>
+                <Link to="/resume-vault" className="block py-2 text-sm text-zinc-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>Resume Vault</Link>
+                <Link to="/analytics" className="block py-2 text-sm text-zinc-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>Analytics</Link>
+                <Link to="/profile" className="block py-2 text-sm text-zinc-400 hover:text-white" onClick={() => setMobileMenuOpen(false)}>Profile</Link>
                 <button onClick={() => { setMobileMenuOpen(false); logout(); }} className="block w-full text-left py-2 text-sm text-zinc-400 hover:text-red-400">Logout</button>
               </>
             )}
