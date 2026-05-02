@@ -163,7 +163,7 @@ function StartSection({
         </motion.button>
       </div>
 
-      <p className="mt-4 font-mono text-[10px] text-[var(--text-tertiary)]">// All sessions are recorded locally and scored in real time.</p>
+      <p className="mt-4 font-mono text-[10px] text-[var(--text-tertiary)]">{"// All sessions are recorded locally and scored in real time."}</p>
     </div>
   );
 }
