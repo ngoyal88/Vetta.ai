@@ -155,9 +155,9 @@ const Footer: React.FC = () => (
   <footer className="flex w-full flex-col items-center justify-between gap-4 border-t border-zinc-800/20 bg-[#0a0a0a] px-5 py-8 md:flex-row">
     <span className="font-mono text-[10px] uppercase tracking-tight text-zinc-100">© 2025 VETTA.AI — MISSION: GET THE JOB.</span>
     <div className="flex gap-4">
-      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="#">DOCUMENTATION</a>
-      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="#">PRIVACY</a>
-      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="#">TERMINAL_ACCESS</a>
+      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="/docs">DOCUMENTATION</a>
+      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="/privacy">PRIVACY</a>
+      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="/terminal">TERMINAL_ACCESS</a>
     </div>
   </footer>
 );

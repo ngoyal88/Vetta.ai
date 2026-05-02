@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
@@ -58,42 +58,42 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     return unsubscribe;
   }, []);
 
-  const signup = (email: string, password: string) => createUserWithEmailAndPassword(auth, email, password);
+  const signup = useCallback((email: string, password: string) => createUserWithEmailAndPassword(auth, email, password), []);
 
-  const signin = (email: string, password: string) => signInWithEmailAndPassword(auth, email, password);
+  const signin = useCallback((email: string, password: string) => signInWithEmailAndPassword(auth, email, password), []);
 
-  const signInWithGoogle = () => {
+  const signInWithGoogle = useCallback(() => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
     return signInWithPopup(auth, provider);
-  };
+  }, []);
 
-  const logout = () => signOut(auth);
+  const logout = useCallback(() => signOut(auth), []);
 
-  const sendVerification = async () => {
+  const sendVerification = useCallback(async () => {
     if (!auth.currentUser) throw new Error("Not signed in");
     await sendEmailVerification(auth.currentUser);
-  };
+  }, []);
 
-  const refreshUser = async (): Promise<User | null> => {
+  const refreshUser = useCallback(async (): Promise<User | null> => {
     if (!auth.currentUser) return null;
     await reload(auth.currentUser);
     setCurrentUser(auth.currentUser);
     return auth.currentUser;
-  };
+  }, []);
 
-  const resetPassword = (email: string) => sendPasswordResetEmail(auth, email);
+  const resetPassword = useCallback((email: string) => sendPasswordResetEmail(auth, email), []);
 
-  const updateProfileInfo = async ({ displayName, photoURL }: UpdateProfileInput) => {
+  const updateProfileInfo = useCallback(async ({ displayName, photoURL }: UpdateProfileInput) => {
     if (!auth.currentUser) throw new Error("Not signed in");
     await updateProfile(auth.currentUser, { displayName, photoURL });
     await refreshUser();
-  };
+  }, [refreshUser]);
 
-  const deleteAccount = async () => {
+  const deleteAccount = useCallback(async () => {
     if (!auth.currentUser) throw new Error("Not signed in");
     await deleteUser(auth.currentUser);
-  };
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -108,7 +108,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       updateProfileInfo,
       deleteAccount,
     }),
-    [currentUser],
+    [currentUser, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount],
   );
 
   if (loading) {

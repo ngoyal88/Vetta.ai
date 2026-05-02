@@ -3,12 +3,11 @@ import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import {
-  Activity, Cpu, Radio, AlertTriangle, ChevronRight,
+  Radio, AlertTriangle, ChevronRight,
 } from "lucide-react";
 
 import { useConfirmDialog } from "shared/context/ConfirmDialogContext";
 import { useInterviewLiveKitAdapter } from "features/interview/hooks/useInterviewLiveKitAdapter";
-import AudioVisualizer from "features/interview/components/AudioVisualizer";
 import Subtitles from "features/interview/components/Subtitles";
 import CodeEditor from "features/interview/components/CodeEditor";
 import DSAQuestionDisplay from "features/interview/components/DSAQuestionDisplay";
@@ -261,7 +260,7 @@ const FeedbackScreen = ({ feedback, onBack }) => (
         ) : (
           <div className="flex flex-col items-center gap-3 py-16">
             <div className="w-8 h-8 border border-indigo/30 border-t-indigo rounded-sm animate-spin" />
-            <p className="font-mono text-xs text-[var(--text-tertiary)]">// Analyzing session data…</p>
+            <p className="font-mono text-xs text-[var(--text-tertiary)]">{'// Analyzing session data…'}</p>
           </div>
         )}
       </div>

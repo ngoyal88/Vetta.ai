@@ -10,7 +10,6 @@ const MAX_VERSIONS = 5;
 const ResumeVault = () => {
   const {
     entries,
-    meta,
     loading,
     error,
     uploadResume,

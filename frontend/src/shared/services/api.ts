@@ -4,16 +4,6 @@ const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 type AuthHeaders = Record<string, string>;
 
-type StartInterviewParams = {
-  userId: string;
-  interviewType: string;
-  difficulty: string;
-  resumeData?: unknown;
-  customRole?: string | null;
-  candidateName?: string | null;
-  yearsExperience?: number | null;
-};
-
 export type StartInterviewResponse = {
   session_id: string;
   [key: string]: unknown;

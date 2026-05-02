@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, SkipForward, LogOut, Code2, ChevronRight, Timer, Activity } from 'lucide-react';
+import { Mic, SkipForward, LogOut, Code2, ChevronRight, Timer } from 'lucide-react';
 
 const DIFF_COLORS = {
   easy:   'text-emerald border-l-emerald',
