@@ -1,10 +1,16 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, Image, Mail, ShieldCheck, User2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useConfirmDialog } from 'shared/context/ConfirmDialogContext';
+import { useNavigate } from 'react-router-dom';
 
-export default function AccountTab({
+import { useAuth } from 'shared/context/AuthContext';
+import { useConfirmDialog } from 'shared/context/ConfirmDialogContext';
+import useUserProfile from 'shared/hooks/useUserProfile';
+import { api } from 'shared/services/api';
+import type { AccountPanelProps } from 'features/dashboard/types/panels';
+
+function AccountSection({
   currentUser,
   profileName,
   setProfileName,
@@ -21,15 +27,11 @@ export default function AccountTab({
   api,
   deleteAccount,
   navigate,
-}) {
+}: AccountPanelProps) {
   const { confirmDialog } = useConfirmDialog();
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-gray-900/50 border border-cyan-600/20 rounded-2xl p-8 mt-6"
-    >
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-gray-900/50 border border-cyan-600/20 rounded-2xl p-8 mt-6">
       <div className="flex items-center gap-3 mb-6">
         <ShieldCheck className="w-6 h-6 text-cyan-400" />
         <h2 className="text-2xl font-bold text-white">Account & Profile</h2>
@@ -145,9 +147,7 @@ export default function AccountTab({
               <AlertTriangle className="w-5 h-5" />
               <span className="font-semibold">Danger Zone</span>
             </div>
-            <p className="text-sm text-gray-300 mb-3">
-              Delete your account and all interview history. This action cannot be undone.
-            </p>
+            <p className="text-sm text-gray-300 mb-3">Delete your account and all interview history. This action cannot be undone.</p>
             <button
               onClick={() => {
                 confirmDialog({
@@ -181,3 +181,47 @@ export default function AccountTab({
     </motion.div>
   );
 }
+
+const Profile: React.FC = () => {
+  const { currentUser, sendVerification, resetPassword, updateProfileInfo, deleteAccount, refreshUser } = useAuth();
+  const { profile } = useUserProfile();
+  const navigate = useNavigate();
+
+  const [profileName, setProfileName] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [deletingAccountState, setDeletingAccountState] = useState(false);
+
+  useEffect(() => {
+    setProfileName(profile?.name || currentUser?.displayName || '');
+    setProfilePhoto(currentUser?.photoURL || '');
+  }, [profile?.name, currentUser]);
+
+  return (
+    <div className="min-h-screen bg-base px-5 py-6 pt-16">
+      <div className="mx-auto max-w-6xl">
+        <p className="mb-4 font-mono text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">Profile</p>
+        <AccountSection
+          currentUser={currentUser}
+          profileName={profileName}
+          setProfileName={setProfileName}
+          profilePhoto={profilePhoto}
+          setProfilePhoto={setProfilePhoto}
+          savingProfile={savingProfile}
+          setSavingProfile={setSavingProfile}
+          sendVerification={sendVerification}
+          resetPassword={resetPassword}
+          updateProfileInfo={updateProfileInfo}
+          refreshUser={refreshUser}
+          deletingAccountState={deletingAccountState}
+          setDeletingAccountState={setDeletingAccountState}
+          api={api}
+          deleteAccount={deleteAccount}
+          navigate={navigate}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default Profile;
