@@ -59,7 +59,12 @@ def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     }
 
 
-async def parse_resume_llm(file_bytes: bytes, filename: str, uid: str) -> ParsedResumeResponse:
+async def parse_resume_llm(
+    file_bytes: bytes,
+    filename: str,
+    uid: Optional[str] = None,
+    persist: bool = True,
+) -> ParsedResumeResponse:
     """
     LLM-powered resume parser.
     - Extracts raw text.
@@ -242,17 +247,18 @@ async def parse_resume_llm(file_bytes: bytes, filename: str, uid: str) -> Parsed
     }
 
     # Persist to Firestore (best-effort)
-    try:
-        doc_ref = (
-            db.collection("users")
-            .document(uid)
-            .collection("profiles")
-            .document("resume_parsed")
-        )
-        doc_ref.set({"profile": profile.dict(), "meta": meta}, merge=True)
-    except Exception:
-        # Do not fail the request solely due to Firestore issues
-        pass
+    if persist and uid:
+        try:
+            doc_ref = (
+                db.collection("users")
+                .document(uid)
+                .collection("profiles")
+                .document("resume_parsed")
+            )
+            doc_ref.set({"profile": profile.dict(), "meta": meta}, merge=True)
+        except Exception:
+            # Do not fail the request solely due to Firestore issues
+            pass
 
     return ParsedResumeResponse(profile=profile, meta=meta)
 

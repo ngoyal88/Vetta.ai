@@ -12,6 +12,7 @@ from models.interview import DifficultyLevel, InterviewSession, InterviewType
 from utils.auth import verify_firebase_token
 from utils.rate_limit import check_rate_limit
 from utils.redis_client import create_session
+from services.vault.vault_service import get_vault_entry, get_vault_meta, get_version_by_id
 
 from . import SESSION_TTL, interview_service, logger, router
 
@@ -24,6 +25,41 @@ class StartInterviewRequest(BaseModel):
     custom_role: Optional[str] = None
     resume_data: Optional[dict] = None
     years_experience: Optional[int] = Field(None, ge=0, le=50)
+
+
+def _extract_candidate_name(resume_data: Optional[dict]) -> Optional[str]:
+    if not isinstance(resume_data, dict):
+        return None
+    name = resume_data.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    if isinstance(name, dict):
+        raw = name.get("raw")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
+async def _load_active_resume(uid: str) -> Dict[str, Any]:
+    try:
+        meta = await get_vault_meta(uid)
+        active_id = meta.get("active_resume_id")
+        if not active_id:
+            return {}
+        entry = await get_vault_entry(uid, active_id)
+        if not entry:
+            return {}
+        version_id = entry.get("current_version_id")
+        if not version_id:
+            return {}
+        version = await get_version_by_id(uid, version_id)
+        if not version:
+            return {}
+        profile = version.get("profile_snapshot")
+        return profile if isinstance(profile, dict) else {}
+    except Exception as e:
+        logger.warning("Failed to load vault resume for %s: %s", uid, e)
+        return {}
 
 
 @router.post("/start")
@@ -42,21 +78,7 @@ async def start_interview(
 
         resume_data: Dict[str, Any] = request.resume_data or {}
         if not resume_data:
-            try:
-                doc = (
-                    db.collection("users")
-                    .document(uid)
-                    .collection("profiles")
-                    .document("resume_parsed")
-                    .get()
-                )
-                if doc.exists:
-                    payload = doc.to_dict() or {}
-                    profile = payload.get("profile")
-                    if isinstance(profile, dict):
-                        resume_data = profile
-            except Exception as e:
-                logger.warning("Failed to load parsed resume for %s: %s", uid, e)
+            resume_data = await _load_active_resume(uid)
 
         first_question = await interview_service.generate_first_question(
             request.interview_type,
@@ -66,11 +88,7 @@ async def start_interview(
             request.years_experience,
         )
 
-        candidate_name = (
-            request.candidate_name
-            or ((resume_data or {}).get("name") if isinstance(resume_data, dict) else None)
-            or request.user_id
-        )
+        candidate_name = request.candidate_name or _extract_candidate_name(resume_data) or request.user_id
 
         session = InterviewSession(
             session_id=session_id,

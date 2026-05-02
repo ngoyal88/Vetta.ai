@@ -44,6 +44,19 @@ def _get_dsa_inner_question(payload: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _extract_resume_name(resume_data: Any) -> Optional[str]:
+    if not isinstance(resume_data, dict):
+        return None
+    name = resume_data.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    if isinstance(name, dict):
+        raw = name.get("raw")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
 class InterviewSessionEngine:
     def __init__(
         self,
@@ -622,11 +635,11 @@ class InterviewSessionEngine:
 
             self.current_phase = InterviewPhase.GREETING.value
             self._set_conductor_phase_str(self.current_phase)
-            user_name = session_data.get("candidate_name") or (
-                (session_data.get("resume_data", {}) or {}).get("name", {}).get("raw")
-                if isinstance(session_data.get("resume_data"), dict)
-                else None
-            ) or session_data.get("user_id", "Candidate")
+            user_name = (
+                session_data.get("candidate_name")
+                or _extract_resume_name(session_data.get("resume_data"))
+                or session_data.get("user_id", "Candidate")
+            )
             interview_type = session_data.get("interview_type", "technical")
             custom_role = session_data.get("custom_role")
             role = custom_role or interview_type
