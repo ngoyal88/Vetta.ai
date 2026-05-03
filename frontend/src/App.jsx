@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { Routes, Route, useSearchParams } from "react-router-dom";
+import { Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { Toaster } from 'react-hot-toast';
 import Navbar from 'shared/components/Navbar';
 import ErrorBoundary from 'shared/components/ErrorBoundary';
@@ -7,6 +7,15 @@ import Home from "shared/pages/Home";
 import SignIn from "features/auth/pages/SignIn";
 import SignUp from "features/auth/pages/SignUp";
 import Dashboard from 'features/dashboard/pages/Dashboard';
+import ResumeVault from 'features/vault/pages/ResumeVault';
+import Profile from 'features/dashboard/pages/Profile';
+import Analytics from 'features/dashboard/pages/Analytics';
+import ModesPage from 'features/modes/pages/ModesPage';
+import RoleTargetedPage from 'features/modes/role-targeted/pages/RoleTargetedPage';
+import PressureModePage from 'features/modes/pressure-mode/pages/PressureModePage';
+import ResumeDeepDivePage from 'features/modes/resume-deep-dive/pages/ResumeDeepDivePage';
+import BlindModePage from 'features/modes/blind-mode/pages/BlindModePage';
+import PairProgrammingPage from 'features/modes/pair-programming/pages/PairProgrammingPage';
 import PrivateRoute from 'shared/components/PrivateRoute';
 import { useBackendHealth } from 'shared/context/BackendHealthContext';
 
@@ -75,6 +84,79 @@ function App() {
             element={
               <PrivateRoute>
                 <Dashboard />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/resume-vault"
+            element={
+              <PrivateRoute>
+                <ResumeVault />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <PrivateRoute>
+                <Profile />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <PrivateRoute>
+                <Analytics />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/modes"
+            element={
+              <PrivateRoute>
+                <ModesPage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/modes/role-targeted"
+            element={
+              <PrivateRoute>
+                <RoleTargetedPage />
+              </PrivateRoute>
+            }
+          />
+          <Route path="/role-targeted" element={<Navigate to="/modes/role-targeted" replace />} />
+          <Route
+            path="/modes/pressure-mode"
+            element={
+              <PrivateRoute>
+                <PressureModePage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/modes/resume-deep-dive"
+            element={
+              <PrivateRoute>
+                <ResumeDeepDivePage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/modes/blind-mode"
+            element={
+              <PrivateRoute>
+                <BlindModePage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/modes/pair-programming"
+            element={
+              <PrivateRoute>
+                <PairProgrammingPage />
               </PrivateRoute>
             }
           />

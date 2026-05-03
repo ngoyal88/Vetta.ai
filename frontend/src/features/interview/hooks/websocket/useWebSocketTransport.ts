@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { auth } from "firebaseConfig";
 import toast from "react-hot-toast";
 import { decodeJsonMessage } from "../utils/messageCodec";
+import type { UseWebSocketTransportOptions } from "../../types";
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = 3000;
@@ -22,11 +23,6 @@ const getWebSocketBaseUrl = () => {
     }
   }
   return `${protocol}//${hostPort}/ws`;
-};
-
-type UseWebSocketTransportOptions = {
-  sessionId: string;
-  onMessage: (message: Record<string, unknown>) => void;
 };
 
 export const useWebSocketTransport = (options: UseWebSocketTransportOptions) => {

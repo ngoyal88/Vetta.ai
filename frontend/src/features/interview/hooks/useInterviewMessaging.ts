@@ -2,46 +2,7 @@ import { useCallback, useRef } from "react";
 import toast from "react-hot-toast";
 import { extractSpokenText, normalizeQuestionPayload } from "./utils/questionUtils";
 import { normalizeStatus, isSilentStatus, isSpeakingStatus } from "./utils/statusMapping";
-
-type MessagingOptions = {
-  sessionId: string;
-  optionsRef: React.MutableRefObject<{ addBanner?: (type: string, message: string, autoDismissMs?: number | null) => number | null; removeBanner?: (id: number) => void; removeBannerByType?: (type: string) => void } | null>;
-  aiTextFullRef: React.MutableRefObject<string>;
-  activeTtsStreamIdRef: React.MutableRefObject<string | null>;
-  playInterviewTtsBase64: (audio: string | null) => void;
-  stopAiPlaybackLocally: (messageType: string | null) => void;
-  clearAiReveal: () => void;
-  sendControl: (message: unknown) => void;
-  setCurrentQuestion: (value: unknown) => void;
-  setLoadingNextProblem: (value: boolean) => void;
-  setPhase: (value: string) => void;
-  setTranscriptInterim: (value: string) => void;
-  setTranscriptFinal: (value: string | ((prev: string) => string)) => void;
-  setAiText: (value: string) => void;
-  setAiFullText: (value: string) => void;
-  setAiSpeechWpm: (value: number) => void;
-  setAiSpeakingState: (value: boolean) => void;
-  setFeedback: (value: unknown) => void;
-  setError: (value: string) => void;
-  setStatus: (value: string | ((prev: string) => string)) => void;
-  setSttFallbackActive: (value: boolean) => void;
-  onPlaybackStart?: () => void;
-  onPlaybackEnd?: () => void;
-  onHeartbeat?: () => void;
-  persistFeedback: (payload: {
-    feedback?: string;
-    full?: unknown;
-    duration_minutes?: number;
-    questions_answered?: number;
-    code_problems_attempted?: number;
-  }) => void;
-};
-
-type ChunkBuffer = {
-  questionId: string | number;
-  totalChunks: number;
-  parts: string[];
-};
+import type { ChunkBuffer, MessagingOptions } from "../types";
 
 export const useInterviewMessaging = (options: MessagingOptions) => {
   const chunkBufferRef = useRef<ChunkBuffer | null>(null);

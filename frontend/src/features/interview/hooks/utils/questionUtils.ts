@@ -1,8 +1,4 @@
-type QuestionPayload = {
-  question?: unknown;
-  phase?: string;
-  spoken_text?: string;
-};
+import type { QuestionPayload } from "../../types";
 
 export const normalizeQuestionPayload = (payload: QuestionPayload) => {
   const q = payload?.question;

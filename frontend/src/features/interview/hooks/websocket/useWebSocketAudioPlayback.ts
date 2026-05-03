@@ -1,15 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { AudioPlayer } from "shared/utils/audioUtils";
-
-type UseWebSocketAudioPlaybackOptions = {
-  setAiSpeaking: (value: boolean) => void;
-  setAiText: (value: string) => void;
-  setAiFullText: (value: string) => void;
-  setAiSpeechWpm: (value: number) => void;
-  sendMessage: (message: unknown) => void;
-  onPlaybackStart?: () => void;
-  onPlaybackEnd?: () => void;
-};
+import type { UseWebSocketAudioPlaybackOptions } from "../../types";
 
 export const useWebSocketAudioPlayback = (options: UseWebSocketAudioPlaybackOptions) => {
   const playerRef = useRef<AudioPlayer | null>(null);

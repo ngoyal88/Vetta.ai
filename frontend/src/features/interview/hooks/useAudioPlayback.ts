@@ -1,17 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { AudioPlayer } from "shared/utils/audioUtils";
-
-type PlaybackOptions = {
-  setAiSpeakingState: (value: boolean) => void;
-  setAiText: (value: string) => void;
-  setAiFullText: (value: string) => void;
-  setAiSpeechWpm: (value: number) => void;
-  setStatus: (value: string) => void;
-  sendControl: (message: unknown) => void;
-  scheduleMicResume: (delayMs?: number) => void;
-  onPlaybackEnd?: () => void;
-  onLocalPlaybackStart?: () => void;
-};
+import type { PlaybackOptions } from "../types";
 
 export const useAudioPlayback = (options: PlaybackOptions) => {
   const playerRef = useRef<AudioPlayer | null>(null);

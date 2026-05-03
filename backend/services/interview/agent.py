@@ -105,10 +105,23 @@ async def _update_session(session_key: str, data: Dict[str, Any], ttl: int = SES
         log.error("Error updating session %s: %s", session_key, e, exc_info=True)
 
 
+def _extract_resume_name(resume_data: Any) -> Optional[str]:
+    if not isinstance(resume_data, dict):
+        return None
+    name = resume_data.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    if isinstance(name, dict):
+        raw = name.get("raw")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
 def _build_system_prompt(session_data: Dict[str, Any], conductor: SessionConductor) -> str:
     candidate_name = (
         session_data.get("candidate_name")
-        or (session_data.get("resume_data") or {}).get("name", {}).get("raw")
+        or _extract_resume_name(session_data.get("resume_data"))
         or "Candidate"
     )
     interview_type = str(session_data.get("interview_type") or "technical")
@@ -887,7 +900,7 @@ async def entrypoint(ctx: JobContext) -> None:
     else:
         candidate_name = (
             session_data.get("candidate_name")
-            or (session_data.get("resume_data") or {}).get("name", {}).get("raw")
+            or _extract_resume_name(session_data.get("resume_data"))
             or "Candidate"
         )
         role = session_data.get("custom_role") or session_data.get("interview_type", "technical")

@@ -1,1 +1,0 @@
-export { useInterviewWebSocketAdapter as useInterviewWebSocket } from "./websocket/useInterviewWebSocketAdapter";

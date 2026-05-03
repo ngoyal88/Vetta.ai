@@ -3,21 +3,10 @@ import { Room, RoomEvent, createLocalAudioTrack, RemoteTrack } from "livekit-cli
 import { auth } from "firebaseConfig";
 import { decodeJsonMessage, encodeJsonMessage } from "./utils/messageCodec";
 import toast from "react-hot-toast";
+import type { TransportOptions } from "../types";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 const isDev = process.env.NODE_ENV !== "production";
-
-type TransportOptions = {
-  sessionId: string;
-  onMessage: (message: unknown) => void;
-  onAudioChunk: (message: unknown) => void;
-  onReconnectSuccess?: () => void;
-  onAudioUnlockPrompt?: () => void;
-  onAudioUnlocked?: () => void;
-  addBanner?: (type: string, message: string, autoDismissMs?: number | null) => number | null;
-  micEnabledRef?: React.MutableRefObject<boolean>;
-  roomRef?: React.MutableRefObject<Room | null>;
-};
 
 export const useTransportConnection = (options: TransportOptions) => {
   const optionsRef = useRef(options);

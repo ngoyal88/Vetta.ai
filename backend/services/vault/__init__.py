@@ -1,0 +1,39 @@
+from .vault_service import (
+    MAX_RESUMES_PER_USER,
+    MAX_VERSIONS_PER_RESUME,
+    get_vault_meta,
+    list_vault_entries,
+    get_vault_entry,
+    create_resume_entry,
+    add_version,
+    list_versions,
+    get_version_by_id,
+    restore_version,
+    set_active_resume,
+    update_entry,
+    delete_resume_entry,
+    update_version_score,
+    update_entry_scorecard,
+)
+from .analysis_service import build_vault_scorecard
+from .compare_service import compare_profiles
+
+__all__ = [
+    "MAX_RESUMES_PER_USER",
+    "MAX_VERSIONS_PER_RESUME",
+    "get_vault_meta",
+    "list_vault_entries",
+    "get_vault_entry",
+    "create_resume_entry",
+    "add_version",
+    "list_versions",
+    "get_version_by_id",
+    "restore_version",
+    "set_active_resume",
+    "update_entry",
+    "delete_resume_entry",
+    "update_version_score",
+    "update_entry_scorecard",
+    "build_vault_scorecard",
+    "compare_profiles",
+]

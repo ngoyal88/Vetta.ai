@@ -1,17 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { AudioRecorder } from "shared/utils/audioUtils";
-
-type AudioCaptureOptions = {
-  sendControl: (message: unknown) => void;
-  setAudioLevel: (value: number) => void;
-  setIsRecording: (value: boolean) => void;
-  isAiSpeakingRef: React.MutableRefObject<boolean>;
-  micEnabledRef: React.MutableRefObject<boolean>;
-  roomRef?: React.MutableRefObject<{ state?: string } | null>;
-  onInterrupt: () => void;
-  checkForInterrupt: (level: number, isAiSpeaking: boolean, onInterrupt: () => void) => void;
-  onError?: (error: Error) => void;
-};
+import type { AudioCaptureOptions } from "../types";
 
 export const useAudioCapture = (options: AudioCaptureOptions) => {
   const recorderRef = useRef<AudioRecorder | null>(null);
