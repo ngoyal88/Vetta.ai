@@ -2,6 +2,9 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { QuickMode, ReplayItem } from '../types';
 
+// Types
+type DashboardProps = {};
+
 const QUICK_MODES: QuickMode[] = [
   { id: 'role-targeted', label: '[ROLE-TARGETED]' },
   { id: 'pressure-mode', label: '[PRESSURE_MODE]' },
@@ -28,7 +31,7 @@ const REPLAYS: ReplayItem[] = [
   },
 ];
 
-const Dashboard: React.FC = () => {
+const Dashboard: React.FC<DashboardProps> = (): React.ReactElement => {
   const navigate = useNavigate();
 
   return (
@@ -135,7 +138,10 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            <button className="mt-auto border border-cyan-500/50 p-2 text-center font-mono text-[11px] text-cyan-300 transition-colors hover:bg-[#161616]">
+            <button
+              type="button"
+              className="mt-auto border border-cyan-500/50 p-2 text-center font-mono text-[11px] text-cyan-300 transition-colors hover:bg-[#161616]"
+            >
               [ UPDATE_CONTEXT ]
             </button>
           </div>

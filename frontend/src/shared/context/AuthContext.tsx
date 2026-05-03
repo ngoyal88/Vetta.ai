@@ -114,10 +114,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   if (loading) {
     return (
       <AuthContext.Provider value={value}>
-        <div className="min-h-screen bg-black flex items-center justify-center" aria-busy="true" aria-live="polite">
+        <div className="flex min-h-screen items-center justify-center bg-[var(--bg-0)]" aria-busy="true" aria-live="polite">
           <div className="flex flex-col items-center gap-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-2 border-cyan-500 border-t-transparent" />
-            <p className="text-gray-400">Checking auth...</p>
+            <div className="h-12 w-12 animate-spin rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
+            <p className="text-sm text-[var(--cream-3)]">Checking auth...</p>
           </div>
         </div>
       </AuthContext.Provider>

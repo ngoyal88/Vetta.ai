@@ -6,28 +6,56 @@ const HomeNavbar: React.FC = () => {
   const { currentUser, logout } = useAuth();
 
   return (
-    <nav className="sticky top-0 z-50 flex w-full items-center justify-between border-b border-zinc-800/20 bg-[#0a0a0a] px-5 py-2">
-      <div className="flex items-center gap-6">
-        <Link to="/" className="font-mono text-[14px] font-bold uppercase tracking-tighter text-zinc-100">
+    <nav className="sticky top-0 z-50 flex min-h-14 w-full items-center justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3 md:px-6">
+      <div className="flex min-w-0 flex-1 items-center gap-4 md:gap-8">
+        <Link
+          to="/"
+          className="font-mono text-sm font-semibold uppercase tracking-tighter text-[var(--text-primary)] transition-colors duration-[120ms] ease-out hover:text-[var(--text-secondary)]"
+        >
           VETTA.AI
         </Link>
-        <div className="hidden items-center gap-4 md:flex">
-          <a className="px-2 py-1 font-mono text-[11px] uppercase tracking-widest text-zinc-500 transition-all duration-75 ease-in-out hover:bg-zinc-900/50 hover:text-zinc-100" href="#assessment">ASSESSMENT</a>
-          <a className="px-2 py-1 font-mono text-[11px] uppercase tracking-widest text-zinc-500 transition-all duration-75 ease-in-out hover:bg-zinc-900/50 hover:text-zinc-100" href="#personas">PERSONAS</a>
-          <a className="px-2 py-1 font-mono text-[11px] uppercase tracking-widest text-zinc-500 transition-all duration-75 ease-in-out hover:bg-zinc-900/50 hover:text-zinc-100" href="#system-status">SYSTEM_STATUS</a>
+        <div className="hidden items-center gap-2 md:flex md:gap-3">
+          <a
+            className="whitespace-nowrap px-2 py-1 font-mono text-2xs uppercase tracking-widest text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-out hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)]"
+            href="#assessment"
+          >
+            ASSESSMENT
+          </a>
+          <a
+            className="whitespace-nowrap px-2 py-1 font-mono text-2xs uppercase tracking-widest text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-out hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)]"
+            href="#personas"
+          >
+            PERSONAS
+          </a>
+          <a
+            className="whitespace-nowrap px-2 py-1 font-mono text-2xs uppercase tracking-widest text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-out hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)]"
+            href="#system-status"
+          >
+            SYSTEM_STATUS
+          </a>
         </div>
       </div>
 
       {!currentUser ? (
-        <Link to="/signup" className="border border-cyan-500/30 px-3 py-1 font-mono text-[11px] uppercase tracking-widest text-cyan-500 transition-all duration-75 ease-in-out hover:bg-zinc-900/50 hover:text-zinc-100">
+        <Link
+          to="/signup"
+          className="shrink-0 border border-[var(--indigo-border)] px-3 py-2 font-mono text-2xs uppercase tracking-widest text-[var(--indigo)] transition-colors duration-[120ms] ease-out hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)]"
+        >
           MISSION: GET THE JOB
         </Link>
       ) : (
-        <div className="flex items-center gap-3">
-          <Link to="/dashboard" className="border border-cyan-500/30 px-3 py-1 font-mono text-[11px] uppercase tracking-widest text-cyan-500 transition-all duration-75 ease-in-out hover:bg-zinc-900/50 hover:text-zinc-100">
+        <div className="flex shrink-0 items-center gap-3">
+          <Link
+            to="/dashboard"
+            className="border border-[var(--indigo-border)] px-3 py-2 font-mono text-2xs uppercase tracking-widest text-[var(--indigo)] transition-colors duration-[120ms] ease-out hover:bg-[var(--bg-overlay)] hover:text-[var(--text-primary)]"
+          >
             DASHBOARD
           </Link>
-          <button onClick={logout} className="font-mono text-[11px] uppercase tracking-widest text-zinc-500 transition hover:text-zinc-300">
+          <button
+            type="button"
+            onClick={logout}
+            className="font-mono text-2xs uppercase tracking-widest text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-out hover:text-[var(--text-secondary)]"
+          >
             LOGOUT
           </button>
         </div>
@@ -100,9 +128,12 @@ const Hero: React.FC = () => (
 );
 
 const Differentiators: React.FC = () => (
-  <section id="assessment" className="flex w-full flex-col gap-16 border-b border-zinc-800/20 bg-[#0a0a0a] px-8 py-24 md:px-16">
+  <section
+    id="assessment"
+    className="flex w-full scroll-mt-16 flex-col gap-16 border-b border-zinc-800/20 bg-[#0a0a0a] px-8 py-24 md:px-16"
+  >
     <h2 className="text-[32px] font-light text-zinc-100 md:text-[40px]">Not a quiz. A conversation.</h2>
-    <div id="personas" className="grid grid-cols-1 gap-8 md:grid-cols-3">
+    <div id="personas" className="grid scroll-mt-16 grid-cols-1 gap-8 md:grid-cols-3">
       <div className="flex flex-col gap-4 border-t border-cyan-500/50 pt-6">
         <h3 className="text-[18px] text-white">The AI interrupts you</h3>
         <p className="flex-grow text-[14px] text-zinc-400">It detects rambling, challenges weak technical assumptions in real-time, and forces you to justify architectural decisions just like a Senior Engineer would.</p>
@@ -123,7 +154,10 @@ const Differentiators: React.FC = () => (
 );
 
 const HiringSignal: React.FC = () => (
-  <section id="system-status" className="flex w-full flex-col items-center gap-12 border-b border-zinc-800/20 bg-[#0a0a0a] px-8 py-24 md:px-16">
+  <section
+    id="system-status"
+    className="flex w-full scroll-mt-16 flex-col items-center gap-12 border-b border-zinc-800/20 bg-[#0a0a0a] px-8 py-24 md:px-16"
+  >
     <h2 className="max-w-2xl text-center text-[32px] font-light text-zinc-100 md:text-[40px]">Strong Hire. Lean Hire. No Hire.</h2>
     <div className="flex w-full max-w-3xl flex-col border border-white/10 bg-[#111111]">
       <div className="flex items-center justify-between border-b border-zinc-800/50 px-6 py-4">
@@ -152,13 +186,38 @@ const HiringSignal: React.FC = () => (
 );
 
 const Footer: React.FC = () => (
-  <footer className="flex w-full flex-col items-center justify-between gap-4 border-t border-zinc-800/20 bg-[#0a0a0a] px-5 py-8 md:flex-row">
-    <span className="font-mono text-[10px] uppercase tracking-tight text-zinc-100">© 2025 VETTA.AI — MISSION: GET THE JOB.</span>
-    <div className="flex gap-4">
-      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="/docs">DOCUMENTATION</a>
-      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="/privacy">PRIVACY</a>
-      <a className="font-mono text-[10px] uppercase tracking-tight text-zinc-600 transition-opacity duration-200 hover:text-zinc-400" href="/terminal">TERMINAL_ACCESS</a>
+  <footer
+    id="privacy"
+    className="flex w-full scroll-mt-16 flex-col gap-6 border-t border-zinc-800/20 bg-[#0a0a0a] px-5 py-8"
+  >
+    <div className="flex w-full flex-col items-center justify-between gap-4 md:flex-row md:items-start">
+      <span className="text-center font-mono text-[10px] uppercase tracking-tight text-[var(--text-primary)] md:text-left">
+        © 2025 VETTA.AI — MISSION: GET THE JOB.
+      </span>
+      <div className="flex flex-wrap items-center justify-center gap-4 md:justify-end">
+        <Link
+          to={{ pathname: '/', hash: '#assessment' }}
+          className="font-mono text-[10px] uppercase tracking-tight text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-out hover:text-[var(--text-secondary)]"
+        >
+          DOCUMENTATION
+        </Link>
+        <Link
+          to={{ pathname: '/', hash: '#privacy' }}
+          className="font-mono text-[10px] uppercase tracking-tight text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-out hover:text-[var(--text-secondary)]"
+        >
+          PRIVACY
+        </Link>
+        <Link
+          to={{ pathname: '/', hash: '#system-status' }}
+          className="font-mono text-[10px] uppercase tracking-tight text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-out hover:text-[var(--text-secondary)]"
+        >
+          TERMINAL_ACCESS
+        </Link>
+      </div>
     </div>
+    <p className="mx-auto max-w-2xl text-center font-mono text-[10px] leading-relaxed text-[var(--text-tertiary)]">
+      Privacy: interview and account data are used to run sessions and improve your experience. Contact support for questions about your data.
+    </p>
   </footer>
 );
 
