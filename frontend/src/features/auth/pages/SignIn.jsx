@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from 'shared/context/AuthContext';
+import { getPostAuthRedirectPath } from 'shared/utils/getPostAuthRedirectPath';
 import { motion } from 'framer-motion';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from 'firebaseConfig';
@@ -48,6 +49,8 @@ const AuthPreviewPanel = () => (
 const SignIn = () => {
   const { signin, resetPassword, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const redirectTo = getPostAuthRedirectPath(location.state);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -59,7 +62,7 @@ const SignIn = () => {
     setError('');
     try {
       await signin(email, password);
-      navigate('/dashboard');
+      navigate(redirectTo, { replace: true });
     } catch (err) {
       setError('Invalid email or password');
     } finally {
@@ -95,7 +98,7 @@ const SignIn = () => {
       } catch (profileErr) {
         console.warn('Profile write failed after Google sign-in:', profileErr?.code || profileErr, profileErr);
       }
-      navigate('/dashboard');
+      navigate(redirectTo, { replace: true });
     } catch (err) {
       setError(formatAuthError(err));
     } finally {

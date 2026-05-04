@@ -76,6 +76,15 @@ const ResumeVault = () => {
     load();
   }, [selectedResumeId, getVersions]);
 
+  useEffect(() => {
+    if (!editId) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setEditId(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editId]);
+
   const handleUploadNew = async () => {
     if (!newFile) {
       toast.error('Select a file first');
@@ -466,9 +475,21 @@ const ResumeVault = () => {
         </div>
 
         {editId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-            <div className="card w-full max-w-md p-4">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">Edit Resume</p>
+          <div
+            role="presentation"
+            className="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
+            onClick={() => setEditId(null)}
+          >
+            <div
+              className="card w-full max-w-md p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="resume-edit-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p id="resume-edit-title" className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
+                Edit Resume
+              </p>
               <div className="mt-3 space-y-2">
                 <input
                   value={editName}

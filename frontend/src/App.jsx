@@ -17,6 +17,8 @@ import ResumeDeepDivePage from 'features/modes/resume-deep-dive/pages/ResumeDeep
 import BlindModePage from 'features/modes/blind-mode/pages/BlindModePage';
 import PairProgrammingPage from 'features/modes/pair-programming/pages/PairProgrammingPage';
 import PrivateRoute from 'shared/components/PrivateRoute';
+import GuestRoute from 'shared/components/GuestRoute';
+import NotFound from 'shared/pages/NotFound';
 import { useBackendHealth } from 'shared/context/BackendHealthContext';
 
 const InterviewRoom = lazy(() => import('features/interview/pages/InterviewRoom'));
@@ -39,8 +41,8 @@ function InterviewRoomFallback() {
   return (
     <div className="min-h-screen bg-base flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
-        <div className="animate-spin rounded-full h-10 w-10 border-2 border-cyan-500 border-t-transparent" />
-        <p className="text-zinc-500 text-sm">Loading interview...</p>
+        <div className="animate-spin h-10 w-10 rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
+        <p className="text-sm text-[var(--cream-3)]">Loading interview...</p>
       </div>
     </div>
   );
@@ -77,8 +79,34 @@ function App() {
       <ErrorBoundary>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/signin" element={<SignIn />} />
-          <Route path="/signup" element={<SignUp />} />
+          <Route
+            path="/docs"
+            element={<Navigate to={{ pathname: '/', hash: '#assessment' }} replace />}
+          />
+          <Route
+            path="/privacy"
+            element={<Navigate to={{ pathname: '/', hash: '#privacy' }} replace />}
+          />
+          <Route
+            path="/terminal"
+            element={<Navigate to={{ pathname: '/', hash: '#system-status' }} replace />}
+          />
+          <Route
+            path="/signin"
+            element={
+              <GuestRoute>
+                <SignIn />
+              </GuestRoute>
+            }
+          />
+          <Route
+            path="/signup"
+            element={
+              <GuestRoute>
+                <SignUp />
+              </GuestRoute>
+            }
+          />
           <Route
             path="/dashboard"
             element={
@@ -170,6 +198,7 @@ function App() {
               </PrivateRoute>
             }
           />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </ErrorBoundary>
     </>
