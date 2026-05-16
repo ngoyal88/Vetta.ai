@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from services.integrations.groq_service import GroqService
 from services.resume.scorecard_service import normalize_resume_for_scorecard, build_resume_scorecard
+from services.vault.analysis_service import _compact_resume_text
 
 
 def _extract_json_obj(raw: str) -> Dict[str, Any]:
@@ -55,13 +56,16 @@ async def compare_profiles(
     system_prompt = (
         "You compare two resumes for a role. Return ONLY JSON: "
         "{\"recommended_id\": \"a\"|\"b\", \"recommendation_reason\": string, "
-        "\"section_verdicts\": object}"  # section_verdicts may be empty
-        "."
+        "\"section_verdicts\": object, \"diff_summary\": string, "
+        "\"section_highlights\": {\"summary\": string, \"skills\": string, "
+        "\"experience\": string, \"projects\": string}}."
     )
     user_prompt = (
         f"role={role or ''}\n"
         f"resume_a_summary={_compact_summary(profile_a)}\n"
         f"resume_b_summary={_compact_summary(profile_b)}\n"
+        f"resume_a_text={_compact_resume_text(profile_a)}\n"
+        f"resume_b_text={_compact_resume_text(profile_b)}\n"
         f"score_a={score_a} score_b={score_b}"
     )
 
@@ -85,6 +89,24 @@ async def compare_profiles(
     if not isinstance(section_verdicts, dict):
         section_verdicts = {}
 
+    diff_summary = payload.get("diff_summary")
+    if not isinstance(diff_summary, str) or not diff_summary.strip():
+        diff_summary = (
+            f"Resume A scores {score_a} vs Resume B at {score_b}. "
+            f"Key skill differences: {len(skills_a - skills_b)} only in A, "
+            f"{len(skills_b - skills_a)} only in B."
+        )
+
+    section_highlights = payload.get("section_highlights")
+    if not isinstance(section_highlights, dict):
+        section_highlights = {}
+    else:
+        section_highlights = {
+            str(k): str(v)
+            for k, v in section_highlights.items()
+            if isinstance(k, str) and isinstance(v, str) and v.strip()
+        }
+
     return {
         "score_a": score_a,
         "score_b": score_b,
@@ -94,4 +116,6 @@ async def compare_profiles(
         "recommended_id": recommended_id,
         "recommendation_reason": reason,
         "section_verdicts": section_verdicts,
+        "diff_summary": diff_summary.strip(),
+        "section_highlights": section_highlights,
     }

@@ -1,4 +1,4 @@
-import json
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -6,8 +6,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from firebase_admin import firestore
 
 from firebase_config import db
-from models.vault import ScorePoint, VaultScorecard
+from models.vault import (
+    ScorePoint,
+    VaultScorecard,
+    normalize_vault_name,
+    normalize_vault_tag_list,
+    normalize_vault_tags,
+)
 from services.vault.analysis_service import build_vault_scorecard, generate_diff_summary
+from services.vault import file_storage
 
 
 MAX_RESUMES_PER_USER = 5
@@ -30,20 +37,42 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def normalize_tags(raw: Optional[str]) -> List[str]:
-    if not raw:
-        return []
-    raw = raw.strip()
-    if not raw:
-        return []
-    if raw.startswith("["):
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                return [str(t).strip() for t in parsed if str(t).strip()]
-        except Exception:
-            pass
-    return [t.strip() for t in raw.split(",") if t.strip()]
+def _build_score_point(
+    version_number: int,
+    score: int,
+    *,
+    version_id: Optional[str] = None,
+    action: Optional[str] = None,
+    role: Optional[str] = None,
+    created_at: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    return ScorePoint(
+        version_number=version_number,
+        score=score,
+        created_at=created_at or _now(),
+        version_id=version_id,
+        action=action,
+        role=role,
+    ).model_dump()
+
+
+def normalize_tags(raw: Any) -> List[str]:
+    return normalize_vault_tags(raw)
+
+
+def normalize_update_tags(raw: Any) -> List[str]:
+    return normalize_vault_tag_list(raw)
+
+
+def normalize_entry_name(raw: Any) -> str:
+    if not isinstance(raw, str):
+        raise ValueError("invalid_name")
+    try:
+        return normalize_vault_name(raw)
+    except ValueError as exc:
+        if str(exc) == "name_blank":
+            raise ValueError("invalid_name") from exc
+        raise
 
 
 async def get_vault_meta(uid: str) -> Dict[str, Any]:
@@ -97,8 +126,8 @@ async def create_resume_entry(
     data = {
         "id": resume_id,
         "user_id": uid,
-        "name": name,
-        "tags": tags,
+        "name": normalize_entry_name(name),
+        "tags": normalize_tags(tags),
         "is_active": is_active,
         "created_at": now,
         "last_updated": now,
@@ -119,6 +148,10 @@ async def add_version(
     profile_snapshot: Dict[str, Any],
     user_note: str,
     role: Optional[str] = None,
+    *,
+    source_filename: Optional[str] = None,
+    source_blob: Optional[bytes] = None,
+    content_type: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], VaultScorecard]:
     entry = await get_vault_entry(uid, resume_id)
     if not entry:
@@ -143,6 +176,26 @@ async def add_version(
 
     scorecard = await build_vault_scorecard(profile_snapshot, role=role)
 
+    file_meta: Dict[str, Any] = {
+        "source_filename": None,
+        "content_type": None,
+        "has_source_file": False,
+    }
+    if source_blob and source_filename:
+        await asyncio.to_thread(
+            file_storage.save_version_file,
+            uid,
+            resume_id,
+            version_id,
+            source_filename,
+            source_blob,
+        )
+        file_meta = {
+            "source_filename": source_filename,
+            "content_type": content_type or file_storage.content_type_for_filename(source_filename),
+            "has_source_file": True,
+        }
+
     version_data = {
         "id": version_id,
         "resume_id": resume_id,
@@ -150,14 +203,25 @@ async def add_version(
         "created_at": now,
         "user_note": user_note or "",
         "score_at_version": scorecard.score,
+        "latest_score": scorecard.score,
         "diff_summary": diff_summary,
         "profile_snapshot": profile_snapshot,
+        **file_meta,
     }
 
     _versions_collection(uid, resume_id).document(version_id).set(version_data)
 
     score_history = list(entry.get("score_history") or [])
-    score_history.append(ScorePoint(version_number=version_number, score=scorecard.score, created_at=now).model_dump())
+    score_history.append(
+        _build_score_point(
+            version_number,
+            scorecard.score,
+            version_id=version_id,
+            action="upload",
+            role=role,
+            created_at=now,
+        )
+    )
 
     entry_update = {
         "current_version_id": version_id,
@@ -181,6 +245,16 @@ async def list_versions(uid: str, resume_id: str) -> List[Dict[str, Any]]:
     return versions
 
 
+async def get_version_for_resume(uid: str, resume_id: str, version_id: str) -> Optional[Dict[str, Any]]:
+    snap = _versions_collection(uid, resume_id).document(version_id).get()
+    if not snap.exists:
+        return None
+    payload = snap.to_dict() or {}
+    payload.setdefault("id", version_id)
+    payload.setdefault("resume_id", resume_id)
+    return payload
+
+
 async def get_version_by_id(uid: str, version_id: str) -> Optional[Dict[str, Any]]:
     query = db.collection_group("versions").where("id", "==", version_id).limit(1).stream()
     for doc in query:
@@ -199,21 +273,34 @@ async def restore_version(uid: str, version_id: str, role: Optional[str] = None)
         raise ValueError("version_not_found")
     resume_id = version.get("resume_id")
     if not resume_id:
-        raise ValueError("resume_not_found")
+        raise ValueError("version_resume_mismatch")
 
-    profile_snapshot = version.get("profile_snapshot") or {}
-    scorecard = await build_vault_scorecard(profile_snapshot, role=role)
-    now = _now()
+    linked_version = await get_version_for_resume(uid, resume_id, version_id)
+    if not linked_version:
+        raise ValueError("version_resume_mismatch")
 
     entry = await get_vault_entry(uid, resume_id)
     if not entry:
         raise ValueError("resume_not_found")
 
+    profile_snapshot = linked_version.get("profile_snapshot") or {}
+    scorecard = await build_vault_scorecard(profile_snapshot, role=role)
+    now = _now()
+
     score_history = list(entry.get("score_history") or [])
-    score_history.append(ScorePoint(version_number=version.get("version_number", 0), score=scorecard.score, created_at=now).model_dump())
+    score_history.append(
+        _build_score_point(
+            linked_version.get("version_number", 0),
+            scorecard.score,
+            version_id=version_id,
+            action="restore",
+            role=role,
+            created_at=now,
+        )
+    )
 
     _versions_collection(uid, resume_id).document(version_id).set(
-        {"score_at_version": scorecard.score},
+        {"latest_score": scorecard.score},
         merge=True,
     )
 
@@ -227,11 +314,20 @@ async def restore_version(uid: str, version_id: str, role: Optional[str] = None)
         merge=True,
     )
 
-    return {"resume_id": resume_id, "version_id": version_id, "scorecard": scorecard.model_dump()}
+    return {
+        "resume_id": resume_id,
+        "version_id": version_id,
+        "version_number": linked_version.get("version_number"),
+        "restored_current_version": True,
+        "scorecard": scorecard.model_dump(),
+    }
 
 
 async def set_active_resume(uid: str, resume_id: str) -> None:
     entries = await list_vault_entries(uid)
+    if not any(entry["id"] == resume_id for entry in entries):
+        raise ValueError("resume_not_found")
+
     batch = db.batch()
     for entry in entries:
         ref = _vault_collection(uid).document(entry["id"])
@@ -243,19 +339,42 @@ async def set_active_resume(uid: str, resume_id: str) -> None:
 
 
 async def update_entry(uid: str, resume_id: str, name: Optional[str], tags: Optional[List[str]]) -> Dict[str, Any]:
+    existing = await get_vault_entry(uid, resume_id)
+    if not existing:
+        raise ValueError("resume_not_found")
+
     updates: Dict[str, Any] = {"last_updated": _now()}
     if name is not None:
-        updates["name"] = name
+        updates["name"] = normalize_entry_name(name)
     if tags is not None:
-        updates["tags"] = tags
-    _vault_collection(uid).document(resume_id).set(updates, merge=True)
+        updates["tags"] = normalize_update_tags(tags)
+    _vault_collection(uid).document(resume_id).update(updates)
     entry = await get_vault_entry(uid, resume_id)
     if not entry:
         raise ValueError("resume_not_found")
     return entry
 
 
+def _select_fallback_active_resume(entries: List[Dict[str, Any]]) -> Optional[str]:
+    if not entries:
+        return None
+
+    for entry in entries:
+        if entry.get("current_version_id"):
+            return entry["id"]
+
+    return entries[0]["id"]
+
+
 async def delete_resume_entry(uid: str, resume_id: str) -> None:
+    deleted_entry = await get_vault_entry(uid, resume_id)
+    if not deleted_entry:
+        raise ValueError("resume_not_found")
+
+    meta = await get_vault_meta(uid)
+    previous_active_id = meta.get("active_resume_id")
+    deleted_was_active = previous_active_id == resume_id or bool((deleted_entry or {}).get("is_active"))
+
     versions = await list_versions(uid, resume_id)
     batch = db.batch()
     for version in versions:
@@ -264,19 +383,49 @@ async def delete_resume_entry(uid: str, resume_id: str) -> None:
     batch.delete(_vault_collection(uid).document(resume_id))
     batch.commit()
 
-    meta = await get_vault_meta(uid)
-    resume_count = max(0, int(meta.get("resume_count", 0)) - 1)
-    active_id = meta.get("active_resume_id")
-    if active_id == resume_id:
-        active_id = None
-    await set_vault_meta(uid, resume_count, active_id)
+    await asyncio.to_thread(file_storage.delete_resume_files, uid, resume_id)
+
+    remaining_entries = await list_vault_entries(uid)
+    remaining_ids = {entry["id"] for entry in remaining_entries}
+
+    next_active_id = previous_active_id if previous_active_id in remaining_ids else None
+    if deleted_was_active or next_active_id is None:
+        next_active_id = _select_fallback_active_resume(remaining_entries)
+
+    if remaining_entries:
+        active_batch = db.batch()
+        dirty = False
+        for entry in remaining_entries:
+            should_be_active = entry["id"] == next_active_id
+            if entry.get("is_active") == should_be_active:
+                continue
+            active_batch.set(
+                _vault_collection(uid).document(entry["id"]),
+                {"is_active": should_be_active},
+                merge=True,
+            )
+            dirty = True
+        if dirty:
+            active_batch.commit()
+
+    await set_vault_meta(uid, len(remaining_entries), next_active_id)
 
 
-async def update_version_score(uid: str, resume_id: str, version_id: str, score: int) -> None:
-    _versions_collection(uid, resume_id).document(version_id).set(
-        {"score_at_version": score},
-        merge=True,
-    )
+def _find_version_ref(uid: str, version_id: str):
+    query = db.collection_group("versions").where("id", "==", version_id).limit(1).stream()
+    for doc in query:
+        path = doc.reference.path
+        if not path.startswith(f"users/{uid}/"):
+            continue
+        return doc.reference
+    return None
+
+
+async def update_version_score(uid: str, version_id: str, score: int) -> None:
+    ref = _find_version_ref(uid, version_id)
+    if ref is None:
+        raise ValueError("version_not_found")
+    ref.set({"latest_score": score}, merge=True)
 
 
 async def update_entry_scorecard(
@@ -284,6 +433,9 @@ async def update_entry_scorecard(
     resume_id: str,
     scorecard: VaultScorecard,
     version_number: Optional[int] = None,
+    version_id: Optional[str] = None,
+    action: Optional[str] = None,
+    role: Optional[str] = None,
 ) -> None:
     entry = await get_vault_entry(uid, resume_id)
     if not entry:
@@ -291,7 +443,14 @@ async def update_entry_scorecard(
     score_history = list(entry.get("score_history") or [])
     if version_number is not None:
         score_history.append(
-            ScorePoint(version_number=version_number, score=scorecard.score, created_at=_now()).model_dump()
+            _build_score_point(
+                version_number,
+                scorecard.score,
+                version_id=version_id,
+                action=action,
+                role=role,
+                created_at=scorecard.last_analyzed_at,
+            )
         )
     _vault_collection(uid).document(resume_id).set(
         {

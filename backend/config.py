@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     firebase_project_id: str = ""
     firebase_credentials_path: str = "serviceAccount.json"
 
+    # Vault source files (PDF/DOCX/TXT) on local disk — no Firebase Storage required.
+    vault_storage_dir: str = "data/vault"
+
     api_token: str = os.getenv("API_TOKEN", "")
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "")
     jwt_algorithm: str = "HS256"

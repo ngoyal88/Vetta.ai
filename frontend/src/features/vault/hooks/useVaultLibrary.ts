@@ -8,6 +8,7 @@ import type {
   VaultEntry,
   VaultMeta,
   VaultRestoreResponse,
+  VaultStatusResponse,
   VaultUpdatePayload,
   VaultUploadResponse,
   VaultVersion,
@@ -44,13 +45,13 @@ export const useVaultLibrary = () => {
     return res;
   };
 
-  const deleteEntry = async (resumeId: string): Promise<{ status: string }> => {
+  const deleteEntry = async (resumeId: string): Promise<VaultStatusResponse> => {
     const res = await vaultApi.deleteEntry(resumeId);
     await refresh();
     return res;
   };
 
-  const setActive = async (resumeId: string): Promise<{ status: string }> => {
+  const setActive = async (resumeId: string): Promise<VaultStatusResponse> => {
     const res = await vaultApi.setActive(resumeId);
     await refresh();
     return res;
@@ -76,8 +77,10 @@ export const useVaultLibrary = () => {
     resumeAId: string,
     resumeBId: string,
     role?: string,
+    versionAId?: string,
+    versionBId?: string,
   ): Promise<VaultCompareResponse> => {
-    return vaultApi.compare(resumeAId, resumeBId, role);
+    return vaultApi.compare(resumeAId, resumeBId, role, versionAId, versionBId);
   };
 
   const getVersions = async (resumeId: string): Promise<VaultVersion[]> => {
