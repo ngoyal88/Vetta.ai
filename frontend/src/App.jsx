@@ -7,7 +7,13 @@ import Home from "shared/pages/Home";
 import SignIn from "features/auth/pages/SignIn";
 import SignUp from "features/auth/pages/SignUp";
 import Dashboard from 'features/dashboard/pages/Dashboard';
-import ResumeVault from 'features/vault/pages/ResumeVault';
+import VaultLayout from 'features/vault/layout/VaultLayout';
+import VaultHubPage from 'features/vault/pages/VaultHubPage';
+import VaultComparePage from 'features/vault/pages/VaultComparePage';
+import VaultCompareResultPage from 'features/vault/pages/VaultCompareResultPage';
+import VaultLibraryPage from 'features/vault/pages/VaultLibraryPage';
+import VaultVersionsPage from 'features/vault/pages/VaultVersionsPage';
+import VaultVersionDetailPage from 'features/vault/pages/VaultVersionDetailPage';
 import Profile from 'features/dashboard/pages/Profile';
 import Analytics from 'features/dashboard/pages/Analytics';
 import ModesPage from 'features/modes/pages/ModesPage';
@@ -119,10 +125,17 @@ function App() {
             path="/resume-vault"
             element={
               <PrivateRoute>
-                <ResumeVault />
+                <VaultLayout />
               </PrivateRoute>
             }
-          />
+          >
+            <Route index element={<VaultHubPage />} />
+            <Route path="compare" element={<VaultComparePage />} />
+            <Route path="compare/result" element={<VaultCompareResultPage />} />
+            <Route path="library" element={<VaultLibraryPage />} />
+            <Route path="r/:resumeId" element={<VaultVersionsPage />} />
+            <Route path="r/:resumeId/:versionId" element={<VaultVersionDetailPage />} />
+          </Route>
           <Route
             path="/profile"
             element={

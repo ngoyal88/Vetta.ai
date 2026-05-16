@@ -188,8 +188,7 @@ const RoleTargetedPage: React.FC = () => {
     try {
       const profile = await vaultApi.getActiveResumeProfile();
       setParsedResume(profile || null);
-    } catch (err) {
-      console.warn('Failed to load resume from Vault:', err);
+    } catch {
       setParsedResume(null);
     }
   }, [currentUser]);
@@ -204,7 +203,7 @@ const RoleTargetedPage: React.FC = () => {
       return;
     }
     if (interviewType === 'resume' && !parsedResume) {
-      toast.error('Please upload your resume first');
+      toast.error('Please upload or activate a resume in Resume Vault first');
       return;
     }
     if (interviewType === 'custom' && !customRole.trim()) {
@@ -249,7 +248,6 @@ const RoleTargetedPage: React.FC = () => {
       setShowPreCheck(true);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      console.error(err);
       toast.error(`Failed to start interview: ${message}`);
     }
   };

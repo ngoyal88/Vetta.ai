@@ -48,15 +48,14 @@ export interface ScorePoint {
   version_number: number;
   score: number;
   created_at: TimestampLike;
+  version_id?: string | null;
+  action?: string | null;
+  role?: string | null;
 }
 
 export interface VaultScorecard {
   score: number;
-  coverage_counts: {
-    skills: number;
-    projects: number;
-    work_experiences: number;
-  };
+  coverage_counts: Record<string, number>;
   summary_line: string;
   role_fit_score?: number | null;
   role_fit_role?: string | null;
@@ -89,8 +88,12 @@ export interface VaultVersion {
   created_at: TimestampLike;
   user_note: string;
   score_at_version?: number | null;
+  latest_score?: number | null;
   diff_summary?: string | null;
   profile_snapshot: ResumeProfile;
+  source_filename?: string | null;
+  content_type?: string | null;
+  has_source_file?: boolean;
 }
 
 export interface VaultMeta {
