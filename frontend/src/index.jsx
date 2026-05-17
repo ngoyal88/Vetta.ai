@@ -8,9 +8,9 @@ import { ConfirmDialogProvider } from "shared/context/ConfirmDialogContext";
 import { BrowserRouter } from "react-router-dom";
 import * as Sentry from "@sentry/react";
 
-if (process.env.REACT_APP_SENTRY_DSN) {
+if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
-    dsn: process.env.REACT_APP_SENTRY_DSN,
+    dsn: import.meta.env.VITE_SENTRY_DSN,
     tracesSampleRate: 0.0,
   });
 }

@@ -94,6 +94,8 @@ export interface VaultVersion {
   source_filename?: string | null;
   content_type?: string | null;
   has_source_file?: boolean;
+  storage_path?: string | null;
+  storage_backend?: string | null;
 }
 
 export interface VaultMeta {

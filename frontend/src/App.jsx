@@ -33,7 +33,7 @@ const InterviewRoomLiveKit = lazy(() => import('features/interview/pages/Intervi
 function useInterviewTransport() {
   const [searchParams] = useSearchParams();
   const { livekitAvailable, healthLoading } = useBackendHealth();
-  const envForce = process.env.REACT_APP_USE_LIVEKIT;
+  const envForce = import.meta.env.VITE_USE_LIVEKIT;
   if (envForce === 'true') return true;
   if (envForce === 'false') return false;
   if (searchParams.get('transport') === 'ws') return false;

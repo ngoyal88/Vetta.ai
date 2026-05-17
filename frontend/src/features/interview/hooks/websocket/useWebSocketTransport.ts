@@ -10,7 +10,7 @@ const HEARTBEAT_INTERVAL = 30000;
 const ACTIVITY_TIMEOUT = 300000;
 
 const getWebSocketBaseUrl = () => {
-  const raw = (process.env.REACT_APP_WS_URL || "").trim();
+  const raw = (import.meta.env.VITE_WS_URL || "").trim();
   const isSecure = typeof window !== "undefined" && window.location?.protocol === "https:";
   const protocol = isSecure ? "wss:" : "ws:";
   let hostPort = "localhost:8000";
