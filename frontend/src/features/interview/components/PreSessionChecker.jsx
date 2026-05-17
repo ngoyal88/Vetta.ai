@@ -54,8 +54,8 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
         setErrorMessage({
           title: "Microphone access denied",
           body:
-            "Click the camera/mic icon in your browser address bar → Allow → then refresh this page.",
-          fix: "How to allow mic in Chrome: Settings → Privacy → Microphone → Allow roundr.ai",
+            "Click the camera/mic icon in your browser address bar -> Allow -> then refresh this page.",
+          fix: "How to allow mic in Chrome: Settings -> Privacy -> Microphone -> Allow roundr.ai",
         });
       } else if (err.name === "NotFoundError") {
         setErrorMessage({
@@ -169,7 +169,7 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
+      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
       const healthRes = await fetch(`${apiUrl}/livekit/health`, {
         signal: controller.signal,
       });

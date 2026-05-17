@@ -17,7 +17,7 @@ const INTERRUPT_ENERGY_THRESHOLD = 0.008;
 const INTERRUPT_HOLD_MS = 180;
 const INTERRUPT_DEBOUNCE_MS = 2000;
 const MIN_PLAYBACK_BEFORE_INTERRUPT_MS = 2000;
-const isDev = process.env.NODE_ENV !== "production";
+const isDev = import.meta.env.DEV;
 
 const isEditableElement = (target: EventTarget | null) => {
   if (!target) return false;

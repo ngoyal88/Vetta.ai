@@ -5,8 +5,8 @@ import { decodeJsonMessage, encodeJsonMessage } from "./utils/messageCodec";
 import toast from "react-hot-toast";
 import type { TransportOptions } from "../types";
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
-const isDev = process.env.NODE_ENV !== "production";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const isDev = import.meta.env.DEV;
 
 export const useTransportConnection = (options: TransportOptions) => {
   const optionsRef = useRef(options);
@@ -60,7 +60,7 @@ export const useTransportConnection = (options: TransportOptions) => {
       }
 
       const { token: lkToken, url: lkUrl } = await tokenRes.json();
-      const wsUrl = (lkUrl || process.env.REACT_APP_LIVEKIT_URL || "").trim();
+      const wsUrl = (lkUrl || import.meta.env.VITE_LIVEKIT_URL || "").trim();
       if (!wsUrl) throw new Error("LiveKit URL is not configured");
 
       const room = new Room();
