@@ -16,6 +16,7 @@ aiofiles
 ### Database & caching
 redis==5.0.2
 firebase_admin
+supabase>=2.0.0
 
 ### Document / resume parsing
 PyPDF2==3.0.1

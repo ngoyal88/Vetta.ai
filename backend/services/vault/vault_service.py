@@ -180,9 +180,11 @@ async def add_version(
         "source_filename": None,
         "content_type": None,
         "has_source_file": False,
+        "storage_path": None,
+        "storage_backend": None,
     }
     if source_blob and source_filename:
-        await asyncio.to_thread(
+        storage_path, resolved_content_type, storage_backend = await asyncio.to_thread(
             file_storage.save_version_file,
             uid,
             resume_id,
@@ -192,8 +194,10 @@ async def add_version(
         )
         file_meta = {
             "source_filename": source_filename,
-            "content_type": content_type or file_storage.content_type_for_filename(source_filename),
+            "content_type": content_type or resolved_content_type,
             "has_source_file": True,
+            "storage_path": storage_path,
+            "storage_backend": storage_backend,
         }
 
     version_data = {
@@ -209,29 +213,42 @@ async def add_version(
         **file_meta,
     }
 
-    _versions_collection(uid, resume_id).document(version_id).set(version_data)
+    try:
+        _versions_collection(uid, resume_id).document(version_id).set(version_data)
 
-    score_history = list(entry.get("score_history") or [])
-    score_history.append(
-        _build_score_point(
-            version_number,
-            scorecard.score,
-            version_id=version_id,
-            action="upload",
-            role=role,
-            created_at=now,
+        score_history = list(entry.get("score_history") or [])
+        score_history.append(
+            _build_score_point(
+                version_number,
+                scorecard.score,
+                version_id=version_id,
+                action="upload",
+                role=role,
+                created_at=now,
+            )
         )
-    )
 
-    entry_update = {
-        "current_version_id": version_id,
-        "version_count": version_number,
-        "last_updated": now,
-        "scorecard": scorecard.model_dump(),
-        "score_history": score_history,
-    }
+        entry_update = {
+            "current_version_id": version_id,
+            "version_count": version_number,
+            "last_updated": now,
+            "scorecard": scorecard.model_dump(),
+            "score_history": score_history,
+        }
 
-    _vault_collection(uid).document(resume_id).set(entry_update, merge=True)
+        _vault_collection(uid).document(resume_id).set(entry_update, merge=True)
+    except Exception:
+        if file_meta.get("has_source_file"):
+            await asyncio.to_thread(
+                file_storage.delete_version_file,
+                uid,
+                resume_id,
+                version_id,
+                source_filename,
+                storage_path=file_meta.get("storage_path"),
+                storage_backend=file_meta.get("storage_backend"),
+            )
+        raise
 
     return version_data, scorecard
 
@@ -376,6 +393,18 @@ async def delete_resume_entry(uid: str, resume_id: str) -> None:
     deleted_was_active = previous_active_id == resume_id or bool((deleted_entry or {}).get("is_active"))
 
     versions = await list_versions(uid, resume_id)
+    for version in versions:
+        if version.get("has_source_file"):
+            await asyncio.to_thread(
+                file_storage.delete_version_file,
+                uid,
+                resume_id,
+                version["id"],
+                version.get("source_filename"),
+                storage_path=version.get("storage_path"),
+                storage_backend=version.get("storage_backend"),
+            )
+
     batch = db.batch()
     for version in versions:
         ref = _versions_collection(uid, resume_id).document(version["id"])

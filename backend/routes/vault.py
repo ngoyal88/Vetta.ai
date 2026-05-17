@@ -344,9 +344,14 @@ async def download_version_file(version_id: str, uid: str = Depends(verify_fireb
             resume_id,
             version_id,
             source_filename,
+            storage_path=version.get("storage_path"),
+            storage_backend=version.get("storage_backend"),
         )
     except FileNotFoundError:
         raise HTTPException(404, "Stored file not found") from None
+    except RuntimeError as exc:
+        logger.warning("Vault file storage unavailable for uid=%s version_id=%s: %s", uid, version_id, exc)
+        raise HTTPException(503, "Resume file storage is not available") from exc
 
     media_type = version.get("content_type") or file_storage.content_type_for_filename(source_filename)
     headers = {}
