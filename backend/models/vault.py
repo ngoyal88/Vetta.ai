@@ -96,6 +96,8 @@ class ResumeVersion(BaseModel):
     source_filename: Optional[str] = None
     content_type: Optional[str] = None
     has_source_file: bool = False
+    storage_path: Optional[str] = None
+    storage_backend: Optional[str] = None
 
 
 class VaultEntry(BaseModel):

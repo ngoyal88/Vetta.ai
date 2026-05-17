@@ -45,8 +45,13 @@ class Settings(BaseSettings):
     firebase_project_id: str = ""
     firebase_credentials_path: str = "serviceAccount.json"
 
-    # Vault source files (PDF/DOCX/TXT) on local disk — no Firebase Storage required.
+    # Local vault files when Supabase is not configured (dev). Also used as on-disk mirror path segment.
     vault_storage_dir: str = "data/vault"
+
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_role_key: str = ""
+    supabase_vault_bucket: str = "Resume"
 
     api_token: str = os.getenv("API_TOKEN", "")
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "")
