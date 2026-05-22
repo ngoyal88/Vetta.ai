@@ -41,10 +41,10 @@ export const MODE_CARDS: ModeCardDefinition[] = [
     title: "Role-targeted",
     tagline: "Company · role · seniority",
     summary:
-      "Describe the job you are preparing for—not just “backend,” but backend at a given archetype with the right bar and focus areas. The session follows that lens so questions emphasize the systems and tradeoffs that interview loop actually cares about.",
+      "Target a company and role—not just “backend,” but the loop you are actually preparing for. Add a job description when you have one; otherwise the session uses role archetype, focus, and your resume.",
     highlights: [
       "Questions weighted toward the stack and failure modes that matter for that seat.",
-      "Calibrated difficulty so follow-ups feel like a real loop, not a generic rubric.",
+      "Optional JD tightens alignment; role + company + resume are enough to start.",
     ],
     comingSoon: false,
   },

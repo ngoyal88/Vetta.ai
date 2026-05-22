@@ -9,6 +9,13 @@ export type StartInterviewResponse = {
   [key: string]: unknown;
 };
 
+export type StartInterviewTargetContext = {
+  targetCompany?: string | null;
+  targetRole?: string | null;
+  jobDescription?: string | null;
+  interviewFocus?: string | null;
+};
+
 export type SubmitCodeResponse = {
   passed?: boolean;
   tests_passed?: number;
@@ -30,6 +37,12 @@ export type SubmitCodeResponse = {
   [key: string]: unknown;
 };
 
+export type TranscriptLine = {
+  speaker: string;
+  text: string;
+  timestamp?: string;
+};
+
 export type InterviewHistoryItem = {
   id?: string;
   session_id?: string;
@@ -39,7 +52,12 @@ export type InterviewHistoryItem = {
   status?: string;
   interview_type?: string;
   custom_role?: string;
+  target_role?: string;
+  target_company?: string;
+  interview_focus?: string;
   difficulty?: string;
+  duration_minutes?: number;
+  questions_answered?: number;
   candidate_name?: string;
   scores?: {
     overall?: number;
@@ -47,6 +65,7 @@ export type InterviewHistoryItem = {
   };
   feedback?: string | { feedback?: string; text?: string; generated_at?: string; generatedAt?: string } | null;
   final_feedback?: string | { feedback?: string; text?: string; generated_at?: string; generatedAt?: string } | null;
+  live_transcription?: TranscriptLine[];
   [key: string]: unknown;
 };
 
@@ -72,6 +91,7 @@ const startInterview = async (
   customRole: string | null = null,
   candidateName: string | null = null,
   yearsExperience: number | null = null,
+  targetContext: StartInterviewTargetContext = {},
 ): Promise<StartInterviewResponse> => {
   const response = await fetch(`${API_URL}/interview/start`, {
     method: "POST",
@@ -84,10 +104,23 @@ const startInterview = async (
       resume_data: resumeData,
       candidate_name: candidateName,
       years_experience: yearsExperience,
+      target_company: targetContext.targetCompany,
+      target_role: targetContext.targetRole ?? customRole,
+      job_description: targetContext.jobDescription,
+      interview_focus: targetContext.interviewFocus,
     }),
   });
 
-  if (!response.ok) throw new Error("Failed to start interview");
+  if (!response.ok) {
+    let message = "Failed to start interview";
+    try {
+      const errorBody = await response.json();
+      if (typeof errorBody?.detail === "string") message = errorBody.detail;
+    } catch {
+      // Keep the generic message if the server did not return JSON.
+    }
+    throw new Error(message);
+  }
   return response.json() as Promise<StartInterviewResponse>;
 };
 
