@@ -1,9 +1,12 @@
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, List
 from utils.logger import get_logger
 from services.interview.llm_engine import LLMEngine
+from services.interview.transcript_service import extract_live_transcription
 
 logger = get_logger("FeedbackService")
+
+_TRANSCRIPT_TURN_LIMIT = 40
 
 class FeedbackService:
     def __init__(self, engine:LLMEngine):
@@ -24,6 +27,44 @@ class FeedbackService:
         )
         return any(m in t for m in markers)
 
+    def _format_transcript_summary(self, lines: List[Dict[str, Any]], limit: int = _TRANSCRIPT_TURN_LIMIT) -> str:
+        parts: List[str] = []
+        for entry in lines[-limit:]:
+            if not isinstance(entry, dict):
+                continue
+            speaker = str(entry.get("speaker") or entry.get("role") or "").lower()
+            text = str(entry.get("text") or "").strip()[:500]
+            if not text:
+                continue
+            label = "Candidate" if speaker == "candidate" else "Interviewer"
+            parts.append(f"{label}: {text}")
+        return "\n\n".join(parts)
+
+    def _build_conversation_summary(self, session_data: Dict) -> str:
+        from services.interview.interview_service import _extract_question_text
+
+        responses = session_data.get("responses", []) or []
+        if responses:
+            qa_summary_parts = []
+            for i, qa in enumerate(responses):
+                q_entry = qa.get("question", {})
+                q_text = _extract_question_text(q_entry)
+                a_text = str(qa.get("response", "") or "")[:300]
+                qa_summary_parts.append(f"Q{i + 1}: {q_text}\nA{i + 1}: {a_text}")
+            return "\n\n".join(qa_summary_parts)
+
+        live = session_data.get("live_transcription")
+        if isinstance(live, list) and live:
+            summary = self._format_transcript_summary(live)
+            if summary:
+                return summary
+
+        extracted = extract_live_transcription(session_data)
+        if extracted:
+            return self._format_transcript_summary(extracted)
+
+        return ""
+
     def _fallback_feedback(self, session_data: Dict) -> str:
         responses = session_data.get("responses", []) or []
         return (
@@ -40,19 +81,15 @@ class FeedbackService:
         session_data: Dict
     ) -> Dict[str, Any]:
         """Generate comprehensive final feedback"""
-        from services.interview.interview_service import _extract_question_text
-
-        qa_summary_parts = []
-        for i, qa in enumerate(session_data.get('responses', [])):
-            q_entry = qa.get('question', {})
-            q_text = _extract_question_text(q_entry)
-            a_text = qa.get('response', '')[:300]
-            qa_summary_parts.append(f"Q{i+1}: {q_text}\nA{i+1}: {a_text}")
-        qa_summary = "\n\n".join(qa_summary_parts)
+        qa_summary = self._build_conversation_summary(session_data)
 
         prompt = f"""Provide interview feedback:
 
 Type: {session_data.get('interview_type')}
+Target Company: {session_data.get('target_company') or ''}
+Target Role: {session_data.get('target_role') or session_data.get('custom_role') or ''}
+Interview Focus: {session_data.get('interview_focus') or ''}
+JD Fit Context: {session_data.get('jd_fit_context') or {}}
 Duration: {session_data.get('duration', 0)} minutes
 Questions Answered: {len(session_data.get('responses', []))}
 
@@ -79,6 +116,9 @@ AREAS FOR IMPROVEMENT:
 - [area 1 with specific action]
 - [area 2 with specific action]
 - [area 3 with specific action]
+
+ROLE READINESS:
+[If this was role_targeted, give role readiness for the target JD/company, top gaps, and the next focused practice plan. Otherwise keep this brief.]
 
 RECOMMENDATION: [Hire / Strong Maybe / Needs Improvement]
 [One sentence rationale]"""

@@ -17,6 +17,7 @@ from firebase_config import db
 from models.interview import DifficultyLevel, InterviewType
 from services.interview.interview_service import InterviewService
 from services.interview.session_conductor import SessionConductor
+from services.interview.transcript_service import attach_transcript_to_session, extract_assistant_transcript_text
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
 from redis.asyncio import Redis
@@ -128,6 +129,30 @@ def _build_system_prompt(session_data: Dict[str, Any], conductor: SessionConduct
     difficulty = str(session_data.get("difficulty") or "medium")
     custom_role = (session_data.get("custom_role") or "").strip()
     role_line = f"Custom role focus: {custom_role}" if custom_role else "Custom role focus: none"
+    target_company = session_data.get("target_company") or ""
+    target_role = session_data.get("target_role") or ""
+    interview_focus = session_data.get("interview_focus") or ""
+    jd_fit_context = session_data.get("jd_fit_context") or {}
+    jd_summary = jd_fit_context.get("summary") if isinstance(jd_fit_context, dict) else ""
+    probing_areas = jd_fit_context.get("probing_areas") if isinstance(jd_fit_context, dict) else []
+    target_lines = ""
+    if target_role or target_company:
+        target_lines = (
+            f"\nTarget company: {target_company or 'not specified'}"
+            f"\nTarget role: {target_role or custom_role or 'not specified'}"
+            f"\nInterview focus: {interview_focus or 'mixed'}"
+        )
+    if jd_summary:
+        target_lines += f"\nJD fit summary: {jd_summary}"
+    if isinstance(probing_areas, list) and probing_areas:
+        target_lines += f"\nPriority probing areas: {', '.join([str(p) for p in probing_areas[:6]])}"
+
+    role_targeted_rule = ""
+    if str(interview_type).lower() == "role_targeted":
+        role_targeted_rule = (
+            "\nThis is a role-targeted loop: stay anchored to the target company, role, "
+            "any job description provided, and probing areas. Do not drift into generic trivia."
+        )
 
     return f"""You are a senior software engineer conducting a real technical interview.
 You are not a question dispenser. You are a person having a conversation.
@@ -151,6 +176,7 @@ Candidate: {candidate_name}
 Interview type: {interview_type}
 Difficulty: {difficulty}
 {role_line}
+{target_lines}{role_targeted_rule}
 """
 
 
@@ -277,12 +303,15 @@ async def _run_evaluation_async(
 
 
 async def _handle_agent_turn(session_id: str, text: str) -> None:
+    clean = (text or "").strip()
+    if not clean:
+        return
     session_key = f"interview:{session_id}"
     session_data = await _get_session(session_key)
     if not session_data:
         return
     conductor = SessionConductor.load(session_data.get("session_conductor"))
-    conductor.append_turn("interviewer", text)
+    conductor.append_turn("interviewer", clean)
     session_data["session_conductor"] = conductor.serialize()
     await _update_session(session_key, session_data)
 
@@ -465,6 +494,13 @@ async def _handle_skip_question(
             session_data.get("resume_data"),
             session_data.get("custom_role"),
             session_data.get("years_experience"),
+            target_context={
+                "target_company": session_data.get("target_company"),
+                "target_role": session_data.get("target_role"),
+                "job_description": session_data.get("job_description"),
+                "interview_focus": session_data.get("interview_focus"),
+                "jd_fit_context": session_data.get("jd_fit_context"),
+            },
         )
         next_question_raw = await interview_service._generate_dsa_question(difficulty, context)
         next_question_obj = {
@@ -488,7 +524,20 @@ async def _handle_skip_question(
         })
         return
 
-    follow_up_text = await interview_service.generate_follow_up(responses, interview_type)
+    context = interview_service._build_context(
+        interview_type,
+        session_data.get("resume_data"),
+        session_data.get("custom_role"),
+        session_data.get("years_experience"),
+        target_context={
+            "target_company": session_data.get("target_company"),
+            "target_role": session_data.get("target_role"),
+            "job_description": session_data.get("job_description"),
+            "interview_focus": session_data.get("interview_focus"),
+            "jd_fit_context": session_data.get("jd_fit_context"),
+        },
+    )
+    follow_up_text = await interview_service.generate_follow_up(responses, interview_type, llm_context=context)
     next_question_obj = {
         "question": {"question": follow_up_text},
         "type": interview_type.value,
@@ -544,12 +593,20 @@ async def _handle_end_interview(
         started_at = datetime.now(timezone.utc)
 
     duration_minutes = int(max(0, (datetime.now(timezone.utc) - started_at).total_seconds() / 60))
+    attach_transcript_to_session(session_data)
     feedback_payload = {
         "interview_type": session_data.get("interview_type"),
         "custom_role": session_data.get("custom_role"),
+        "target_company": session_data.get("target_company"),
+        "target_role": session_data.get("target_role"),
+        "job_description": session_data.get("job_description"),
+        "interview_focus": session_data.get("interview_focus"),
+        "jd_fit_context": session_data.get("jd_fit_context"),
         "duration": duration_minutes,
         "responses": session_data.get("responses", []),
         "code_submissions": session_data.get("code_submissions", []),
+        "live_transcription": session_data.get("live_transcription", []),
+        "session_conductor": session_data.get("session_conductor"),
     }
     final_feedback = await interview_service.generate_final_feedback(feedback_payload)
     scores = parse_scores_from_feedback(
@@ -566,6 +623,7 @@ async def _handle_end_interview(
         "duration_minutes": duration_minutes,
         "questions_answered": len(session_data.get("responses", [])),
         "code_problems_attempted": len(session_data.get("code_submissions", [])),
+        "live_transcription": session_data.get("live_transcription", []),
     })
     await _update_session(session_key, session_data)
 
@@ -581,6 +639,7 @@ async def _handle_end_interview(
             "responses": session_data.get("responses", []),
             "questions": session_data.get("questions", []),
             "code_submissions": session_data.get("code_submissions", []),
+            "live_transcription": session_data.get("live_transcription", []),
             "final_feedback": final_feedback,
             "scores": scores,
         }, merge=True)
@@ -620,6 +679,7 @@ async def _handle_candidate_disconnect(
     completed_ts = datetime.now(timezone.utc).isoformat()
     session_data["completed_at"] = completed_ts
     session_data["last_updated"] = completed_ts
+    attach_transcript_to_session(session_data)
 
     responses = session_data.get("responses", []) or []
     if len(responses) >= 2:
@@ -639,9 +699,16 @@ async def _handle_candidate_disconnect(
             feedback_payload = {
                 "interview_type": session_data.get("interview_type"),
                 "custom_role": session_data.get("custom_role"),
+                "target_company": session_data.get("target_company"),
+                "target_role": session_data.get("target_role"),
+                "job_description": session_data.get("job_description"),
+                "interview_focus": session_data.get("interview_focus"),
+                "jd_fit_context": session_data.get("jd_fit_context"),
                 "duration": duration_minutes,
                 "responses": responses,
                 "code_submissions": session_data.get("code_submissions", []),
+                "live_transcription": session_data.get("live_transcription", []),
+                "session_conductor": session_data.get("session_conductor"),
             }
             final_feedback = await asyncio.wait_for(
                 interview_service.generate_final_feedback(feedback_payload), 45.0
@@ -669,6 +736,7 @@ async def _handle_candidate_disconnect(
             "responses": session_data.get("responses", []),
             "questions": session_data.get("questions", []),
             "code_submissions": session_data.get("code_submissions", []),
+            "live_transcription": session_data.get("live_transcription", []),
             "final_feedback": session_data.get("final_feedback"),
             "scores": scores,
         }, merge=True)
@@ -780,19 +848,14 @@ async def entrypoint(ctx: JobContext) -> None:
 
     def _on_conversation_item_added(ev: Any) -> None:
         item = getattr(ev, "item", None)
-        if item and getattr(item, "role", None) == "assistant":
-            content = getattr(item, "content", None) or getattr(item, "text", "") or ""
-            if isinstance(content, list):
-                content = " ".join(
-                    getattr(c, "text", "") or str(c) for c in content if hasattr(c, "text")
-                )
-            text = str(content).strip()
-            if text:
-                asyncio.create_task(_send_control(ctx.room, {
-                    "type": "ai_transcript",
-                    "text": text,
-                }))
-            asyncio.create_task(_handle_agent_turn(session_id, text))
+        text = extract_assistant_transcript_text(item)
+        if not text:
+            return
+        asyncio.create_task(_send_control(ctx.room, {
+            "type": "ai_transcript",
+            "text": text,
+        }))
+        asyncio.create_task(_handle_agent_turn(session_id, text))
 
     def _on_error(ev: Any) -> None:
         err = getattr(ev, "error", ev) if hasattr(ev, "error") else ev
@@ -903,7 +966,7 @@ async def entrypoint(ctx: JobContext) -> None:
             or _extract_resume_name(session_data.get("resume_data"))
             or "Candidate"
         )
-        role = session_data.get("custom_role") or session_data.get("interview_type", "technical")
+        role = session_data.get("target_role") or session_data.get("custom_role") or session_data.get("interview_type", "technical")
         greeting = await interview_service.generate_greeting(candidate_name, role)
         await session.say(greeting)
 

@@ -12,6 +12,7 @@ from firebase_admin import firestore
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewType
 from services.interview.session_conductor import SessionConductor
+from services.interview.transcript_service import attach_transcript_to_session
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
 from utils.redis_client import get_session, redis as redis_client, update_session
@@ -142,7 +143,28 @@ class InterviewSessionEngine:
 
     async def _prebuild_llm_context_async(self) -> None:
         try:
-            self._prebuilt_context = self.conductor.build_llm_context()
+            session_data = await get_session(self.session_key)
+            static_context = ""
+            if session_data:
+                try:
+                    interview_type = InterviewType(session_data.get("interview_type", "dsa"))
+                except Exception:
+                    interview_type = InterviewType.DSA
+                static_context = self.interview_service._build_context(
+                    interview_type,
+                    session_data.get("resume_data"),
+                    session_data.get("custom_role"),
+                    session_data.get("years_experience"),
+                    target_context={
+                        "target_company": session_data.get("target_company"),
+                        "target_role": session_data.get("target_role"),
+                        "job_description": session_data.get("job_description"),
+                        "interview_focus": session_data.get("interview_focus"),
+                        "jd_fit_context": session_data.get("jd_fit_context"),
+                    },
+                )
+            dynamic_context = self.conductor.build_llm_context()
+            self._prebuilt_context = "\n\n".join([part for part in [static_context, dynamic_context] if part])
         except Exception:
             self._prebuilt_context = None
 
@@ -224,6 +246,13 @@ class InterviewSessionEngine:
                     session_data.get("resume_data"),
                     session_data.get("custom_role"),
                     session_data.get("years_experience"),
+                    target_context={
+                        "target_company": session_data.get("target_company"),
+                        "target_role": session_data.get("target_role"),
+                        "job_description": session_data.get("job_description"),
+                        "interview_focus": session_data.get("interview_focus"),
+                        "jd_fit_context": session_data.get("jd_fit_context"),
+                    },
                 )
                 next_question_raw = await self.interview_service._generate_dsa_question(difficulty, context)
                 next_question_obj = {
@@ -232,7 +261,24 @@ class InterviewSessionEngine:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             else:
-                follow_up_text = await self.interview_service.generate_follow_up(responses, interview_type)
+                context = self.interview_service._build_context(
+                    interview_type,
+                    session_data.get("resume_data"),
+                    session_data.get("custom_role"),
+                    session_data.get("years_experience"),
+                    target_context={
+                        "target_company": session_data.get("target_company"),
+                        "target_role": session_data.get("target_role"),
+                        "job_description": session_data.get("job_description"),
+                        "interview_focus": session_data.get("interview_focus"),
+                        "jd_fit_context": session_data.get("jd_fit_context"),
+                    },
+                )
+                follow_up_text = await self.interview_service.generate_follow_up(
+                    responses,
+                    interview_type,
+                    llm_context=context,
+                )
                 next_question_obj = {
                     "question": {"question": follow_up_text},
                     "type": interview_type.value,
@@ -288,6 +334,13 @@ class InterviewSessionEngine:
                 session_data.get("resume_data"),
                 session_data.get("custom_role"),
                 session_data.get("years_experience"),
+                target_context={
+                    "target_company": session_data.get("target_company"),
+                    "target_role": session_data.get("target_role"),
+                    "job_description": session_data.get("job_description"),
+                    "interview_focus": session_data.get("interview_focus"),
+                    "jd_fit_context": session_data.get("jd_fit_context"),
+                },
             )
             next_question_raw = await self.interview_service._generate_dsa_question(difficulty, context)
             next_question_obj = {
@@ -352,12 +405,20 @@ class InterviewSessionEngine:
                 started_at = datetime.now(timezone.utc)
 
             duration_minutes = int(max(0, (datetime.now(timezone.utc) - started_at).total_seconds() / 60))
+            attach_transcript_to_session(session_data)
             feedback_payload = {
                 "interview_type": session_data.get("interview_type"),
                 "custom_role": session_data.get("custom_role"),
+                "target_company": session_data.get("target_company"),
+                "target_role": session_data.get("target_role"),
+                "job_description": session_data.get("job_description"),
+                "interview_focus": session_data.get("interview_focus"),
+                "jd_fit_context": session_data.get("jd_fit_context"),
                 "duration": duration_minutes,
                 "responses": session_data.get("responses", []),
                 "code_submissions": session_data.get("code_submissions", []),
+                "live_transcription": session_data.get("live_transcription", []),
+                "session_conductor": session_data.get("session_conductor"),
             }
             final_feedback = await self.interview_service.generate_final_feedback(feedback_payload)
             scores = parse_scores_from_feedback(
@@ -367,7 +428,7 @@ class InterviewSessionEngine:
             completion_reason = "ended_early" if session_data.get("status") != "completed" else "completed"
             completed_ts = datetime.now(timezone.utc).isoformat()
 
-            session_data["status"] = "ended_early"
+            session_data["status"] = completion_reason
             session_data["completion_reason"] = completion_reason
             session_data["completed_at"] = completed_ts
             session_data["last_updated"] = completed_ts
@@ -375,13 +436,14 @@ class InterviewSessionEngine:
             session_data["duration_minutes"] = duration_minutes
             session_data["questions_answered"] = len(session_data.get("responses", []))
             session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
+            session_data["live_transcription"] = session_data.get("live_transcription", [])
             session_data["session_conductor"] = self.conductor.serialize()
             await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
 
             try:
                 db.collection("interviews").document(self.session_id).set(
                     {
-                        "status": "ended_early",
+                        "status": completion_reason,
                         "completion_reason": completion_reason,
                         "completed_at": firestore.SERVER_TIMESTAMP,
                         "last_updated": firestore.SERVER_TIMESTAMP,
@@ -391,6 +453,7 @@ class InterviewSessionEngine:
                         "responses": session_data.get("responses", []),
                         "questions": session_data.get("questions", []),
                         "code_submissions": session_data.get("code_submissions", []),
+                        "live_transcription": session_data.get("live_transcription", []),
                         "final_feedback": final_feedback,
                         "scores": scores or None,
                     },
@@ -407,7 +470,7 @@ class InterviewSessionEngine:
                     "duration_minutes": duration_minutes,
                     "questions_answered": session_data["questions_answered"],
                     "code_problems_attempted": session_data["code_problems_attempted"],
-                    "status": "ended_early",
+                    "status": completion_reason,
                     "timestamp": completed_ts,
                 }
             )
@@ -434,6 +497,7 @@ class InterviewSessionEngine:
             completed_ts = datetime.now(timezone.utc).isoformat()
             session_data["completed_at"] = completed_ts
             session_data["last_updated"] = completed_ts
+            attach_transcript_to_session(session_data)
             turn_count = len(session_data.get("responses", []))
             if turn_count >= 2:
                 try:
@@ -452,9 +516,16 @@ class InterviewSessionEngine:
                     feedback_payload = {
                         "interview_type": session_data.get("interview_type"),
                         "custom_role": session_data.get("custom_role"),
+                        "target_company": session_data.get("target_company"),
+                        "target_role": session_data.get("target_role"),
+                        "job_description": session_data.get("job_description"),
+                        "interview_focus": session_data.get("interview_focus"),
+                        "jd_fit_context": session_data.get("jd_fit_context"),
                         "duration": duration_minutes,
                         "responses": session_data.get("responses", []),
                         "code_submissions": session_data.get("code_submissions", []),
+                        "live_transcription": session_data.get("live_transcription", []),
+                        "session_conductor": session_data.get("session_conductor"),
                     }
                     final_feedback = await asyncio.wait_for(
                         self.interview_service.generate_final_feedback(feedback_payload),
@@ -465,6 +536,7 @@ class InterviewSessionEngine:
                     logger.warning("Partial feedback generation failed: %s", e)
             session_data["questions_answered"] = len(session_data.get("responses", []))
             session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
+            session_data["live_transcription"] = session_data.get("live_transcription", [])
             await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
             try:
                 scores = parse_scores_from_feedback(
@@ -483,6 +555,7 @@ class InterviewSessionEngine:
                         "responses": session_data.get("responses", []),
                         "questions": session_data.get("questions", []),
                         "code_submissions": session_data.get("code_submissions", []),
+                        "live_transcription": session_data.get("live_transcription", []),
                         "final_feedback": session_data.get("final_feedback"),
                         "scores": scores,
                     },
@@ -490,8 +563,8 @@ class InterviewSessionEngine:
                 )
             except Exception as fe:
                 logger.warning("Firestore persist on disconnect failed: %s", fe)
-        finally:
-            pass
+        except Exception as e:
+            logger.warning("Candidate disconnect handling failed: %s", e)
 
     async def on_candidate_reconnect(self) -> None:
         session_data = await get_session(self.session_key)
@@ -642,7 +715,7 @@ class InterviewSessionEngine:
             )
             interview_type = session_data.get("interview_type", "technical")
             custom_role = session_data.get("custom_role")
-            role = custom_role or interview_type
+            role = session_data.get("target_role") or custom_role or interview_type
 
             greeting = await self.interview_service.generate_greeting(user_name, role)
             self._first_question = first_question
