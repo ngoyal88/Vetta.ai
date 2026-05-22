@@ -8,6 +8,7 @@ from models.interview import DifficultyLevel, InterviewType
 from services.interview.answer_evaluator import AnswerEvaluator
 from services.interview.answer_processor import AnswerProcessor
 from services.interview.feedback_service import FeedbackService
+from services.interview.jd_context_service import JDContextService
 from services.interview.llm_engine import LLMEngine
 from services.interview.prompt_engine import PromptEngine
 from services.interview.question_service import QuestionService
@@ -82,6 +83,7 @@ class InterviewService:
 
         self._prompt = PromptEngine(self._engine)
         self._questions = QuestionService(self._engine)
+        self._jd_context = JDContextService(self._engine)
         self._evaluator = AnswerEvaluator(self._engine)
         self._feedback = FeedbackService(self._engine)
         self._answers = AnswerProcessor(self._prompt, session_ttl)
@@ -110,8 +112,15 @@ class InterviewService:
         resume_data: Dict = None,
         custom_role: str = None,
         years_experience: Optional[int] = None,
+        target_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        context = self._prompt._build_context(interview_type, resume_data, custom_role, years_experience)
+        context = self._prompt._build_context(
+            interview_type,
+            resume_data,
+            custom_role,
+            years_experience,
+            target_context=target_context,
+        )
         return await self._questions.generate_first_question(interview_type, difficulty, context, custom_role)
 
     def _build_context(
@@ -120,8 +129,34 @@ class InterviewService:
         resume_data: Dict = None,
         custom_role: str = None,
         years_experience: Optional[int] = None,
+        target_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        return self._prompt._build_context(interview_type, resume_data, custom_role, years_experience)
+        return self._prompt._build_context(
+            interview_type,
+            resume_data,
+            custom_role,
+            years_experience,
+            target_context=target_context,
+        )
+
+    async def build_jd_fit_context(
+        self,
+        *,
+        target_company: Optional[str],
+        target_role: str,
+        job_description: str,
+        interview_focus: str,
+        resume_data: Optional[Dict[str, Any]] = None,
+        years_experience: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return await self._jd_context.build_context(
+            target_company=target_company,
+            target_role=target_role,
+            job_description=job_description,
+            interview_focus=interview_focus,
+            resume_data=resume_data,
+            years_experience=years_experience,
+        )
 
     async def _generate_dsa_question(self, difficulty: DifficultyLevel, context: str) -> Dict[str, Any]:
         return await self._questions._generate_dsa_question(difficulty, context)

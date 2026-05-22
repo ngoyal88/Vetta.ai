@@ -85,7 +85,14 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
         )
 
 
-    def _build_context(self, interview_type: InterviewType, resume_data: Dict = None, custom_role: str = None, years_experience: Optional[int] = None) -> str:
+    def _build_context(
+        self,
+        interview_type: InterviewType,
+        resume_data: Dict = None,
+        custom_role: str = None,
+        years_experience: Optional[int] = None,
+        target_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Build context from resume data. Supports legacy (list of {name}) and LLM profile (skills dict, projects list of dicts)."""
         context = ""
 
@@ -130,6 +137,36 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
 
         if years_experience is not None:
             context += f"\nYears of Experience: {years_experience}"
+
+        if target_context:
+            target_company = target_context.get("target_company")
+            target_role = target_context.get("target_role")
+            interview_focus = target_context.get("interview_focus")
+            jd_fit = target_context.get("jd_fit_context") or {}
+            job_description = (target_context.get("job_description") or "")[:1800]
+            context += "\n\nROLE-TARGETED CONTEXT:"
+            if target_company:
+                context += f"\nTarget Company: {target_company}"
+            if target_role:
+                context += f"\nTarget Role: {target_role}"
+            if interview_focus:
+                context += f"\nInterview Focus: {str(interview_focus).replace('_', ' ')}"
+            if job_description:
+                context += f"\nJob Description Excerpt: {job_description}"
+            if isinstance(jd_fit, dict):
+                summary = jd_fit.get("summary")
+                if summary:
+                    context += f"\nJD Fit Summary: {summary}"
+                for label, key in (
+                    ("Required Skills", "required_skills"),
+                    ("Candidate Strengths", "candidate_strengths"),
+                    ("Candidate Gaps", "candidate_gaps"),
+                    ("Probing Areas", "probing_areas"),
+                    ("Interview Plan", "interview_plan"),
+                ):
+                    values = jd_fit.get(key)
+                    if isinstance(values, list) and values:
+                        context += f"\n{label}: {', '.join([str(v) for v in values[:6]])}"
 
         return context
 

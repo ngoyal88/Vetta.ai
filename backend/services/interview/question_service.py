@@ -30,6 +30,9 @@ class QuestionService:
         elif interview_type == InterviewType.CUSTOM:
             q = await self._generate_custom_role_question(custom_role, difficulty, context)
             return {"question": q, "type": "custom_role", "timestamp": datetime.now(timezone.utc).isoformat()}
+        elif interview_type == InterviewType.ROLE_TARGETED:
+            q = await self._generate_role_targeted_question(difficulty, context)
+            return {"question": q, "type": "role_targeted", "timestamp": datetime.now(timezone.utc).isoformat()}
         else:
             q = await self._generate_general_question(interview_type, difficulty, context)
             return {"question": q, "type": interview_type.value, "timestamp": datetime.now(timezone.utc).isoformat()}
@@ -266,6 +269,57 @@ Return ONLY valid JSON:
                 'question': response,
                 'evaluation_criteria': '',
                 'difficulty': difficulty.value
+            }
+
+    async def _generate_role_targeted_question(
+        self,
+        difficulty: DifficultyLevel,
+        context: str,
+    ) -> Dict[str, Any]:
+        focus_hint = (
+            "Prioritize behavioral scenarios, ownership, and collaboration signals from the JD."
+            if "Interview Focus: behavioral" in context
+            else "Prioritize system design tradeoffs, scalability, and architecture decisions from the JD."
+            if "Interview Focus: system design" in context
+            else "Prioritize an algorithmic or data-structure problem suitable for a spoken interview "
+            "(describe the problem clearly; do not require an IDE)."
+            if "Interview Focus: dsa" in context
+            else "Prioritize hands-on technical depth tied to stack/tools named in the JD."
+            if "Interview Focus: technical" in context
+            else "Balance technical depth and behavioral signals according to the JD and probing areas."
+        )
+        prompt = f"""You are starting a job-specific interview.
+Difficulty: {difficulty.value}
+{context}
+
+Generate ONE opening interview question. It must be specific to the target role (and company, if given) and should probe either a candidate strength or likely gap.
+{focus_hint}
+
+Return ONLY valid JSON:
+{{
+    "question": "Your question here",
+    "evaluation_criteria": "What to look for in a strong answer"
+}}"""
+        response = await self._engine.generate_raw(prompt, 0.65, empty_fallback="{}")
+        try:
+            resp = response.strip().strip('`').strip()
+            if resp.lower().startswith('json'):
+                resp = resp[4:]
+            start = resp.find('{')
+            end = resp.rfind('}') + 1
+            obj = json.loads(resp[start:end])
+            return {
+                "type": "role_targeted",
+                "question": obj.get("question", response),
+                "evaluation_criteria": obj.get("evaluation_criteria", ""),
+                "difficulty": difficulty.value,
+            }
+        except Exception:
+            return {
+                "type": "role_targeted",
+                "question": response,
+                "evaluation_criteria": "",
+                "difficulty": difficulty.value,
             }
 
     async def _generate_general_question(
