@@ -56,6 +56,9 @@ const Navbar = () => {
                 <NavLink to="/resume-vault" className={navLinkClass}>
                   Resume Vault
                 </NavLink>
+                <NavLink to="/history" className={navLinkClass}>
+                  History
+                </NavLink>
                 <NavLink to="/analytics" className={navLinkClass}>
                   Analytics
                 </NavLink>
@@ -158,6 +161,13 @@ const Navbar = () => {
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   Resume Vault
+                </NavLink>
+                <NavLink
+                  to="/history"
+                  className={navLinkClass}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  History
                 </NavLink>
                 <NavLink
                   to="/analytics"
