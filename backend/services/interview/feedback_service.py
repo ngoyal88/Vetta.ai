@@ -76,12 +76,55 @@ class FeedbackService:
             "Please re-run a short follow-up interview to generate complete scoring."
         )
 
+    def _insufficient_data_feedback(self, session_data: Dict, reason: str) -> str:
+        role = session_data.get("target_role") or session_data.get("custom_role") or "this role"
+        duration = session_data.get("duration", 0)
+        reason_copy = {
+            "silence_timeout": (
+                "The session ended because we did not receive a spoken response for about 3 minutes."
+            ),
+            "tab_away_timeout": (
+                "The session ended because you were away from the interview tab for more than 10 minutes."
+            ),
+            "candidate_disconnected": (
+                "The session ended because the connection was lost for an extended period."
+            ),
+        }.get(reason, "The session ended before enough conversation was captured.")
+        return (
+            "OVERALL PERFORMANCE:\n"
+            f"{reason_copy} "
+            "That can happen if the microphone was muted, the tab was in the background, or you needed more time.\n\n"
+            f"Duration: {duration} minutes\n"
+            "Questions Answered: 0\n\n"
+            "TECHNICAL SKILLS: N/A\n"
+            "Not enough spoken answers to assess technical depth.\n\n"
+            "COMMUNICATION: N/A\n"
+            "Not enough spoken answers to assess communication.\n\n"
+            "KEY STRENGTHS:\n"
+            "- Session started successfully\n\n"
+            "AREAS FOR IMPROVEMENT:\n"
+            "- Check microphone permissions before starting\n"
+            "- Stay on the interview tab while the AI is listening\n"
+            f"- Try a shorter retry focused on {role}\n\n"
+            "RECOMMENDATION: Retry\n"
+            "Start a fresh session when you are ready to speak."
+        )
+
     async def generate_final_feedback(
         self,
         session_data: Dict
     ) -> Dict[str, Any]:
         """Generate comprehensive final feedback"""
         qa_summary = self._build_conversation_summary(session_data)
+        completion_reason = str(session_data.get("completion_reason") or "").lower()
+        thin_session_reasons = {"silence_timeout", "tab_away_timeout", "candidate_disconnected"}
+        if completion_reason in thin_session_reasons and not qa_summary.strip():
+            text = self._insufficient_data_feedback(session_data, completion_reason)
+            return {
+                "feedback": text,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "completion_reason": completion_reason,
+            }
 
         prompt = f"""Provide interview feedback:
 

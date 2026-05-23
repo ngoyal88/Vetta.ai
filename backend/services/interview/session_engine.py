@@ -90,6 +90,9 @@ class InterviewSessionEngine:
         self._current_answer_started_at: Optional[float] = None
         self._streaming_llm_enabled = bool(getattr(settings, "streaming_llm_enabled", True))
         self._finalize_used_stream_followup = False
+        self._silence_watchdog_task: Optional[asyncio.Task] = None
+        self._last_user_speech_at: float = time.monotonic()
+        self._silence_tier: int = 0
 
     async def initialize(self, *, skip_greeting: bool = False) -> None:
         session_data = await get_session(self.session_key)
@@ -116,9 +119,14 @@ class InterviewSessionEngine:
         await self.transport.send_status("connected")
         if not skip_greeting:
             await self._start_greeting(session_data)
+        self._last_user_speech_at = time.monotonic()
+        self._silence_watchdog_task = asyncio.create_task(self._silence_watchdog_loop())
 
     async def on_transcript(self, text: str, is_final: bool, confidence: Optional[float] = None) -> None:
         await self.transport.send_transcript(text, is_final)
+        if is_final and len((text or "").strip()) >= 3:
+            self._last_user_speech_at = time.monotonic()
+            self._silence_tier = 0
         self._last_transcript_confidence = confidence if is_final else self._last_transcript_confidence
         if not is_final:
             self.latest_interim_transcript = text
@@ -371,7 +379,44 @@ class InterviewSessionEngine:
             logger.error("dsa_next_question error: %s", e, exc_info=True)
             await self.transport.send_error("Failed to load next question")
 
-    async def on_end_interview(self) -> None:
+    async def on_candidate_away(self) -> None:
+        session_data = await get_session(self.session_key)
+        if not session_data:
+            return
+        session_data["candidate_away_since"] = time.time()
+        session_data["silence_paused"] = True
+        self._silence_tier = 0
+        await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+
+    async def on_candidate_back(self) -> None:
+        session_data = await get_session(self.session_key)
+        if not session_data:
+            return
+        session_data["silence_paused"] = False
+        session_data.pop("candidate_away_since", None)
+        self._last_user_speech_at = time.monotonic()
+        self._silence_tier = 0
+        await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+        await self._emit_session_status(session_data)
+
+    async def _emit_session_status(self, session_data: Dict[str, Any]) -> None:
+        status = str(session_data.get("status") or "active")
+        ended = status in {"ended_early", "completed", "incomplete_exit"}
+        payload: Dict[str, Any] = {
+            "type": "session_status",
+            "status": "ended" if ended else "active",
+            "completion_reason": session_data.get("completion_reason"),
+        }
+        final_feedback = session_data.get("final_feedback")
+        if ended and final_feedback:
+            if isinstance(final_feedback, dict):
+                payload["final_feedback"] = final_feedback.get("feedback")
+                payload["full"] = final_feedback
+            else:
+                payload["final_feedback"] = final_feedback
+        await self.transport.send_message(payload)
+
+    async def on_end_interview(self, completion_reason: Optional[str] = None) -> None:
         if self.current_phase == InterviewPhase.ENDED.value:
             return
         feedback_lock_key = f"feedback_generating:{self.session_id}"
@@ -414,6 +459,7 @@ class InterviewSessionEngine:
                 "job_description": session_data.get("job_description"),
                 "interview_focus": session_data.get("interview_focus"),
                 "jd_fit_context": session_data.get("jd_fit_context"),
+                "completion_reason": completion_reason or session_data.get("completion_reason"),
                 "duration": duration_minutes,
                 "responses": session_data.get("responses", []),
                 "code_submissions": session_data.get("code_submissions", []),
@@ -425,7 +471,10 @@ class InterviewSessionEngine:
                 final_feedback.get("feedback") if isinstance(final_feedback, dict) else None
             )
 
-            completion_reason = "ended_early" if session_data.get("status") != "completed" else "completed"
+            if not completion_reason:
+                completion_reason = (
+                    "ended_early" if session_data.get("status") != "completed" else "completed"
+                )
             completed_ts = datetime.now(timezone.utc).isoformat()
 
             session_data["status"] = completion_reason
@@ -464,6 +513,15 @@ class InterviewSessionEngine:
 
             await self.transport.send_message(
                 {
+                    "type": "interview_ended",
+                    "completion_reason": completion_reason,
+                    "duration_minutes": duration_minutes,
+                    "questions_answered": session_data["questions_answered"],
+                    "timestamp": completed_ts,
+                }
+            )
+            await self.transport.send_message(
+                {
                     "type": "feedback",
                     "feedback": final_feedback.get("feedback") if isinstance(final_feedback, dict) else final_feedback,
                     "full": final_feedback,
@@ -471,6 +529,7 @@ class InterviewSessionEngine:
                     "questions_answered": session_data["questions_answered"],
                     "code_problems_attempted": session_data["code_problems_attempted"],
                     "status": completion_reason,
+                    "completion_reason": completion_reason,
                     "timestamp": completed_ts,
                 }
             )
@@ -581,8 +640,71 @@ class InterviewSessionEngine:
             await self.transport.send_message({"type": "silence_warning", "tier": 2, "seconds_silent": seconds_silent})
             await self.transport.speak("Would you like me to rephrase the question?", {})
         elif tier >= 3:
-            await self.transport.send_message({"type": "silence_warning", "tier": 3, "seconds_silent": seconds_silent})
-            await self.on_end_interview()
+            await self.transport.send_message({
+                "type": "silence_warning",
+                "tier": 3,
+                "seconds_silent": seconds_silent,
+                "ending": True,
+            })
+            await self.transport.speak(
+                "I haven't heard anything for a while, so I'll wrap up here and share what we have so far.",
+                {},
+            )
+            await self.on_end_interview(completion_reason="silence_timeout")
+
+    async def _silence_watchdog_loop(self) -> None:
+        tier1 = int(getattr(self.settings, "silence_tier1_seconds", 60))
+        tier2 = int(getattr(self.settings, "silence_tier2_seconds", 120))
+        tier3 = int(getattr(self.settings, "silence_tier3_seconds", 180))
+        away_max = int(getattr(self.settings, "candidate_away_max_seconds", 600))
+
+        while self.current_phase != InterviewPhase.ENDED.value:
+            await asyncio.sleep(5)
+            if self.current_phase in {InterviewPhase.FEEDBACK.value, InterviewPhase.ENDED.value}:
+                return
+
+            session_data = await get_session(self.session_key)
+            if not session_data:
+                continue
+            if session_data.get("status") in {"ended_early", "completed", "incomplete_exit"}:
+                return
+
+            if session_data.get("silence_paused"):
+                away_since = session_data.get("candidate_away_since")
+                if away_since and (time.time() - float(away_since)) >= away_max:
+                    await self.transport.speak(
+                        "You were away for a while; I'll close out the session and share your report.",
+                        {},
+                    )
+                    await self.on_end_interview(completion_reason="tab_away_timeout")
+                    return
+                continue
+
+            if session_data.get("stt_unavailable"):
+                continue
+
+            conductor = SessionConductor.load(session_data.get("session_conductor"))
+            if conductor.session_phase == "dsa" and conductor.last_code_change_at:
+                if (time.time() - conductor.last_code_change_at) < 30:
+                    self._last_user_speech_at = time.monotonic()
+                    self._silence_tier = 0
+                    continue
+
+            silence_for = time.monotonic() - self._last_user_speech_at
+            if silence_for < tier1:
+                self._silence_tier = 0
+                continue
+
+            if silence_for >= tier3 and self._silence_tier < 3:
+                self._silence_tier = 3
+                await self.on_silence_tier(3, int(silence_for))
+                return
+            if silence_for >= tier2 and self._silence_tier < 2:
+                self._silence_tier = 2
+                await self.on_silence_tier(2, int(silence_for))
+            elif silence_for >= tier1 and self._silence_tier < 1:
+                self._silence_tier = 1
+                await self.on_silence_tier(1, int(silence_for))
 
     def mark_answer_window_started(self) -> None:
         self._current_answer_started_at = self._current_answer_started_at or time.monotonic()
@@ -670,7 +792,7 @@ class InterviewSessionEngine:
         elapsed_min = (datetime.now(timezone.utc) - self._session_started_at).total_seconds() / 60
         if elapsed_min >= max_duration_min:
             logger.info("Max interview duration (%s min) reached for %s", max_duration_min, self.session_id)
-            await self.on_end_interview()
+            await self.on_end_interview(completion_reason="max_duration")
             return True
         return False
 

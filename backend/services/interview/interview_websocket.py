@@ -193,7 +193,15 @@ class InterviewWebSocketHandler:
 
         elif msg_type == "end_interview":
             if eng:
-                await eng.on_end_interview()
+                await eng.on_end_interview(completion_reason="user_ended")
+
+        elif msg_type == "candidate_away":
+            if eng:
+                await eng.on_candidate_away()
+
+        elif msg_type == "candidate_back":
+            if eng:
+                await eng.on_candidate_back()
 
         elif msg_type == "ping":
             await self.send_message({"type": "pong"})

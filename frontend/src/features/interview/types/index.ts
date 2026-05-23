@@ -18,6 +18,10 @@ export type CodeEditorHandle = {
 
 export type LiveKitOptions = BannerOptions & {
   codeEditorRef?: { current?: CodeEditorHandle | null };
+  onInterviewEnded?: (payload?: { completion_reason?: string }) => void;
+  sendControl?: (message: unknown) => void;
+  syncSessionStatus?: () => Promise<{ ended?: boolean; reason?: string } | void>;
+  connected?: boolean;
 };
 
 export type FeedbackPayload = {
@@ -26,6 +30,7 @@ export type FeedbackPayload = {
   duration_minutes?: number;
   questions_answered?: number;
   code_problems_attempted?: number;
+  completion_reason?: string;
 };
 
 export type QuestionPayload = {
@@ -97,6 +102,10 @@ export type MessagingOptions = {
   onPlaybackEnd?: () => void;
   onHeartbeat?: () => void;
   persistFeedback: (payload: FeedbackPayload) => void;
+  onInterviewEnded?: (payload?: { completion_reason?: string }) => void;
+  setSilenceWarning?: (payload: { tier: number; secondsSilent: number; ending?: boolean }) => void;
+  setSttReconnecting?: (value: boolean) => void;
+  onTranscriptReceived?: () => void;
 };
 
 export type OptionsRef = React.MutableRefObject<LiveKitOptions | null>;
@@ -153,6 +162,10 @@ export type UseWebSocketMessagingOptions = {
   setAiTextFull: (value: string) => void;
   clearReveal: () => void;
   playQuestionAudio: (audioBase64: string | null) => void;
+  onInterviewEnded?: (payload?: { completion_reason?: string }) => void;
+  setSilenceWarning?: (payload: { tier: number; secondsSilent: number; ending?: boolean }) => void;
+  setSttFallbackActive?: (value: boolean) => void;
+  setSttReconnecting?: (value: boolean) => void;
 };
 
 export type UseWebSocketSessionEffectsOptions = {

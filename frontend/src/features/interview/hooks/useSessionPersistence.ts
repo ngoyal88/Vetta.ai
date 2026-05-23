@@ -3,8 +3,19 @@ import { codeBackupKey, codeLangKey } from "./utils/sessionKeys";
 import { persistFeedback } from "./utils/feedbackPersistence";
 import type { FeedbackPayload, OptionsRef } from "../types";
 
-export const useSessionPersistence = (sessionId: string, optionsRef: OptionsRef) => {
+type SessionPersistenceOptions = {
+  sendControl?: (message: unknown) => void;
+  syncSessionStatus?: () => Promise<{ ended?: boolean; reason?: string } | void>;
+  connected?: boolean;
+};
+
+export const useSessionPersistence = (
+  sessionId: string,
+  optionsRef: OptionsRef,
+  persistenceOptions: SessionPersistenceOptions = {}
+) => {
   const tabHiddenAtRef = useRef<number | null>(null);
+  const { sendControl, syncSessionStatus, connected } = persistenceOptions;
 
   const backupCodeFromEditor = useCallback(() => {
     const editor = optionsRef.current?.codeEditorRef?.current;
@@ -44,29 +55,61 @@ export const useSessionPersistence = (sessionId: string, optionsRef: OptionsRef)
     (onSuspendAudio?: () => void, onResumeAudio?: () => void) => {
       if (document.hidden) {
         tabHiddenAtRef.current = Date.now();
+        if (connected && sendControl) {
+          sendControl({ type: "candidate_away" });
+        }
         onSuspendAudio?.();
         backupCodeFromEditor();
       } else {
         onResumeAudio?.();
         const hiddenAt = tabHiddenAtRef.current;
-        if (hiddenAt != null) {
-          const durationMs = Date.now() - hiddenAt;
-          tabHiddenAtRef.current = null;
+        tabHiddenAtRef.current = null;
+        if (connected && sendControl) {
+          sendControl({ type: "candidate_back" });
+        }
+        const durationMs = hiddenAt != null ? Date.now() - hiddenAt : 0;
+        if (syncSessionStatus) {
+          void syncSessionStatus().then((result) => {
+            const addBanner = optionsRef.current?.addBanner;
+            if (!addBanner || typeof addBanner !== "function") return;
+            if (result?.ended) {
+              const reason = result.reason || "";
+              if (reason === "silence_timeout") {
+                addBanner(
+                  "warning",
+                  "Session ended while you were away (no speech detected).",
+                  8000
+                );
+              } else if (reason === "tab_away_timeout") {
+                addBanner(
+                  "warning",
+                  "Session ended — you were away for more than 10 minutes.",
+                  8000
+                );
+              } else {
+                addBanner("info", "Your session has ended.", 6000);
+              }
+              return;
+            }
+            if (durationMs > 5000) {
+              addBanner("success", "Welcome back — session still in progress.", 4000);
+            }
+          });
+        } else if (durationMs > 5000) {
           const addBanner = optionsRef.current?.addBanner;
           if (typeof addBanner === "function") {
-            if (durationMs > 300000) {
-              addBanner("info", `You were away for ${Math.round(durationMs / 60000)} minutes. Your progress is saved.`);
-            } else if (durationMs > 5000) {
-              addBanner("info", "You were away for a moment. Your progress is saved.");
-            }
+            addBanner("success", "Welcome back — session still in progress.", 4000);
           }
         }
       }
     },
-    [backupCodeFromEditor, optionsRef]
+    [backupCodeFromEditor, connected, optionsRef, sendControl, syncSessionStatus]
   );
 
-  const persistFeedbackPayload = useCallback((payload: FeedbackPayload) => persistFeedback(sessionId, payload), [sessionId]);
+  const persistFeedbackPayload = useCallback(
+    (payload: FeedbackPayload) => persistFeedback(sessionId, payload),
+    [sessionId]
+  );
 
   return {
     handleVisibilityChange,

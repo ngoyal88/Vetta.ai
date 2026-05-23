@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "livekit-client";
 import { checkBrowserSupport } from "shared/utils/audioUtils";
 import toast from "react-hot-toast";
@@ -10,7 +10,9 @@ import { useInterviewMessaging } from "./useInterviewMessaging";
 import { useInterruptDetection } from "./useInterruptDetection";
 import { useSessionPersistence } from "./useSessionPersistence";
 import { useUIEffects } from "./useUIEffects";
-import type { LiveKitOptions } from "../types";
+import { loadFeedback, persistFeedback } from "./utils/feedbackPersistence";
+import type { MicHealth } from "features/interview/components/MicHealthIndicator";
+import type { FeedbackPayload, LiveKitOptions } from "../types";
 
 const MIC_RESUME_DELAY_MS = 250;
 const INTERRUPT_ENERGY_THRESHOLD = 0.008;
@@ -52,6 +54,14 @@ export const useInterviewLiveKitAdapter = (sessionId: string, initialPhase = "be
   const [micEnabled, setMicEnabled] = useState(true);
   const [audioLevel, setAudioLevel] = useState(0);
   const [sttFallbackActive, setSttFallbackActive] = useState(false);
+  const [sttReconnecting, setSttReconnecting] = useState(false);
+  const [silenceWarning, setSilenceWarning] = useState<{
+    tier: number;
+    secondsSilent: number;
+    ending?: boolean;
+  } | null>(null);
+  const lastTranscriptAtRef = useRef<number | null>(null);
+  const interviewEndedRef = useRef(false);
 
   const aiSpeakingRef = useRef(false);
   const micEnabledRef = useRef(true);
@@ -122,7 +132,42 @@ export const useInterviewLiveKitAdapter = (sessionId: string, initialPhase = "be
     stopAiPlaybackRef.current = stopAiPlaybackLocally;
   }, [stopAiPlaybackLocally]);
 
-  const { handleVisibilityChange, restoreCodeToEditor, persistFeedbackPayload } = useSessionPersistence(sessionId, optionsRef);
+  const persistFeedbackPayload = useCallback(
+    (payload: FeedbackPayload) => persistFeedback(sessionId, payload),
+    [sessionId]
+  );
+
+  const syncSessionStatus = useCallback(async () => {
+    if (!sessionId) return { ended: false };
+    try {
+      const data = await api.getSessionDetails(sessionId);
+      const status = String(data.status || "");
+      const ended = ["ended_early", "completed", "incomplete_exit"].includes(status);
+      if (ended) {
+        const stored = loadFeedback(sessionId);
+        if (stored) {
+          setFeedback(stored);
+        } else if (data.final_feedback) {
+          const ff = data.final_feedback;
+          const payload: FeedbackPayload = {
+            feedback: typeof ff === "object" ? (ff.feedback as string) : String(ff),
+            full: ff,
+            completion_reason: data.completion_reason as string | undefined,
+          };
+          setFeedback(payload);
+          persistFeedbackPayload(payload);
+        }
+        interviewEndedRef.current = true;
+        optionsRef.current?.onInterviewEnded?.({
+          completion_reason: (data.completion_reason as string) || status,
+        });
+        return { ended: true, reason: (data.completion_reason as string) || status };
+      }
+      return { ended: false };
+    } catch {
+      return { ended: false };
+    }
+  }, [sessionId, persistFeedbackPayload]);
 
   const {
     handleMessage,
@@ -159,6 +204,16 @@ export const useInterviewLiveKitAdapter = (sessionId: string, initialPhase = "be
       }
     },
     persistFeedback: persistFeedbackPayload,
+    setSilenceWarning,
+    setSttReconnecting,
+    onTranscriptReceived: () => {
+      lastTranscriptAtRef.current = Date.now();
+      setSilenceWarning(null);
+    },
+    onInterviewEnded: (payload) => {
+      interviewEndedRef.current = true;
+      optionsRef.current?.onInterviewEnded?.(payload);
+    },
   });
 
   const {
@@ -181,6 +236,16 @@ export const useInterviewLiveKitAdapter = (sessionId: string, initialPhase = "be
     roomRef,
   });
 
+  const { handleVisibilityChange, restoreCodeToEditor } = useSessionPersistence(
+    sessionId,
+    optionsRef,
+    {
+      sendControl: sendControlProxy,
+      syncSessionStatus,
+      connected,
+    }
+  );
+
   useEffect(() => {
     if (transportError) setError(transportError);
   }, [transportError]);
@@ -188,6 +253,40 @@ export const useInterviewLiveKitAdapter = (sessionId: string, initialPhase = "be
   useEffect(() => {
     sendControlRef.current = sendControl;
   }, [sendControl]);
+
+  useEffect(() => {
+    optionsRef.current = {
+      ...options,
+      sendControl,
+      syncSessionStatus,
+      connected,
+    };
+  }, [options, sendControl, syncSessionStatus, connected]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const stored = loadFeedback(sessionId);
+    if (stored) {
+      setFeedback(stored);
+      interviewEndedRef.current = true;
+      optionsRef.current?.onInterviewEnded?.({
+        completion_reason: stored.completion_reason,
+      });
+      return;
+    }
+    void syncSessionStatus();
+  }, [sessionId, syncSessionStatus]);
+
+  const micHealth: MicHealth = useMemo(() => {
+    if (sttReconnecting) return "reconnecting";
+    if (sttFallbackActive) return "no_signal";
+    if (audioLevel > 0.02) return "ok";
+    if (lastTranscriptAtRef.current && Date.now() - lastTranscriptAtRef.current < 60_000) {
+      return "ok";
+    }
+    if (audioLevel > 0.005) return "quiet";
+    return "no_signal";
+  }, [audioLevel, sttFallbackActive, sttReconnecting]);
 
   useEffect(() => {
     const support = checkBrowserSupport();
@@ -248,7 +347,7 @@ export const useInterviewLiveKitAdapter = (sessionId: string, initialPhase = "be
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [connected, handleVisibilityChange, recorderRef, sessionId]);
+  }, [connected, handleVisibilityChange, recorderRef, sessionId, sendControl, syncSessionStatus]);
 
   useEffect(() => {
     if (!connected) return;
@@ -423,5 +522,9 @@ export const useInterviewLiveKitAdapter = (sessionId: string, initialPhase = "be
     reconnectAttempt,
     sttFallbackActive,
     setSttFallbackActive,
+    sttReconnecting,
+    silenceWarning,
+    micHealth,
+    syncSessionStatus,
   };
 };

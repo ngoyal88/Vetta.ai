@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { Room } from "livekit-client";
+import { setSkipPrecheck } from "features/interview/utils/precheckStorage";
 
 const BROWSER_REQUIREMENTS = {
   audioWorklet: !!(typeof window !== "undefined" && window.AudioWorkletNode),
@@ -8,15 +9,13 @@ const BROWSER_REQUIREMENTS = {
   webSocket: typeof WebSocket !== "undefined",
 };
 
-const CHECK_KEYS = ["mic_permission", "mic_signal", "speaker", "connection"];
-
 const getStatusLabel = (state) => {
-  if (state === "pending") return "WAITING";
-  if (state === "running") return "CHECKING";
-  if (state === "passed") return "PASSED";
-  if (state === "failed") return "FAILED";
-  if (state === "warning") return "WARNING";
-  return "WAITING";
+  if (state === "pending") return "Waiting";
+  if (state === "running") return "Checking";
+  if (state === "passed") return "Ready";
+  if (state === "failed") return "Needs attention";
+  if (state === "warning") return "Warning";
+  return "Waiting";
 };
 
 export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthToken }) {
@@ -28,6 +27,7 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
   });
   const [errorMessage, setErrorMessage] = useState(null);
   const [connectionWarning, setConnectionWarning] = useState(null);
+  const [connectionError, setConnectionError] = useState(null);
   const [showAudioMeter, setShowAudioMeter] = useState(false);
   const [audioMeterLevel, setAudioMeterLevel] = useState(0);
   const [showDeviceSelector, setShowDeviceSelector] = useState(false);
@@ -43,6 +43,8 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
   const checkMicPermission = async () => {
     setCheckStateKey("mic_permission", "running");
     setErrorMessage(null);
+    setConnectionError(null);
+    setAllChecksDone(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = stream;
@@ -56,12 +58,14 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
           body:
             "Click the camera/mic icon in your browser address bar -> Allow -> then refresh this page.",
           fix: "How to allow mic in Chrome: Settings -> Privacy -> Microphone -> Allow roundr.ai",
+          source: "mic",
         });
       } else if (err.name === "NotFoundError") {
         setErrorMessage({
           title: "No microphone found",
           body: "Plug in a headset or check your system audio settings.",
           fix: null,
+          source: "mic",
         });
       } else if (err.name === "NotReadableError") {
         setErrorMessage({
@@ -69,14 +73,17 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
           body:
             "Close Zoom, Discord, Google Meet, or any other app using your mic, then try again.",
           fix: null,
+          source: "mic",
         });
       } else {
         setErrorMessage({
           title: "Microphone error",
           body: `Could not access microphone: ${err.message}`,
           fix: null,
+          source: "mic",
         });
       }
+      setAllChecksDone(true);
     }
   };
 
@@ -84,6 +91,7 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
     setCheckStateKey("mic_signal", "running");
     setShowAudioMeter(true);
     setErrorMessage(null);
+    setAllChecksDone(false);
 
     const audioContext = new AudioContext({ sampleRate: 16000 });
     const source = audioContext.createMediaStreamSource(stream);
@@ -113,18 +121,20 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
       } else {
         audioContext.close();
         setShowAudioMeter(false);
-        if (maxRms < 0.005) {
+        if (maxRms < 0.008) {
           setCheckStateKey("mic_signal", "failed");
           setErrorMessage({
             title: "Microphone not picking up sound",
             body:
-              "We detected your mic but no signal. Try speaking, check if muted in system settings, or select a different microphone.",
+              "We detected your mic but no usable signal. Speak at a normal volume, confirm the mic is not muted in system settings, and try a different input if needed. Silent sessions may auto-end after 3 minutes.",
             fix: null,
+            source: "mic",
           });
           setShowDeviceSelector(true);
           navigator.mediaDevices.enumerateDevices().then((devices) => {
             setAudioInputDevices(devices.filter((d) => d.kind === "audioinput"));
           });
+          setAllChecksDone(true);
         } else {
           setCheckStateKey("mic_signal", "passed");
           checkSpeaker();
@@ -148,6 +158,8 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
 
   const checkSpeaker = async () => {
     setCheckStateKey("speaker", "running");
+    setErrorMessage(null);
+    setAllChecksDone(false);
     const audioContext = new AudioContext();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
@@ -165,6 +177,9 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
 
   const checkConnection = async () => {
     setCheckStateKey("connection", "running");
+    setConnectionWarning(null);
+    setConnectionError(null);
+    setAllChecksDone(false);
     const start = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -224,22 +239,21 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
       clearTimeout(timeoutId);
       if (err.name === "TimeoutError" || err.name === "AbortError") {
         setCheckStateKey("connection", "failed");
-        setErrorMessage({
-          title: "Cannot reach Roundr servers",
+        setConnectionError({
+          title: "Connection check failed",
           body:
-            "Your network may be blocking the connection (common on corporate/university networks). Try: disable VPN, use mobile hotspot, or try a different network.",
-          fix: null,
+            "We could not reach the interview servers from this network. You can try the WebSocket fallback or switch networks and retry.",
         });
       } else {
         setCheckStateKey("connection", "failed");
-        setErrorMessage({
+        setConnectionError({
           title: "LiveKit connection failed",
           body:
             err?.message ||
-            "Unable to establish interview room connection. Please try again in a few moments.",
-          fix: null,
+            "We could not establish a LiveKit connection. You can try the WebSocket fallback to continue.",
         });
       }
+      setAllChecksDone(true);
     }
   };
 
@@ -250,12 +264,29 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hasBlockingFailure =
-    checkState.mic_permission === "failed" || checkState.mic_signal === "failed";
-  const connectionBlocking = checkState.connection === "failed";
+  const getMicStatus = () => {
+    if (checkState.mic_permission === "failed") return "failed";
+    if (checkState.mic_permission === "running") return "running";
+    if (checkState.mic_permission === "pending") return "pending";
+    if (checkState.mic_permission === "passed") {
+      if (checkState.mic_signal === "running") return "running";
+      if (checkState.mic_signal === "failed") return "failed";
+      if (checkState.mic_signal === "passed") return "passed";
+      return "pending";
+    }
+    return "pending";
+  };
 
-  const renderCheckIcon = (key) => {
-    const state = checkState[key];
+  const micStatus = getMicStatus();
+  const speakerStatus = checkState.speaker;
+  const connectionStatus = checkState.connection;
+
+  const micError = errorMessage?.source === "mic" ? errorMessage : null;
+  const speakerError = errorMessage?.source === "speaker" ? errorMessage : null;
+
+  const hasBlockingFailure = micStatus === "failed" || connectionStatus === "failed";
+
+  const renderCheckIcon = (state) => {
     if (state === "pending")
       return (
         <div className="w-5 h-5 rounded-full border border-zinc-600 shrink-0" />
@@ -275,141 +306,246 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
     );
   };
 
-  const checkLabels = {
-    mic_permission: "Microphone permission",
-    mic_signal: "Microphone signal",
-    speaker: "Speaker output",
-    connection: "Connection",
+  const micHint = () => {
+    if (micStatus === "running") return "Listening for input. Speak a few words.";
+    if (micStatus === "passed") return "Microphone access and input look good.";
+    if (micStatus === "failed") return "We could not hear your microphone.";
+    return "We will check mic access and input level.";
   };
+
+  const speakerHint = () => {
+    if (speakerStatus === "running") return "Playing a short beep.";
+    if (speakerStatus === "passed") return "Audio output looks good.";
+    if (speakerStatus === "warning") return "We did not confirm speaker output.";
+    return "We will play a short beep to confirm audio output.";
+  };
+
+  const connectionHint = () => {
+    if (connectionStatus === "running") return "Checking reachability to the interview servers.";
+    if (connectionStatus === "passed") return "Connection looks stable.";
+    if (connectionStatus === "warning") return "Connection is usable but a bit slow.";
+    if (connectionStatus === "failed") return "We could not reach the live interview servers.";
+    return "We will verify that the interview servers are reachable.";
+  };
+
+  const handleSkipPrecheck = () => {
+    setSkipPrecheck(true);
+    onAllPassed?.();
+  };
+
+  const routeToWebSocket = () => {
+    try {
+      sessionStorage.setItem("force_ws", "1");
+      window.location.href = `/interview/${sessionId}?transport=ws`;
+    } catch (err) {
+      window.location.href = `/interview/${sessionId}?transport=ws`;
+    }
+  };
+
+  const primaryLabel = !allChecksDone
+    ? "Running checks..."
+    : hasBlockingFailure
+      ? "Resolve issues to continue"
+      : "Start interview";
 
   return (
     <div className="fixed inset-0 z-[9999] bg-[var(--bg-base)] flex items-center justify-center">
-      <div className="w-full max-w-md mx-4 bg-[var(--bg-overlay)] border border-[var(--border-subtle)] rounded-2xl p-8">
-        <h2 className="text-xl font-semibold text-white mb-6 text-center">
-          Getting you ready for your interview
-        </h2>
-
-        <div className="space-y-0">
-          {CHECK_KEYS.map((key) => (
-            <div
-              key={key}
-              className="flex items-center gap-3 py-3 border-b border-[var(--border-subtle)] last:border-0"
-            >
-              {renderCheckIcon(key)}
-              <span className="flex-1 text-sm text-zinc-300">
-                {checkLabels[key]}
-              </span>
-              <span className="text-xs text-zinc-500">
-                {getStatusLabel(checkState[key])}
-              </span>
-            </div>
-          ))}
+      <div className="w-full max-w-lg mx-4 bg-[var(--bg-overlay)] border border-[var(--border-subtle)] rounded-2xl p-6">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-white">Quick pre-check</h2>
+          <p className="text-sm text-zinc-400 mt-2">
+            Three short checks for a smooth interview: mic, speaker, connection.
+          </p>
         </div>
 
-        {showAudioMeter && (
-          <div className="my-4">
-            <p className="text-xs text-zinc-500 mb-2 text-center">
-              Say anything to test your microphone...
-            </p>
-            <div className="h-3 bg-[var(--bg-raised)] rounded-full overflow-hidden border border-[var(--border-subtle)]">
-              <div
-                className="h-full bg-cyan-500 rounded-full transition-all duration-75"
-                style={{
-                  width: `${Math.min(100, audioMeterLevel * 500)}%`,
-                }}
-              />
+        <div className="mt-6 space-y-3">
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="h-9 w-9 rounded-full bg-[var(--bg-raised)] border border-[var(--border-subtle)] text-xs font-semibold text-zinc-300 flex items-center justify-center">
+                  1
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Microphone</p>
+                  <p className="text-xs text-zinc-500">{micHint()}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {renderCheckIcon(micStatus)}
+                <span className="text-xs text-zinc-400">{getStatusLabel(micStatus)}</span>
+              </div>
             </div>
-          </div>
-        )}
 
-        {showSpeakerConfirm && (
-          <div className="my-4 p-4 bg-[var(--bg-raised)] rounded-xl border border-[var(--border-subtle)]">
-            <p className="text-sm text-zinc-300 text-center mb-3">
-              Did you hear a short beep?
-            </p>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSpeakerConfirm(false);
-                  setCheckStateKey("speaker", "passed");
-                  checkConnection();
-                }}
-                className="flex-1 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-400 text-sm hover:bg-emerald-600/30 transition-colors"
-              >
-                Yes, I heard it
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSpeakerConfirm(false);
-                  setCheckStateKey("speaker", "warning");
-                  setErrorMessage({
-                    title: "Audio output not working",
-                    body:
-                      "Check your system volume, make sure your speakers/headphones are plugged in, and that the browser is not muted.",
-                    fix: "On Mac: check the speaker icon in menu bar. On Windows: check Volume Mixer.",
-                  });
-                  checkConnection();
-                }}
-                className="flex-1 py-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-zinc-400 text-sm hover:bg-[var(--bg-overlay)] transition-colors"
-              >
-                No, I didn&apos;t
-              </button>
-            </div>
-          </div>
-        )}
+            {showAudioMeter && (
+              <div className="mt-3">
+                <p className="text-xs text-zinc-500 mb-2">
+                  Say anything so we can see the level.
+                </p>
+                <div className="h-2 bg-[var(--bg-raised)] rounded-full overflow-hidden border border-[var(--border-subtle)]">
+                  <div
+                    className="h-full bg-cyan-500 rounded-full transition-all duration-75"
+                    style={{
+                      width: `${Math.min(100, audioMeterLevel * 500)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
 
-        {errorMessage && (
-          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
-            <p className="text-sm font-medium text-red-400 mb-1">
-              {errorMessage.title}
-            </p>
-            <p className="text-xs text-red-300/80">{errorMessage.body}</p>
-            {errorMessage.fix && (
-              <p className="text-xs text-zinc-500 mt-2">{errorMessage.fix}</p>
+            {micError && (
+              <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <p className="text-xs font-medium text-red-300">{micError.title}</p>
+                <p className="text-xs text-red-200/80 mt-1">{micError.body}</p>
+                {micError.fix && (
+                  <p className="text-xs text-zinc-500 mt-2">{micError.fix}</p>
+                )}
+              </div>
+            )}
+
+            {showDeviceSelector && audioInputDevices.length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs text-zinc-500 mb-1">Try a different microphone:</p>
+                <select
+                  className="w-full bg-[var(--bg-raised)] border border-[var(--border-subtle)] text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500/50"
+                  onChange={(e) => switchDevice(e.target.value)}
+                  value=""
+                >
+                  <option value="">Select microphone...</option>
+                  {audioInputDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId}>
+                      {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
             )}
           </div>
-        )}
 
-        {connectionWarning && (
-          <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
-            <p className="text-xs text-amber-300/80">{connectionWarning}</p>
-          </div>
-        )}
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="h-9 w-9 rounded-full bg-[var(--bg-raised)] border border-[var(--border-subtle)] text-xs font-semibold text-zinc-300 flex items-center justify-center">
+                  2
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Speaker</p>
+                  <p className="text-xs text-zinc-500">{speakerHint()}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {renderCheckIcon(speakerStatus)}
+                <span className="text-xs text-zinc-400">{getStatusLabel(speakerStatus)}</span>
+              </div>
+            </div>
 
-        {showDeviceSelector && audioInputDevices.length > 0 && (
-          <div className="mt-3">
-            <p className="text-xs text-zinc-500 mb-1">
-              Try a different microphone:
-            </p>
-            <select
-              className="w-full bg-[var(--bg-raised)] border border-[var(--border-subtle)] text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500/50"
-              onChange={(e) => switchDevice(e.target.value)}
-              value=""
-            >
-              <option value="">Select microphone...</option>
-              {audioInputDevices.map((device) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}
-                </option>
-              ))}
-            </select>
+            {showSpeakerConfirm && (
+              <div className="mt-3 p-3 bg-[var(--bg-raised)] rounded-lg border border-[var(--border-subtle)]">
+                <p className="text-xs text-zinc-300 text-center mb-3">
+                  Did you hear a short beep?
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSpeakerConfirm(false);
+                      setCheckStateKey("speaker", "passed");
+                      checkConnection();
+                    }}
+                    className="flex-1 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-400 text-xs hover:bg-emerald-600/30 transition-colors"
+                  >
+                    Yes, I heard it
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSpeakerConfirm(false);
+                      setCheckStateKey("speaker", "warning");
+                      setErrorMessage({
+                        title: "Audio output not confirmed",
+                        body:
+                          "Check your system volume, make sure your speakers or headphones are connected, and that the browser is not muted.",
+                        fix: "On Mac: check the speaker icon in the menu bar. On Windows: check Volume Mixer.",
+                        source: "speaker",
+                      });
+                      checkConnection();
+                    }}
+                    className="flex-1 py-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-zinc-400 text-xs hover:bg-[var(--bg-overlay)] transition-colors"
+                  >
+                    No, I did not
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {speakerError && (
+              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                <p className="text-xs font-medium text-amber-300">{speakerError.title}</p>
+                <p className="text-xs text-amber-200/80 mt-1">{speakerError.body}</p>
+                {speakerError.fix && (
+                  <p className="text-xs text-zinc-500 mt-2">{speakerError.fix}</p>
+                )}
+              </div>
+            )}
           </div>
-        )}
+
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="h-9 w-9 rounded-full bg-[var(--bg-raised)] border border-[var(--border-subtle)] text-xs font-semibold text-zinc-300 flex items-center justify-center">
+                  3
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Connection</p>
+                  <p className="text-xs text-zinc-500">{connectionHint()}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {renderCheckIcon(connectionStatus)}
+                <span className="text-xs text-zinc-400">{getStatusLabel(connectionStatus)}</span>
+              </div>
+            </div>
+
+            {connectionWarning && (
+              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                <p className="text-xs text-amber-200/80">{connectionWarning}</p>
+              </div>
+            )}
+
+            {connectionError && (
+              <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <p className="text-xs font-medium text-red-300">{connectionError.title}</p>
+                <p className="text-xs text-red-200/80 mt-1">{connectionError.body}</p>
+                <button
+                  type="button"
+                  onClick={routeToWebSocket}
+                  className="mt-3 w-full py-2 rounded-lg bg-cyan-500 text-black text-xs font-medium hover:bg-cyan-400 transition-colors"
+                >
+                  Try WebSocket fallback
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="mt-6 flex flex-col gap-2">
           <button
             type="button"
             onClick={onAllPassed}
-            disabled={!allChecksDone || hasBlockingFailure || connectionBlocking}
+            disabled={!allChecksDone || hasBlockingFailure}
             className={`w-full py-3 rounded-xl font-medium text-sm transition-all duration-200 ${
-              allChecksDone && !hasBlockingFailure && !connectionBlocking
+              allChecksDone && !hasBlockingFailure
                 ? "bg-cyan-500 hover:bg-cyan-400 text-black cursor-pointer"
                 : "bg-[var(--bg-surface)] text-zinc-600 cursor-not-allowed border border-[var(--border-subtle)]"
             }`}
           >
-            {allChecksDone ? "Start Interview" : "Running checks..."}
+            {primaryLabel}
+          </button>
+          <button
+            type="button"
+            onClick={handleSkipPrecheck}
+            className="w-full py-2.5 rounded-xl text-xs text-zinc-400 hover:text-zinc-200 border border-transparent hover:border-[var(--border-subtle)] transition-colors"
+          >
+            Skip pre-check, I know it works
           </button>
           <button
             type="button"

@@ -101,6 +101,9 @@ export const useInterviewMessaging = (options: MessagingOptions) => {
               return prev ? `${prev} ${text}` : text;
             });
             options.setTranscriptInterim("");
+            if (text.trim().length >= 3) {
+              options.onTranscriptReceived?.();
+            }
           } else {
             options.setTranscriptInterim(text);
           }
@@ -114,6 +117,9 @@ export const useInterviewMessaging = (options: MessagingOptions) => {
             options.setAiSpeakingState(true);
           } else if (isSilentStatus(nextStatus)) {
             options.setAiSpeakingState(false);
+          }
+          if (nextStatus === "completed") {
+            options.onInterviewEnded?.({ completion_reason: "ended_early" });
           }
           break;
         }
@@ -162,6 +168,54 @@ export const useInterviewMessaging = (options: MessagingOptions) => {
           break;
         }
 
+        case "silence_warning": {
+          const tier = Number(message.tier) || 1;
+          const secondsSilent = Number(message.seconds_silent) || 0;
+          options.setSilenceWarning?.({ tier, secondsSilent, ending: Boolean(message.ending) });
+          const addBanner = options.optionsRef.current?.addBanner;
+          if (typeof addBanner === "function") {
+            if (tier >= 3 || message.ending) {
+              addBanner("warning", "No speech detected for a while. Ending the session…", 8000);
+            } else if (tier === 2) {
+              addBanner("info", "Still there? The interviewer can rephrase the question.", 6000);
+            } else {
+              addBanner("info", "Take your time — the mic is open when you are ready.", 5000);
+            }
+          }
+          if (message.ending) {
+            options.onInterviewEnded?.({ completion_reason: "silence_timeout" });
+          }
+          break;
+        }
+
+        case "session_status": {
+          if (message.status === "ended") {
+            const reason = (message.completion_reason as string) || "ended_early";
+            if (message.final_feedback || message.full) {
+              const payload = {
+                feedback: (message.final_feedback as string) || undefined,
+                full: message.full,
+                completion_reason: reason,
+              };
+              options.setFeedback(payload);
+              options.persistFeedback(payload);
+            }
+            options.onInterviewEnded?.({ completion_reason: reason });
+          } else {
+            const addBanner = options.optionsRef.current?.addBanner;
+            if (typeof addBanner === "function") {
+              addBanner("success", "Welcome back — session still in progress.", 4000);
+            }
+          }
+          break;
+        }
+
+        case "interview_ended":
+          options.onInterviewEnded?.({
+            completion_reason: (message.completion_reason as string) || "ended_early",
+          });
+          break;
+
         case "feedback": {
           const payload = {
             feedback: message.feedback as string,
@@ -169,10 +223,18 @@ export const useInterviewMessaging = (options: MessagingOptions) => {
             duration_minutes: message.duration_minutes as number,
             questions_answered: message.questions_answered as number,
             code_problems_attempted: message.code_problems_attempted as number,
+            completion_reason: message.completion_reason as string | undefined,
           };
           options.setFeedback(payload);
           options.persistFeedback(payload);
-          toast.success("Interview completed!");
+          options.onInterviewEnded?.({
+            completion_reason: (message.completion_reason as string) || "ended_early",
+          });
+          toast.success(
+            payload.completion_reason === "silence_timeout"
+              ? "Session ended due to silence"
+              : "Interview completed!"
+          );
           break;
         }
 
@@ -183,16 +245,23 @@ export const useInterviewMessaging = (options: MessagingOptions) => {
           options.onHeartbeat?.();
           break;
 
-        case "reconnecting_stt": {
+        case "reconnecting_stt":
+        case "stt_reconnecting": {
           const attempt = (message.attempt as number) ?? 1;
+          options.setSttReconnecting?.(true);
           const addBanner = options.optionsRef.current?.addBanner;
           if (typeof addBanner === "function") {
-            addBanner("warning", `Voice recognition reconnecting (${attempt} of 3)...`);
+            addBanner(
+              "warning",
+              `Voice connection paused — reconnecting (${attempt} of 3)…`,
+              6000
+            );
           }
           break;
         }
 
         case "stt_restored": {
+          options.setSttReconnecting?.(false);
           const addBanner = options.optionsRef.current?.addBanner;
           const removeBannerByType = options.optionsRef.current?.removeBannerByType;
           if (typeof removeBannerByType === "function") removeBannerByType("warning");
