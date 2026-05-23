@@ -15,7 +15,8 @@ import VaultLibraryPage from 'features/vault/pages/VaultLibraryPage';
 import VaultVersionsPage from 'features/vault/pages/VaultVersionsPage';
 import VaultVersionDetailPage from 'features/vault/pages/VaultVersionDetailPage';
 import Profile from 'features/dashboard/pages/Profile';
-import Analytics from 'features/dashboard/pages/Analytics';
+import HistoryPage from 'features/dashboard/pages/HistoryPage';
+import AnalyticsPage from 'features/dashboard/pages/AnalyticsPage';
 import ModesPage from 'features/modes/pages/ModesPage';
 import RoleTargetedPage from 'features/modes/role-targeted/pages/RoleTargetedPage';
 import PressureModePage from 'features/modes/pressure-mode/pages/PressureModePage';
@@ -145,10 +146,18 @@ function App() {
             }
           />
           <Route
+            path="/history"
+            element={
+              <PrivateRoute>
+                <HistoryPage />
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/analytics"
             element={
               <PrivateRoute>
-                <Analytics />
+                <AnalyticsPage />
               </PrivateRoute>
             }
           />

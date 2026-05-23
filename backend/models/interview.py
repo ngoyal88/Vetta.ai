@@ -13,6 +13,7 @@ class InterviewType(str, Enum):
     BEHAVIORAL = "behavioral"
     RESUME_BASED = "resume"
     CUSTOM = "custom"
+    ROLE_TARGETED = "role_targeted"
 
 
 class DifficultyLevel(str, Enum):
@@ -70,12 +71,18 @@ class InterviewSession(BaseModel):
     years_experience: Optional[int] = None
     interview_type: InterviewType
     custom_role: Optional[str] = None
+    target_company: Optional[str] = None
+    target_role: Optional[str] = None
+    job_description: Optional[str] = None
+    interview_focus: Optional[str] = None
+    jd_fit_context: Dict[str, Any] = Field(default_factory=dict)
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
     status: str = "active"
     current_question_index: int = 0
     questions: List[Dict[str, Any]] = []
     responses: List[Dict[str, Any]] = []
     code_submissions: List[CodeSubmission] = []
+    # Persisted dialogue: [{speaker: candidate|interviewer, text, timestamp ISO}]
     live_transcription: List[Dict[str, str]] = []
     resume_data: Dict[str, Any] = {}
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
