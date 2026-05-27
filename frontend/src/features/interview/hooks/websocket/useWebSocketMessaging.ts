@@ -70,6 +70,36 @@ export const useWebSocketMessaging = (options: UseWebSocketMessagingOptions) => 
             }
           }
           break;
+        case "silence_warning": {
+          const tier = Number(message.tier) || 1;
+          const secondsSilent = Number(message.seconds_silent) || 0;
+          options.setSilenceWarning?.({ tier, secondsSilent, ending: Boolean(message.ending) });
+          if (message.ending) {
+            options.onInterviewEnded?.({ completion_reason: "silence_timeout" });
+          }
+          break;
+        }
+        case "interview_ended":
+          options.onInterviewEnded?.({
+            completion_reason: (message.completion_reason as string) || "ended_early",
+          });
+          break;
+        case "session_status": {
+          if (message.status === "ended") {
+            const reason = (message.completion_reason as string) || "ended_early";
+            if (message.final_feedback || message.full) {
+              const payload = {
+                feedback: message.final_feedback as string | undefined,
+                full: message.full,
+                completion_reason: reason,
+              };
+              options.setFeedback(payload);
+              persistFeedback(options.sessionId, payload);
+            }
+            options.onInterviewEnded?.({ completion_reason: reason });
+          }
+          break;
+        }
         case "feedback": {
           const payload = {
             feedback: message.feedback as string | undefined,
@@ -77,12 +107,27 @@ export const useWebSocketMessaging = (options: UseWebSocketMessagingOptions) => 
             duration_minutes: message.duration_minutes as number | undefined,
             questions_answered: message.questions_answered as number | undefined,
             code_problems_attempted: message.code_problems_attempted as number | undefined,
+            completion_reason: message.completion_reason as string | undefined,
           };
           options.setFeedback(payload);
           persistFeedback(options.sessionId, payload);
+          options.onInterviewEnded?.({
+            completion_reason: (message.completion_reason as string) || "ended_early",
+          });
           toast.success("Interview completed!");
           break;
         }
+        case "reconnecting_stt":
+        case "stt_reconnecting":
+          options.setSttReconnecting?.(true);
+          break;
+        case "stt_restored":
+          options.setSttReconnecting?.(false);
+          options.setSttFallbackActive?.(false);
+          break;
+        case "stt_unavailable":
+          options.setSttFallbackActive?.(true);
+          break;
         case "heartbeat":
         case "pong":
           break;

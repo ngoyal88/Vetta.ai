@@ -155,6 +155,25 @@ const completeInterview = async (sessionId: string): Promise<Record<string, unkn
   return response.json() as Promise<Record<string, unknown>>;
 };
 
+export type SessionDetailsResponse = {
+  status?: string;
+  completion_reason?: string;
+  final_feedback?: {
+    feedback?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+};
+
+const getSessionDetails = async (sessionId: string): Promise<SessionDetailsResponse> => {
+  const response = await fetch(`${API_URL}/interview/session/${encodeURIComponent(sessionId)}`, {
+    method: "GET",
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error("Failed to fetch session details");
+  return response.json() as Promise<SessionDetailsResponse>;
+};
+
 const getInterviewHistory = async (limit = 20): Promise<InterviewHistoryResponse> => {
   const response = await fetch(`${API_URL}/interview/history?limit=${limit}`, {
     method: "GET",
@@ -188,6 +207,7 @@ export const api = {
   startInterview,
   submitCode,
   completeInterview,
+  getSessionDetails,
   getInterviewHistory,
   deleteInterview,
   deleteAccountData,

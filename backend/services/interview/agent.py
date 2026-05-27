@@ -330,6 +330,40 @@ def _is_session_active(session: AgentSession) -> bool:
     return True
 
 
+_ENDED_STATUSES = frozenset({"ended_early", "completed", "incomplete_exit"})
+
+
+async def _emit_session_status(ctx: JobContext, session_data: Dict[str, Any]) -> None:
+    status = str(session_data.get("status") or "active")
+    ended = status in _ENDED_STATUSES
+    payload: Dict[str, Any] = {
+        "type": "session_status",
+        "status": "ended" if ended else "active",
+        "completion_reason": session_data.get("completion_reason"),
+    }
+    final_feedback = session_data.get("final_feedback")
+    if ended and final_feedback:
+        if isinstance(final_feedback, dict):
+            payload["final_feedback"] = final_feedback.get("feedback")
+            payload["full"] = final_feedback
+        else:
+            payload["final_feedback"] = final_feedback
+    await _send_control(ctx.room, payload)
+
+
+async def _maybe_restore_stt(session_id: str, ctx: JobContext) -> None:
+    session_key = f"interview:{session_id}"
+    session_data = await _get_session(session_key)
+    if not session_data or not session_data.get("stt_degraded"):
+        return
+    session_data["stt_degraded"] = False
+    session_data["stt_unavailable"] = False
+    if not session_data.get("candidate_away_since"):
+        session_data["silence_paused"] = False
+    await _update_session(session_key, session_data)
+    await _send_control(ctx.room, {"type": "stt_restored"})
+
+
 async def _silence_watchdog(
     session: AgentSession,
     session_id: str,
@@ -339,6 +373,12 @@ async def _silence_watchdog(
 ) -> None:
     last_user_speech_at[0] = time.monotonic()
     tier = 0
+    tier1 = int(getattr(settings, "silence_tier1_seconds", 60))
+    tier2 = int(getattr(settings, "silence_tier2_seconds", 120))
+    tier3 = int(getattr(settings, "silence_tier3_seconds", 180))
+    away_max = int(getattr(settings, "candidate_away_max_seconds", 600))
+    session_key = f"interview:{session_id}"
+
     while True:
         await asyncio.sleep(5)
 
@@ -352,9 +392,41 @@ async def _silence_watchdog(
         if agent_speaking:
             continue
 
-        session_data = await _get_session(f"interview:{session_id}")
+        session_data = await _get_session(session_key)
         if not session_data:
             continue
+        if session_data.get("status") in _ENDED_STATUSES:
+            return
+
+        if session_data.get("silence_paused"):
+            away_since = session_data.get("candidate_away_since")
+            if away_since:
+                away_for = time.time() - float(away_since)
+                if away_for >= away_max:
+                    try:
+                        await _send_control(ctx.room, {
+                            "type": "session_status",
+                            "status": "active",
+                            "away_seconds": int(away_for),
+                        })
+                        await session.say(
+                            "You were away for a while; I'll close out the session and share your report."
+                        )
+                        await _handle_end_interview(
+                            ctx,
+                            session,
+                            session_id,
+                            interview_service,
+                            completion_reason="tab_away_timeout",
+                        )
+                    except RuntimeError:
+                        return
+                    return
+            continue
+
+        if session_data.get("stt_unavailable"):
+            continue
+
         conductor = SessionConductor.load(session_data.get("session_conductor"))
         if conductor.session_phase == "dsa" and conductor.last_code_change_at:
             if (time.time() - conductor.last_code_change_at) < 30:
@@ -363,20 +435,41 @@ async def _silence_watchdog(
                 continue
 
         silence_for = time.monotonic() - last_user_speech_at[0]
-        if silence_for < 30:
+        if silence_for < tier1:
             tier = 0
             continue
         try:
-            if silence_for >= 120 and tier < 3:
+            if silence_for >= tier3 and tier < 3:
                 tier = 3
-                await _handle_end_interview(ctx, session, session_id, interview_service)
+                await _send_control(ctx.room, {
+                    "type": "silence_warning",
+                    "tier": 3,
+                    "seconds_silent": int(silence_for),
+                    "ending": True,
+                })
+                await session.say(
+                    "I haven't heard anything for a while, so I'll wrap up here and share what we have so far."
+                )
+                await _handle_end_interview(
+                    ctx, session, session_id, interview_service, completion_reason="silence_timeout"
+                )
                 return
-            if silence_for >= 60 and tier < 2:
+            if silence_for >= tier2 and tier < 2:
                 tier = 2
+                await _send_control(ctx.room, {
+                    "type": "silence_warning",
+                    "tier": 2,
+                    "seconds_silent": int(silence_for),
+                })
                 await session.say("Would you like me to rephrase the question?")
                 continue
-            if silence_for >= 30 and tier < 1:
+            if silence_for >= tier1 and tier < 1:
                 tier = 1
+                await _send_control(ctx.room, {
+                    "type": "silence_warning",
+                    "tier": 1,
+                    "seconds_silent": int(silence_for),
+                })
                 await session.say("Take your time. I'm listening.")
         except RuntimeError:
             return
@@ -404,7 +497,9 @@ async def _duration_watchdog(
                 await session.say("We have about five minutes left. Let's wrap up strong.")
             if elapsed_minutes >= max_minutes:
                 log.info("Max duration reached for %s (%d min)", session_id, elapsed_minutes)
-                await _handle_end_interview(ctx, session, session_id, interview_service)
+                await _handle_end_interview(
+                    ctx, session, session_id, interview_service, completion_reason="max_duration"
+                )
                 return
         except RuntimeError:
             return
@@ -416,6 +511,7 @@ async def _handle_control_message(
     session_id: str,
     ctx: JobContext,
     interview_service: InterviewService,
+    last_user_speech_at: list[float],
 ) -> None:
     msg_type = message.get("type")
     session_key = f"interview:{session_id}"
@@ -441,8 +537,22 @@ async def _handle_control_message(
         session_data["session_conductor"] = conductor.serialize()
         await _update_session(session_key, session_data)
         return
+    if msg_type == "candidate_away":
+        session_data["candidate_away_since"] = time.time()
+        session_data["silence_paused"] = True
+        await _update_session(session_key, session_data)
+        return
+    if msg_type == "candidate_back":
+        session_data["silence_paused"] = False
+        session_data.pop("candidate_away_since", None)
+        last_user_speech_at[0] = time.monotonic()
+        await _update_session(session_key, session_data)
+        await _emit_session_status(ctx, session_data)
+        return
     if msg_type == "end_interview":
-        await _handle_end_interview(ctx, session, session_id, interview_service)
+        await _handle_end_interview(
+            ctx, session, session_id, interview_service, completion_reason="user_ended"
+        )
         return
     if msg_type in {"skip_question", "dsa_next_question"}:
         await _handle_skip_question(ctx, session, session_id, interview_service)
@@ -557,6 +667,7 @@ async def _handle_end_interview(
     session: AgentSession,
     session_id: str,
     interview_service: InterviewService,
+    completion_reason: str = "ended_early",
 ) -> None:
     session_key = f"interview:{session_id}"
     session_data = await _get_session(session_key)
@@ -602,6 +713,7 @@ async def _handle_end_interview(
         "job_description": session_data.get("job_description"),
         "interview_focus": session_data.get("interview_focus"),
         "jd_fit_context": session_data.get("jd_fit_context"),
+        "completion_reason": completion_reason,
         "duration": duration_minutes,
         "responses": session_data.get("responses", []),
         "code_submissions": session_data.get("code_submissions", []),
@@ -616,7 +728,7 @@ async def _handle_end_interview(
     completed_ts = datetime.now(timezone.utc).isoformat()
     session_data.update({
         "status": "ended_early",
-        "completion_reason": "ended_early",
+        "completion_reason": completion_reason,
         "completed_at": completed_ts,
         "last_updated": completed_ts,
         "final_feedback": final_feedback,
@@ -630,7 +742,7 @@ async def _handle_end_interview(
     try:
         db.collection("interviews").document(session_id).set({
             "status": "ended_early",
-            "completion_reason": "ended_early",
+            "completion_reason": completion_reason,
             "completed_at": firestore.SERVER_TIMESTAMP,
             "last_updated": firestore.SERVER_TIMESTAMP,
             "duration_minutes": duration_minutes,
@@ -647,6 +759,13 @@ async def _handle_end_interview(
         log.warning("Firestore persist failed: %s", e)
 
     await _send_control(ctx.room, {
+        "type": "interview_ended",
+        "completion_reason": completion_reason,
+        "duration_minutes": duration_minutes,
+        "questions_answered": session_data["questions_answered"],
+        "timestamp": completed_ts,
+    })
+    await _send_control(ctx.room, {
         "type": "feedback",
         "feedback": final_feedback.get("feedback") if isinstance(final_feedback, dict) else final_feedback,
         "full": final_feedback,
@@ -654,6 +773,7 @@ async def _handle_end_interview(
         "questions_answered": session_data["questions_answered"],
         "code_problems_attempted": session_data["code_problems_attempted"],
         "status": "ended_early",
+        "completion_reason": completion_reason,
         "timestamp": completed_ts,
     })
     await _send_control(ctx.room, {"type": "status", "status": "completed"})
@@ -824,6 +944,10 @@ async def entrypoint(ctx: JobContext) -> None:
                 "is_final": is_final,
             }))
 
+        if is_final and len(transcript) >= 3:
+            last_user_speech_at[0] = time.monotonic()
+            asyncio.create_task(_maybe_restore_stt(session_id, ctx))
+
         if not is_final:
             return
 
@@ -843,6 +967,7 @@ async def entrypoint(ctx: JobContext) -> None:
             asyncio.create_task(_send_control(ctx.room, {"type": "audio_started"}))
             asyncio.create_task(_send_control(ctx.room, {"type": "status", "status": "speaking"}))
         elif new_state == "listening":
+            last_user_speech_at[0] = time.monotonic()
             asyncio.create_task(_send_control(ctx.room, {"type": "audio_ended"}))
             asyncio.create_task(_send_control(ctx.room, {"type": "status", "status": "listening"}))
 
@@ -871,12 +996,38 @@ async def entrypoint(ctx: JobContext) -> None:
         error_state["count"] = int(error_state["count"]) + 1
 
         err_text = str(err or "").lower()
+        is_stt_error = any(
+            marker in err_text
+            for marker in ("stt", "deepgram", "net0001", "speech", "transcri")
+        )
         likely_llm_provider_failure = (
             "rate limit" in err_text
             or "429" in err_text
             or "apiconnectionerror" in err_text
             or "failed to generate llm completion" in err_text
         )
+
+        if is_stt_error and not likely_llm_provider_failure:
+
+            async def _handle_stt_error() -> None:
+                sd = await _get_session(f"interview:{session_id}")
+                if not sd:
+                    return
+                sd["stt_degraded"] = True
+                sd["silence_paused"] = True
+                attempt = int(error_state["count"])
+                await _update_session(f"interview:{session_id}", sd)
+                await _send_control(
+                    ctx.room, {"type": "reconnecting_stt", "attempt": attempt}
+                )
+                if attempt >= 2:
+                    sd = await _get_session(f"interview:{session_id}") or sd
+                    sd["stt_unavailable"] = True
+                    await _update_session(f"interview:{session_id}", sd)
+                    await _send_control(ctx.room, {"type": "stt_unavailable"})
+
+            asyncio.create_task(_handle_stt_error())
+            return
 
         async def _graceful_end_after_error() -> None:
             try:
@@ -887,7 +1038,9 @@ async def entrypoint(ctx: JobContext) -> None:
             except Exception:
                 pass
             try:
-                await _handle_end_interview(ctx, session, session_id, interview_service)
+                await _handle_end_interview(
+                    ctx, session, session_id, interview_service, completion_reason="error"
+                )
             except Exception:
                 pass
 
@@ -913,7 +1066,9 @@ async def entrypoint(ctx: JobContext) -> None:
         except Exception:
             return
         asyncio.create_task(
-            _handle_control_message(payload, session, session_id, ctx, interview_service)
+            _handle_control_message(
+                payload, session, session_id, ctx, interview_service, last_user_speech_at
+            )
         )
 
     def _on_participant_disconnected(participant: Any) -> None:

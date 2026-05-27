@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     allowed_origin_regex: str = os.getenv("ALLOWED_ORIGIN_REGEX", "")
 
     max_interview_duration_minutes: int = 60
+    silence_tier1_seconds: int = 60
+    silence_tier2_seconds: int = 120
+    silence_tier3_seconds: int = 180
+    candidate_away_max_seconds: int = 600
     max_questions_per_interview: int = 15
     dsa_time_limit_minutes: int = 45
     interview_session_ttl_seconds: int = 7200

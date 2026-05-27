@@ -7,7 +7,15 @@ import { useWebSocketAudioPlayback } from "./useWebSocketAudioPlayback";
 import { useWebSocketMessaging } from "./useWebSocketMessaging";
 import { useWebSocketSessionEffects } from "./useWebSocketSessionEffects";
 
-export const useInterviewWebSocketAdapter = (sessionId: string, initialPhase = "behavioral") => {
+type WebSocketAdapterOptions = {
+  onInterviewEnded?: (payload?: { completion_reason?: string }) => void;
+};
+
+export const useInterviewWebSocketAdapter = (
+  sessionId: string,
+  initialPhase = "behavioral",
+  options: WebSocketAdapterOptions = {}
+) => {
   const [currentQuestion, setCurrentQuestion] = useState<unknown>(null);
   const [loadingNextProblem, setLoadingNextProblem] = useState(false);
   const [phase, setPhase] = useState(initialPhase);
@@ -76,6 +84,7 @@ export const useInterviewWebSocketAdapter = (sessionId: string, initialPhase = "
     setAiTextFull: playback.setAiTextFull,
     clearReveal: playback.clearReveal,
     playQuestionAudio: playback.playQuestionAudio,
+    onInterviewEnded: options.onInterviewEnded,
   });
 
   messagingRef.current = messaging.handleMessage;

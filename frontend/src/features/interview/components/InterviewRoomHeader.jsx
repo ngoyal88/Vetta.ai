@@ -7,7 +7,18 @@ const DIFF_COLORS = {
   hard:   'text-red-400 border-l-red-400',
 };
 
-export default function InterviewRoomHeader({ connected, phase, onSkip, onEndInterview, loadingNextProblem, timer, difficulty, transport }) {
+export default function InterviewRoomHeader({
+  connected,
+  phase,
+  onSkip,
+  onEndInterview,
+  loadingNextProblem,
+  timer,
+  difficulty,
+  transport,
+  micHealthSlot,
+  silenceSlot,
+}) {
   const isDSA = phase === 'dsa';
 
   return (
@@ -36,6 +47,9 @@ export default function InterviewRoomHeader({ connected, phase, onSkip, onEndInt
         </div>
 
         <span className="text-[var(--border)] text-xs">|</span>
+
+        {micHealthSlot}
+        {silenceSlot}
 
         {/* Phase */}
         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-sm border border-[var(--border)] bg-[var(--bg-overlay)]">

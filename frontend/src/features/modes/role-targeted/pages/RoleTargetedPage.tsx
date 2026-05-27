@@ -8,6 +8,7 @@ import { useAuth } from 'shared/context/AuthContext';
 import { api } from 'shared/services/api';
 import type { ResumeProfile } from 'features/vault/types';
 import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
+import { getSkipPrecheck } from 'features/interview/utils/precheckStorage';
 import { vaultApi } from 'features/vault/services/vaultApi';
 
 const COMPANY_OPTIONS = [
@@ -145,6 +146,11 @@ const RoleTargetedPage: React.FC = () => {
           interviewFocus,
         }),
       );
+
+      if (getSkipPrecheck()) {
+        navigate(`/interview/${sessionId}`);
+        return;
+      }
 
       setPreCheckSessionId(sessionId);
       setShowPreCheck(true);

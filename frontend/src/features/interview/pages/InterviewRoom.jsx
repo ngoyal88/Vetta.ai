@@ -3,8 +3,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
-import { ChevronRight } from "lucide-react";
-
 import { useConfirmDialog } from "shared/context/ConfirmDialogContext";
 import { useInterviewWebSocketAdapter } from "features/interview/hooks/websocket/useInterviewWebSocketAdapter";
 import Subtitles from "features/interview/components/Subtitles";
@@ -12,7 +10,7 @@ import CodeEditor from "features/interview/components/CodeEditor";
 import DSAQuestionDisplay from "features/interview/components/DSAQuestionDisplay";
 import InterviewRoomHeader from "features/interview/components/InterviewRoomHeader";
 import VoiceControlBar from "features/interview/components/VoiceControlBar";
-import FeedbackCard from "features/interview/components/FeedbackCard";
+import SessionReportScreen from "features/interview/components/SessionReportScreen";
 import DSASplitLayout from "features/interview/components/DSASplitLayout";
 import { fadeInUp, slidePhase } from "shared/utils/animations";
 
@@ -26,6 +24,7 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
   const { confirmDialog } = useConfirmDialog();
   const storedType = sessionStorage.getItem(`interview_type_${sessionId}`);
   const initialPhase = storedType === "dsa" ? "dsa" : "behavioral";
+  const [interviewEnded, setInterviewEnded] = useState(false);
 
   const {
     connected, error, currentQuestion, phase,
@@ -35,7 +34,9 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
     startRecording, stopRecording, submitAnswer, toggleMicrophone,
     skipQuestion, requestNextDSAQuestion, loadingNextProblem,
     endInterview, audioLevel,
-  } = useInterviewWebSocketAdapter(sessionId, initialPhase);
+  } = useInterviewWebSocketAdapter(sessionId, initialPhase, {
+    onInterviewEnded: () => setInterviewEnded(true),
+  });
 
   useEffect(() => { if (error) toast.error(error); }, [error]);
 
@@ -62,8 +63,6 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
   const formatTimer = (s) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
-  const [interviewEnded, setInterviewEnded] = useState(false);
-
   const handleEndInterview = () => {
     confirmDialog({
       title: "End interview",
@@ -74,44 +73,7 @@ const InterviewRoomWSContent = ({ sessionId, onBack }) => {
   };
 
   if (interviewEnded) {
-    return (
-      <div className="h-screen flex flex-col bg-base overflow-hidden">
-        {error && <div role="alert" aria-live="assertive" className="sr-only">{error}</div>}
-        <header className="h-11 shrink-0 px-4 flex items-center border-b border-[var(--border)] bg-raised">
-          <div className="filepath">
-            <span className="segment">~/interviews</span>
-            <span className="sep">/</span>
-            <span className="active-segment">session-report</span>
-          </div>
-        </header>
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-3xl mx-auto p-6">
-            <p className="font-mono text-[10px] text-[var(--text-tertiary)] uppercase tracking-widest mb-4">Session complete</p>
-            <h1 className="text-xl font-semibold text-white mb-1">Interview report</h1>
-            <p className="text-xs text-[var(--text-secondary)] mb-6">
-              {feedback ? "Analysis complete." : "Generating report — this takes a moment."}
-            </p>
-            {feedback ? (
-              <FeedbackCard
-                feedback={typeof feedback === "string" ? feedback : feedback?.feedback ?? ""}
-                scores={typeof feedback === "object" && feedback?.full?.scores ? feedback.full.scores : undefined}
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-3 py-16">
-                <div className="w-8 h-8 border border-indigo/30 border-t-indigo rounded-sm animate-spin" />
-                <p className="font-mono text-xs text-[var(--text-tertiary)]">{'// Analyzing session data…'}</p>
-              </div>
-            )}
-          </div>
-        </div>
-        <footer className="h-14 shrink-0 px-6 flex items-center border-t border-[var(--border)] bg-raised">
-          <button type="button" onClick={onBack} className="btn-ghost text-xs flex items-center gap-1.5">
-            <ChevronRight size={12} className="rotate-180" />
-            {feedback ? "Back to dashboard" : "Back without waiting"}
-          </button>
-        </footer>
-      </div>
-    );
+    return <SessionReportScreen feedback={feedback} onBack={onBack} />;
   }
 
   return (
