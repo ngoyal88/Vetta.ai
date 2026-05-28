@@ -21,6 +21,10 @@ function parseDate(value: string | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function formatTrendLabel(date: Date): string {
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 function increment(map: Record<string, number>, key: string): void {
   const normalized = key.trim() || 'unknown';
   map[normalized] = (map[normalized] || 0) + 1;
@@ -40,9 +44,9 @@ export function computeSummary(items: InterviewHistoryItem[]): AnalyticsSummary 
   const now = Date.now();
   const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
-  const scored: Array<{ date: Date; score: number; label: string }> = [];
+  const scored: Array<{ date: Date; score: number; label: string; order: number }> = [];
 
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     const status = String(item.status || '').toLowerCase();
     if (COMPLETED_STATUSES.has(status)) completedSessions += 1;
 
@@ -66,13 +70,18 @@ export function computeSummary(items: InterviewHistoryItem[]): AnalyticsSummary 
         scored.push({
           date: startedAt,
           score: overall,
-          label: startedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          label: formatTrendLabel(startedAt),
+          order: index,
         });
       }
     }
   }
 
-  scored.sort((a, b) => a.date.getTime() - b.date.getTime());
+  scored.sort((a, b) => {
+    const diff = a.date.getTime() - b.date.getTime();
+    if (diff !== 0) return diff;
+    return a.order - b.order;
+  });
   const scoreTrend = scored.slice(-10).map(({ date, score, label }) => ({
     date: date.toISOString(),
     score,

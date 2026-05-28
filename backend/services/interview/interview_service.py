@@ -199,3 +199,6 @@ class InterviewService:
 
     async def generate_final_feedback(self, session_data: Dict) -> Dict[str, Any]:
         return await self._feedback.generate_final_feedback(session_data)
+
+    async def generate_replay_highlights(self, session_data: Dict) -> List[Dict[str, Any]]:
+        return await self._feedback.generate_replay_highlights(session_data)

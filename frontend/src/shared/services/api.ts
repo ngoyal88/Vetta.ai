@@ -43,6 +43,13 @@ export type TranscriptLine = {
   timestamp?: string;
 };
 
+export type ReplayHighlight = {
+  question: string;
+  answer: string;
+  source?: 'llm';
+  confidence?: number;
+};
+
 export type InterviewHistoryItem = {
   id?: string;
   session_id?: string;
@@ -59,6 +66,7 @@ export type InterviewHistoryItem = {
   duration_minutes?: number;
   questions_answered?: number;
   candidate_name?: string;
+  years_experience?: number;
   scores?: {
     overall?: number;
     [key: string]: unknown;
@@ -66,6 +74,7 @@ export type InterviewHistoryItem = {
   feedback?: string | { feedback?: string; text?: string; generated_at?: string; generatedAt?: string } | null;
   final_feedback?: string | { feedback?: string; text?: string; generated_at?: string; generatedAt?: string } | null;
   live_transcription?: TranscriptLine[];
+  replay_highlights?: ReplayHighlight[];
   [key: string]: unknown;
 };
 

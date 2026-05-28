@@ -1,13 +1,20 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Clock, RefreshCw } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 import InterviewTimelineItem from '../components/InterviewTimelineItem';
 import { useInterviewHistory } from '../hooks/useInterviewHistory';
 import { getInterviewId } from '../utils/interviewHistoryUtils';
+import { api } from 'shared/services/api';
+import { useAuth } from 'shared/context/AuthContext';
+import { getSkipPrecheck } from 'features/interview/utils/precheckStorage';
+import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
 
 const HistoryPage: React.FC = () => {
+  const { currentUser } = useAuth();
+  const navigate = useNavigate();
   const {
     items,
     loading,
@@ -17,9 +24,74 @@ const HistoryPage: React.FC = () => {
     toggleExpanded,
     deletingId,
   } = useInterviewHistory({ limit: 20 });
+  const [startingPracticeId, setStartingPracticeId] = React.useState<string | null>(null);
+  const [showPreCheck, setShowPreCheck] = React.useState(false);
+  const [preCheckSessionId, setPreCheckSessionId] = React.useState<string | null>(null);
+
+  const handlePracticeAgain = React.useCallback(
+    async (sessionId: string) => {
+      const source = items.find((item) => getInterviewId(item) === sessionId);
+      if (!source) return;
+      if (source.interview_type !== 'role_targeted') return;
+      if (!currentUser) {
+        toast.error('Please sign in again');
+        return;
+      }
+
+      try {
+        setStartingPracticeId(sessionId);
+        const response = await api.startInterview(
+          currentUser.uid,
+          'role_targeted',
+          String(source.difficulty || 'medium'),
+          undefined,
+          String(source.target_role || source.custom_role || ''),
+          String(source.candidate_name || currentUser.displayName || 'Candidate'),
+          typeof source.years_experience === 'number' ? source.years_experience : null,
+          {
+            targetCompany: source.target_company ? String(source.target_company) : null,
+            targetRole: String(source.target_role || source.custom_role || ''),
+            interviewFocus: source.interview_focus ? String(source.interview_focus) : 'mixed',
+          },
+        );
+
+        const newSessionId = response.session_id;
+        sessionStorage.setItem(`interview_type_${newSessionId}`, 'role_targeted');
+
+        if (getSkipPrecheck()) {
+          navigate(`/interview/${newSessionId}`);
+          return;
+        }
+        setPreCheckSessionId(newSessionId);
+        setShowPreCheck(true);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        toast.error(`Failed to start session: ${message}`);
+      } finally {
+        setStartingPracticeId(null);
+      }
+    },
+    [currentUser, items, navigate],
+  );
 
   return (
     <div className="min-h-screen bg-base px-5 py-6 pt-16">
+      {showPreCheck && preCheckSessionId && (
+        <PreSessionCheckerWithBrowserCheck
+          sessionId={preCheckSessionId}
+          getAuthToken={() => currentUser?.getIdToken?.()}
+          onAllPassed={() => {
+            const id = preCheckSessionId;
+            setShowPreCheck(false);
+            setPreCheckSessionId(null);
+            navigate(`/interview/${id}`);
+          }}
+          onCancel={() => {
+            setShowPreCheck(false);
+            setPreCheckSessionId(null);
+          }}
+        />
+      )}
       <div className="mx-auto max-w-6xl">
         <p className="mb-4 font-mono text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">
           History
@@ -75,8 +147,10 @@ const HistoryPage: React.FC = () => {
                       interview={interview}
                       isExpanded={expandedId === id}
                       isDeleting={deletingId === id}
+                      isPracticing={startingPracticeId === id}
                       onToggle={() => toggleExpanded(id)}
                       onDelete={() => deleteInterview(id)}
+                      onPracticeAgain={() => handlePracticeAgain(id)}
                     />
                   );
                 })}
