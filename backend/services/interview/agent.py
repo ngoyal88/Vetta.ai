@@ -133,8 +133,20 @@ def _build_system_prompt(session_data: Dict[str, Any], conductor: SessionConduct
     target_role = session_data.get("target_role") or ""
     interview_focus = session_data.get("interview_focus") or ""
     jd_fit_context = session_data.get("jd_fit_context") or {}
+    resume_probe_context = session_data.get("resume_probe_context") or {}
     jd_summary = jd_fit_context.get("summary") if isinstance(jd_fit_context, dict) else ""
     probing_areas = jd_fit_context.get("probing_areas") if isinstance(jd_fit_context, dict) else []
+    resume_summary = resume_probe_context.get("summary") if isinstance(resume_probe_context, dict) else ""
+    resume_probing_areas = (
+        resume_probe_context.get("probing_areas")
+        if isinstance(resume_probe_context, dict)
+        else []
+    )
+    resume_probe_targets = (
+        resume_probe_context.get("probe_targets")
+        if isinstance(resume_probe_context, dict)
+        else []
+    )
     target_lines = ""
     if target_role or target_company:
         target_lines = (
@@ -146,12 +158,29 @@ def _build_system_prompt(session_data: Dict[str, Any], conductor: SessionConduct
         target_lines += f"\nJD fit summary: {jd_summary}"
     if isinstance(probing_areas, list) and probing_areas:
         target_lines += f"\nPriority probing areas: {', '.join([str(p) for p in probing_areas[:6]])}"
+    if resume_summary:
+        target_lines += f"\nResume deep-dive summary: {resume_summary}"
+    if isinstance(resume_probing_areas, list) and resume_probing_areas:
+        target_lines += f"\nResume probing areas: {', '.join([str(p) for p in resume_probing_areas[:6]])}"
+    if isinstance(resume_probe_targets, list) and resume_probe_targets:
+        probe_labels = []
+        for target in resume_probe_targets[:5]:
+            if isinstance(target, dict):
+                probe_labels.append(str(target.get("label") or target.get("kind") or "resume item"))
+        if probe_labels:
+            target_lines += f"\nPlanned resume targets: {', '.join(probe_labels)}"
 
     role_targeted_rule = ""
     if str(interview_type).lower() == "role_targeted":
         role_targeted_rule = (
             "\nThis is a role-targeted loop: stay anchored to the target company, role, "
             "any job description provided, and probing areas. Do not drift into generic trivia."
+        )
+    resume_deep_dive_rule = ""
+    if str(interview_type).lower() == "resume":
+        resume_deep_dive_rule = (
+            "\nThis session is resume-based. Every question should trace back to a specific item "
+            "in the candidate's history. Probe for metrics, tradeoffs, and direct ownership."
         )
 
     return f"""You are a senior software engineer conducting a real technical interview.
@@ -176,7 +205,7 @@ Candidate: {candidate_name}
 Interview type: {interview_type}
 Difficulty: {difficulty}
 {role_line}
-{target_lines}{role_targeted_rule}
+{target_lines}{role_targeted_rule}{resume_deep_dive_rule}
 """
 
 
@@ -610,6 +639,7 @@ async def _handle_skip_question(
                 "job_description": session_data.get("job_description"),
                 "interview_focus": session_data.get("interview_focus"),
                 "jd_fit_context": session_data.get("jd_fit_context"),
+                "resume_probe_context": session_data.get("resume_probe_context"),
             },
         )
         next_question_raw = await interview_service._generate_dsa_question(difficulty, context)
@@ -645,6 +675,7 @@ async def _handle_skip_question(
             "job_description": session_data.get("job_description"),
             "interview_focus": session_data.get("interview_focus"),
             "jd_fit_context": session_data.get("jd_fit_context"),
+            "resume_probe_context": session_data.get("resume_probe_context"),
         },
     )
     follow_up_text = await interview_service.generate_follow_up(responses, interview_type, llm_context=context)
@@ -713,6 +744,7 @@ async def _handle_end_interview(
         "job_description": session_data.get("job_description"),
         "interview_focus": session_data.get("interview_focus"),
         "jd_fit_context": session_data.get("jd_fit_context"),
+        "resume_probe_context": session_data.get("resume_probe_context"),
         "completion_reason": completion_reason,
         "duration": duration_minutes,
         "responses": session_data.get("responses", []),
@@ -824,6 +856,7 @@ async def _handle_candidate_disconnect(
                 "job_description": session_data.get("job_description"),
                 "interview_focus": session_data.get("interview_focus"),
                 "jd_fit_context": session_data.get("jd_fit_context"),
+                "resume_probe_context": session_data.get("resume_probe_context"),
                 "duration": duration_minutes,
                 "responses": responses,
                 "code_submissions": session_data.get("code_submissions", []),
@@ -1124,5 +1157,10 @@ async def entrypoint(ctx: JobContext) -> None:
         role = session_data.get("target_role") or session_data.get("custom_role") or session_data.get("interview_type", "technical")
         greeting = await interview_service.generate_greeting(candidate_name, role)
         await session.say(greeting)
+        if str(session_data.get("interview_type", "")).lower() == "resume":
+            first_question = (session_data.get("questions") or [{}])[0]
+            first_question_text = _extract_question_text(first_question)
+            if first_question_text and first_question_text != "{}":
+                await session.say(first_question_text)
 
     log.info("Greeting delivered for session %s — agent is live", session_id)

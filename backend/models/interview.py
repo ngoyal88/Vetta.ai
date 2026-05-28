@@ -76,6 +76,7 @@ class InterviewSession(BaseModel):
     job_description: Optional[str] = None
     interview_focus: Optional[str] = None
     jd_fit_context: Dict[str, Any] = Field(default_factory=dict)
+    resume_probe_context: Dict[str, Any] = Field(default_factory=dict)
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
     status: str = "active"
     current_question_index: int = 0

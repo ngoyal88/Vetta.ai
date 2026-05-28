@@ -10,6 +10,11 @@ from services.interview.problem_rewrite_service import rewrite_to_story, generat
 logger = get_logger("QuestionService")
 
 
+def _clean_question_text(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    return text if text else fallback
+
+
 class QuestionService:
     def __init__(self, engine: LLMEngine):
         self._engine = engine
@@ -36,6 +41,93 @@ class QuestionService:
         else:
             q = await self._generate_general_question(interview_type, difficulty, context)
             return {"question": q, "type": interview_type.value, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    async def generate_resume_deep_dive_questions(
+        self,
+        *,
+        difficulty: DifficultyLevel,
+        context: str,
+        probe_targets: list[Dict[str, Any]],
+        count: int = 3,
+    ) -> list[Dict[str, Any]]:
+        selected_targets = [t for t in probe_targets if isinstance(t, dict)][: max(1, count)]
+        if not selected_targets:
+            fallback = await self._generate_general_question(InterviewType.RESUME_BASED, difficulty, context)
+            return [{"question": fallback, "type": InterviewType.RESUME_BASED.value, "timestamp": datetime.now(timezone.utc).isoformat()}]
+
+        target_blob_lines = []
+        for target in selected_targets:
+            target_blob_lines.append(
+                f"- id={target.get('id')}; kind={target.get('kind')}; label={target.get('label')}; "
+                f"detail={target.get('detail')}; resume_ref={target.get('resume_ref')}"
+            )
+        target_blob = "\n".join(target_blob_lines)
+        prompt = f"""You are creating opening interview questions for a resume deep-dive session.
+Difficulty: {difficulty.value}
+Session context:
+{context}
+
+Probe targets (one question per target, keep order):
+{target_blob}
+
+Return ONLY valid JSON:
+{{
+  "questions": [
+    {{
+      "probe_target_id": "target id",
+      "resume_ref": "short quoted claim from resume",
+      "question": "CV-anchored interview question",
+      "evaluation_criteria": "What signals prove deep ownership and tradeoff awareness"
+    }}
+  ]
+}}
+
+Rules:
+- Return exactly {len(selected_targets)} questions.
+- Every question must point to a concrete role/project/achievement/weak area in probe targets.
+- Avoid generic introductions such as \"tell me about yourself\".
+"""
+        response = await self._engine.generate_raw(prompt, 0.55, empty_fallback="{}")
+        parsed: list[Dict[str, Any]] = []
+        try:
+            resp = response.strip().strip("`").strip()
+            if resp.lower().startswith("json"):
+                resp = resp[4:]
+            start = resp.find("{")
+            end = resp.rfind("}") + 1
+            obj = json.loads(resp[start:end])
+            questions = obj.get("questions") if isinstance(obj, dict) else []
+            if isinstance(questions, list):
+                parsed = [q for q in questions if isinstance(q, dict)]
+        except Exception:
+            parsed = []
+
+        out: list[Dict[str, Any]] = []
+        for idx, target in enumerate(selected_targets):
+            generated = parsed[idx] if idx < len(parsed) else {}
+            default_question = (
+                f"Let's deep dive into {target.get('label')}. "
+                f"Walk me through the constraints, your decisions, and measurable impact."
+            )
+            question_obj = {
+                "type": InterviewType.RESUME_BASED.value,
+                "question": _clean_question_text(generated.get("question"), default_question),
+                "evaluation_criteria": _clean_question_text(
+                    generated.get("evaluation_criteria"),
+                    "Clear ownership, concrete tradeoffs, and measurable outcomes tied to the claim.",
+                ),
+                "difficulty": difficulty.value,
+                "probe_target_id": str(generated.get("probe_target_id") or target.get("id") or f"target_{idx+1}"),
+                "resume_ref": str(generated.get("resume_ref") or target.get("resume_ref") or target.get("label") or ""),
+            }
+            out.append(
+                {
+                    "question": question_obj,
+                    "type": InterviewType.RESUME_BASED.value,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        return out
 
     async def _generate_dsa_question(
         self,

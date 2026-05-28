@@ -31,16 +31,19 @@ const Dashboard: React.FC<DashboardProps> = (): React.ReactElement => {
                 type="button"
                 onClick={() => {
                   if (mode.id === 'role-targeted') navigate('/modes/role-targeted');
+                  if (mode.id === 'resume-deep-dive') navigate('/modes/resume-deep-dive');
                 }}
-                disabled={mode.id !== 'role-targeted'}
+                disabled={mode.id !== 'role-targeted' && mode.id !== 'resume-deep-dive'}
                 className={`flex items-center justify-between border bg-[#0c0e14] px-4 py-3 text-left font-mono text-[11px] text-[#e2e1eb] transition-all ${
-                  mode.id === 'role-targeted'
+                  mode.id === 'role-targeted' || mode.id === 'resume-deep-dive'
                     ? 'border-zinc-700 hover:border-cyan-500/50 hover:bg-[#161616]'
                     : 'border-zinc-800/70 opacity-70 cursor-not-allowed'
                 }`}
               >
                 {mode.label}
-                <span className="text-zinc-600">{mode.id === 'role-targeted' ? '->' : 'Coming Soon'}</span>
+                <span className="text-zinc-600">
+                  {mode.id === 'role-targeted' || mode.id === 'resume-deep-dive' ? '->' : 'Coming Soon'}
+                </span>
               </button>
             ))}
           </div>

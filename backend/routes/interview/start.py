@@ -98,7 +98,9 @@ async def start_interview(
                 raise HTTPException(400, "interview_focus must be one of: mixed, technical, behavioral, system_design, dsa")
 
         jd_fit_context: Dict[str, Any] = {}
+        resume_probe_context: Dict[str, Any] = {}
         target_context: Optional[Dict[str, Any]] = None
+        seeded_questions: list[Dict[str, Any]] = []
         if request.interview_type == InterviewType.ROLE_TARGETED:
             jd_fit_context = await interview_service.build_jd_fit_context(
                 target_company=target_company,
@@ -115,15 +117,40 @@ async def start_interview(
                 "interview_focus": interview_focus,
                 "jd_fit_context": jd_fit_context,
             }
+        elif request.interview_type == InterviewType.RESUME_BASED:
+            if not resume_data:
+                raise HTTPException(400, "Upload an active resume in Vault before starting Resume Deep Dive.")
+            resume_probe_context = interview_service.build_resume_probe_context(
+                resume_data=resume_data,
+                years_experience=request.years_experience,
+            )
+            target_context = {
+                "resume_probe_context": resume_probe_context,
+            }
+            seeded_questions = await interview_service.generate_resume_deep_dive_questions(
+                difficulty=request.difficulty,
+                context=interview_service._build_context(
+                    request.interview_type,
+                    resume_data,
+                    request.custom_role,
+                    request.years_experience,
+                    target_context=target_context,
+                ),
+                probe_targets=resume_probe_context.get("probe_targets") or [],
+                count=3,
+            )
 
-        first_question = await interview_service.generate_first_question(
-            request.interview_type,
-            request.difficulty,
-            resume_data,
-            target_role if request.interview_type == InterviewType.ROLE_TARGETED else request.custom_role,
-            request.years_experience,
-            target_context=target_context,
-        )
+        if not seeded_questions:
+            first_question = await interview_service.generate_first_question(
+                request.interview_type,
+                request.difficulty,
+                resume_data,
+                target_role if request.interview_type == InterviewType.ROLE_TARGETED else request.custom_role,
+                request.years_experience,
+                target_context=target_context,
+            )
+            seeded_questions = [first_question]
+        first_question = seeded_questions[0]
 
         candidate_name = request.candidate_name or _extract_candidate_name(resume_data) or request.user_id or uid
 
@@ -139,8 +166,9 @@ async def start_interview(
             job_description=job_description,
             interview_focus=interview_focus if request.interview_type == InterviewType.ROLE_TARGETED else None,
             jd_fit_context=jd_fit_context,
+            resume_probe_context=resume_probe_context,
             difficulty=request.difficulty,
-            questions=[first_question],
+            questions=seeded_questions,
             resume_data=resume_data or {},
         )
 
@@ -161,6 +189,9 @@ async def start_interview(
                     "job_description": job_description,
                     "interview_focus": interview_focus if request.interview_type == InterviewType.ROLE_TARGETED else None,
                     "jd_fit_context": jd_fit_context,
+                    "resume_probe_context": resume_probe_context,
+                    "questions": seeded_questions,
+                    "current_question_index": 0,
                     "status": "active",
                     "started_at": firestore.SERVER_TIMESTAMP,
                     "created_at": firestore.SERVER_TIMESTAMP,

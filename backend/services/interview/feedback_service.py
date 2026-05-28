@@ -255,7 +255,7 @@ AREAS FOR IMPROVEMENT:
 - [area 3 with specific action]
 
 ROLE READINESS:
-[If this was role_targeted, give role readiness for the target JD/company, top gaps, and the next focused practice plan. Otherwise keep this brief.]
+[If this was role_targeted, give role readiness for the target JD/company, top gaps, and the next focused practice plan. If this was resume-based, evaluate whether answers showed real ownership and depth for resume claims (metrics, constraints, tradeoffs, lessons learned). Otherwise keep this brief.]
 
 RECOMMENDATION: [Hire / Strong Maybe / Needs Improvement]
 [One sentence rationale]"""

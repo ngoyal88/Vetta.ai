@@ -38,7 +38,8 @@ const InterviewTimelineItem: React.FC<InterviewTimelineItemProps> = ({
   const { text: feedbackText, generatedAt: feedbackGeneratedAt } = parseFeedback(interview);
   const transcript = interview.live_transcription || [];
   const highlights = interview.replay_highlights || [];
-  const canPracticeAgain = interview.interview_type === 'role_targeted';
+  const canPracticeAgain =
+    interview.interview_type === 'role_targeted' || interview.interview_type === 'resume';
 
   return (
     <li className="relative flex gap-4 pl-12 pb-6">
@@ -64,8 +65,8 @@ const InterviewTimelineItem: React.FC<InterviewTimelineItemProps> = ({
               disabled={!canPracticeAgain || isPracticing}
               title={
                 canPracticeAgain
-                  ? 'Start a similar role-targeted session'
-                  : 'Available for Role Targeted sessions in this version'
+                  ? 'Start a similar session'
+                  : 'Available for Role Targeted and Resume Deep Dive sessions in this version'
               }
               className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors enabled:hover:border-zinc-600 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >

@@ -32,31 +32,34 @@ const HistoryPage: React.FC = () => {
     async (sessionId: string) => {
       const source = items.find((item) => getInterviewId(item) === sessionId);
       if (!source) return;
-      if (source.interview_type !== 'role_targeted') return;
+      if (source.interview_type !== 'role_targeted' && source.interview_type !== 'resume') return;
       if (!currentUser) {
         toast.error('Please sign in again');
         return;
       }
 
+      const isRoleTargeted = source.interview_type === 'role_targeted';
       try {
         setStartingPracticeId(sessionId);
         const response = await api.startInterview(
           currentUser.uid,
-          'role_targeted',
+          isRoleTargeted ? 'role_targeted' : 'resume',
           String(source.difficulty || 'medium'),
           undefined,
-          String(source.target_role || source.custom_role || ''),
+          isRoleTargeted ? String(source.target_role || source.custom_role || '') : null,
           String(source.candidate_name || currentUser.displayName || 'Candidate'),
           typeof source.years_experience === 'number' ? source.years_experience : null,
-          {
-            targetCompany: source.target_company ? String(source.target_company) : null,
-            targetRole: String(source.target_role || source.custom_role || ''),
-            interviewFocus: source.interview_focus ? String(source.interview_focus) : 'mixed',
-          },
+          isRoleTargeted
+            ? {
+                targetCompany: source.target_company ? String(source.target_company) : null,
+                targetRole: String(source.target_role || source.custom_role || ''),
+                interviewFocus: source.interview_focus ? String(source.interview_focus) : 'mixed',
+              }
+            : {},
         );
 
         const newSessionId = response.session_id;
-        sessionStorage.setItem(`interview_type_${newSessionId}`, 'role_targeted');
+        sessionStorage.setItem(`interview_type_${newSessionId}`, isRoleTargeted ? 'role_targeted' : 'resume');
 
         if (getSkipPrecheck()) {
           navigate(`/interview/${newSessionId}`);
