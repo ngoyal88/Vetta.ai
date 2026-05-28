@@ -15,8 +15,11 @@ from config import get_settings
 from firebase_admin import firestore
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewType
+from services.interview.contracts.session_events import SessionEvent, SessionEventType
+from services.interview.contracts.fallback_contracts import InterviewEndedEvent, SessionStatusEvent
 from services.interview.interview_service import InterviewService
 from services.interview.session_conductor import SessionConductor
+from services.interview.session_state_machine import SessionStateMachine
 from services.interview.transcript_service import attach_transcript_to_session, extract_assistant_transcript_text
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
@@ -377,7 +380,7 @@ async def _emit_session_status(ctx: JobContext, session_data: Dict[str, Any]) ->
             payload["full"] = final_feedback
         else:
             payload["final_feedback"] = final_feedback
-    await _send_control(ctx.room, payload)
+    await _send_control(ctx.room, SessionStatusEvent(**payload).model_dump(exclude_none=True))
 
 
 async def _maybe_restore_stt(session_id: str, ctx: JobContext) -> None:
@@ -758,8 +761,22 @@ async def _handle_end_interview(
     )
 
     completed_ts = datetime.now(timezone.utc).isoformat()
+    if completion_reason == "silence_timeout":
+        end_event = SessionEventType.SILENCE_TIMEOUT
+    elif completion_reason == "tab_away_timeout":
+        end_event = SessionEventType.TAB_AWAY_TIMEOUT
+    elif completion_reason == "max_duration":
+        end_event = SessionEventType.MAX_DURATION
+    elif completion_reason in {"error", "candidate_disconnected"}:
+        end_event = SessionEventType.ERROR_END
+    else:
+        end_event = SessionEventType.MANUAL_END
+    terminal_state = SessionStateMachine.transition(
+        session_data.get("status", "active"),
+        SessionEvent(type=end_event, reason=completion_reason),
+    ).value
     session_data.update({
-        "status": "ended_early",
+        "status": terminal_state,
         "completion_reason": completion_reason,
         "completed_at": completed_ts,
         "last_updated": completed_ts,
@@ -773,7 +790,7 @@ async def _handle_end_interview(
 
     try:
         db.collection("interviews").document(session_id).set({
-            "status": "ended_early",
+            "status": terminal_state,
             "completion_reason": completion_reason,
             "completed_at": firestore.SERVER_TIMESTAMP,
             "last_updated": firestore.SERVER_TIMESTAMP,
@@ -790,13 +807,12 @@ async def _handle_end_interview(
     except Exception as e:
         log.warning("Firestore persist failed: %s", e)
 
-    await _send_control(ctx.room, {
-        "type": "interview_ended",
-        "completion_reason": completion_reason,
-        "duration_minutes": duration_minutes,
-        "questions_answered": session_data["questions_answered"],
-        "timestamp": completed_ts,
-    })
+    await _send_control(ctx.room, InterviewEndedEvent(
+        completion_reason=completion_reason,
+        duration_minutes=duration_minutes,
+        questions_answered=session_data["questions_answered"],
+        timestamp=completed_ts,
+    ).model_dump())
     await _send_control(ctx.room, {
         "type": "feedback",
         "feedback": final_feedback.get("feedback") if isinstance(final_feedback, dict) else final_feedback,
@@ -804,7 +820,7 @@ async def _handle_end_interview(
         "duration_minutes": duration_minutes,
         "questions_answered": session_data["questions_answered"],
         "code_problems_attempted": session_data["code_problems_attempted"],
-        "status": "ended_early",
+        "status": terminal_state,
         "completion_reason": completion_reason,
         "timestamp": completed_ts,
     })
@@ -826,7 +842,10 @@ async def _handle_candidate_disconnect(
     if session_data.get("status") in {"ended_early", "completed", "incomplete_exit"}:
         return
 
-    session_data["status"] = "incomplete_exit"
+    session_data["status"] = SessionStateMachine.transition(
+        session_data.get("status", "active"),
+        SessionEvent(type=SessionEventType.DISCONNECT_TIMEOUT, reason="candidate_disconnected"),
+    ).value
     session_data["completion_reason"] = "candidate_disconnected"
     completed_ts = datetime.now(timezone.utc).isoformat()
     session_data["completed_at"] = completed_ts

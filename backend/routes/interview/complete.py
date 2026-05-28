@@ -6,6 +6,8 @@ from firebase_admin import firestore
 
 from firebase_config import db
 from models.interview import InterviewSession
+from services.interview.contracts.session_events import SessionEvent, SessionEventType
+from services.interview.session_state_machine import SessionStateMachine
 from utils.auth import verify_firebase_token
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.rate_limit import check_rate_limit
@@ -52,7 +54,12 @@ async def complete_interview(
         final_feedback = await interview_service.generate_final_feedback(feedback_data)
         replay_highlights = await interview_service.generate_replay_highlights(feedback_data)
 
-        session.status = "completed"
+        session.status = SessionStateMachine.transition(
+            session.status,
+            SessionEvent(type=SessionEventType.COMPLETE),
+        ).value
+        session.last_event_id = f"{session_id}:complete"
+        session.completion_reason = session.completion_reason or "complete"
         session.completed_at = datetime.now(timezone.utc)
         session.live_transcription = session_data.get("live_transcription", [])
         session_dict = session.dict()

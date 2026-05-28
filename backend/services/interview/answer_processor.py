@@ -5,6 +5,8 @@ from config import get_settings
 from utils.logger import get_logger
 from utils.redis_client import get_session, update_session
 from services.interview.prompt_engine import PromptEngine
+from services.interview.contracts.session_events import SessionEvent, SessionEventType
+from services.interview.session_state_machine import SessionStateMachine
 
 logger = get_logger("AnswerProcessor")
 
@@ -93,6 +95,10 @@ class AnswerProcessor:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
+        session_data["status"] = SessionStateMachine.transition(
+            session_data.get("status", "active"),
+            SessionEvent(type=SessionEventType.ANSWER_RECEIVED),
+        ).value
 
         max_questions = get_settings().max_questions_per_interview
         if len(responses) >= max_questions:

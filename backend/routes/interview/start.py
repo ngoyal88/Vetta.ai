@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewSession, InterviewType
+from services.interview.contracts.session_events import SessionEvent, SessionEventType
+from services.interview.modes.capabilities import get_mode_capabilities
+from services.interview.session_state_machine import SessionStateMachine
 from utils.auth import verify_firebase_token
 from utils.rate_limit import check_rate_limit
 from utils.redis_client import create_session
@@ -97,48 +100,27 @@ async def start_interview(
             if interview_focus not in INTERVIEW_FOCUS_VALUES:
                 raise HTTPException(400, "interview_focus must be one of: mixed, technical, behavioral, system_design, dsa")
 
-        jd_fit_context: Dict[str, Any] = {}
-        resume_probe_context: Dict[str, Any] = {}
-        target_context: Optional[Dict[str, Any]] = None
-        seeded_questions: list[Dict[str, Any]] = []
-        if request.interview_type == InterviewType.ROLE_TARGETED:
-            jd_fit_context = await interview_service.build_jd_fit_context(
-                target_company=target_company,
-                target_role=target_role or "",
-                job_description=job_description or "",
-                interview_focus=interview_focus,
-                resume_data=resume_data,
-                years_experience=request.years_experience,
-            )
-            target_context = {
-                "target_company": target_company,
-                "target_role": target_role,
-                "job_description": job_description,
-                "interview_focus": interview_focus,
-                "jd_fit_context": jd_fit_context,
-            }
-        elif request.interview_type == InterviewType.RESUME_BASED:
-            if not resume_data:
-                raise HTTPException(400, "Upload an active resume in Vault before starting Resume Deep Dive.")
-            resume_probe_context = interview_service.build_resume_probe_context(
-                resume_data=resume_data,
-                years_experience=request.years_experience,
-            )
-            target_context = {
-                "resume_probe_context": resume_probe_context,
-            }
-            seeded_questions = await interview_service.generate_resume_deep_dive_questions(
-                difficulty=request.difficulty,
-                context=interview_service._build_context(
-                    request.interview_type,
-                    resume_data,
-                    request.custom_role,
-                    request.years_experience,
-                    target_context=target_context,
-                ),
-                probe_targets=resume_probe_context.get("probe_targets") or [],
-                count=3,
-            )
+        caps = get_mode_capabilities(request.interview_type)
+        if not caps.enabled:
+            raise HTTPException(400, f"{request.interview_type.value} mode is currently disabled")
+        if caps.requires_resume and not resume_data:
+            raise HTTPException(400, "Upload an active resume in Vault before starting this interview mode.")
+
+        start_payload = await interview_service.prepare_mode_start(
+            interview_type=request.interview_type,
+            difficulty=request.difficulty,
+            resume_data=resume_data,
+            custom_role=request.custom_role,
+            years_experience=request.years_experience,
+            target_company=target_company,
+            target_role=target_role,
+            job_description=job_description,
+            interview_focus=interview_focus,
+        )
+        jd_fit_context = start_payload["jd_fit_context"]
+        resume_probe_context = start_payload["resume_probe_context"]
+        target_context = start_payload["target_context"]
+        seeded_questions: list[Dict[str, Any]] = start_payload["seeded_questions"]
 
         if not seeded_questions:
             first_question = await interview_service.generate_first_question(
@@ -170,7 +152,12 @@ async def start_interview(
             difficulty=request.difficulty,
             questions=seeded_questions,
             resume_data=resume_data or {},
+            last_event_id=f"{session_id}:start",
         )
+        session.status = SessionStateMachine.transition(
+            session.status,
+            SessionEvent(type=SessionEventType.START),
+        ).value
 
         await create_session(f"interview:{session_id}", session.dict(), expire_seconds=SESSION_TTL)
 
