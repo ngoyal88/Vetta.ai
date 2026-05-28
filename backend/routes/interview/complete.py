@@ -50,6 +50,7 @@ async def complete_interview(
             "session_conductor": session_data.get("session_conductor"),
         }
         final_feedback = await interview_service.generate_final_feedback(feedback_data)
+        replay_highlights = await interview_service.generate_replay_highlights(feedback_data)
 
         session.status = "completed"
         session.completed_at = datetime.now(timezone.utc)
@@ -81,6 +82,7 @@ async def complete_interview(
                     "code_submissions": [s.dict() for s in session.code_submissions],
                     "live_transcription": session_data.get("live_transcription", []),
                     "final_feedback": final_feedback,
+                    "replay_highlights": replay_highlights,
                     "scores": scores if scores else None,
                     "pass": scores.get("overall", 0) >= 6,
                 }

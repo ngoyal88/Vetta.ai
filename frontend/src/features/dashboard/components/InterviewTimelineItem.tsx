@@ -17,22 +17,29 @@ type InterviewTimelineItemProps = {
   interview: InterviewHistoryItem;
   isExpanded: boolean;
   isDeleting: boolean;
+  isPracticing: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onPracticeAgain: () => void;
 };
 
 const InterviewTimelineItem: React.FC<InterviewTimelineItemProps> = ({
   interview,
   isExpanded,
   isDeleting,
+  isPracticing,
   onToggle,
   onDelete,
+  onPracticeAgain,
 }) => {
   const startedAt = getInterviewStartedAt(interview);
   const overall = interview.scores?.overall as number | undefined;
   const title = formatInterviewTitle(interview);
   const { text: feedbackText, generatedAt: feedbackGeneratedAt } = parseFeedback(interview);
   const transcript = interview.live_transcription || [];
+  const highlights = interview.replay_highlights || [];
+  const canPracticeAgain =
+    interview.interview_type === 'role_targeted' || interview.interview_type === 'resume';
 
   return (
     <li className="relative flex gap-4 pl-12 pb-6">
@@ -52,6 +59,19 @@ const InterviewTimelineItem: React.FC<InterviewTimelineItemProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onPracticeAgain}
+              disabled={!canPracticeAgain || isPracticing}
+              title={
+                canPracticeAgain
+                  ? 'Start a similar session'
+                  : 'Available for Role Targeted and Resume Deep Dive sessions in this version'
+              }
+              className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors enabled:hover:border-zinc-600 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isPracticing ? 'Starting...' : 'Practice this again'}
+            </button>
             <button
               type="button"
               onClick={onToggle}
@@ -127,6 +147,31 @@ const InterviewTimelineItem: React.FC<InterviewTimelineItemProps> = ({
                     <p className="whitespace-pre-line text-sm leading-relaxed text-zinc-300">{feedbackText}</p>
                   </div>
                 ) : null}
+
+                <div>
+                  <p className="mb-2 font-mono text-[10px] uppercase tracking-wider text-[var(--cream-4)]">
+                    Replay highlights
+                  </p>
+                  {highlights.length ? (
+                    <div className="space-y-2">
+                      {highlights.map((highlight, idx) => (
+                        <div
+                          key={`${idx}-${highlight.question}`}
+                          className="rounded-sm border border-[var(--border)] bg-[var(--bg-1)] p-3"
+                        >
+                          <p className="text-xs text-[var(--cream-4)]">Interviewer</p>
+                          <p className="text-sm text-[var(--cream-1)]">{highlight.question}</p>
+                          <p className="mt-2 text-xs text-[var(--cream-4)]">Your answer</p>
+                          <p className="text-sm text-[var(--cream-2)]">{highlight.answer}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[var(--cream-4)]">
+                      Highlights not available for this session yet.
+                    </p>
+                  )}
+                </div>
 
                 <div>
                   <p className="mb-2 font-mono text-[10px] uppercase tracking-wider text-[var(--cream-4)]">

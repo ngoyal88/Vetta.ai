@@ -123,7 +123,7 @@ const AnalyticsPage: React.FC = () => {
                           <div
                             className="w-full rounded-sm bg-[var(--teal-2)]"
                             style={{ height: `${Math.max(8, (point.score / 10) * 100)}%` }}
-                            title={`${point.score}/10`}
+                            title={`${point.label}: ${point.score}/10`}
                           />
                         </div>
                         <span className="font-mono text-[9px] text-[var(--cream-4)]">{point.label}</span>

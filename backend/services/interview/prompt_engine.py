@@ -24,6 +24,14 @@ class PromptEngine:
         conversation = "\n\n".join(conversation_parts) or "Interviewer: Let's begin.\nCandidate: (no response yet)"
         interview_type_str = interview_type.value if isinstance(interview_type, InterviewType) else str(interview_type)
         context_block = llm_context.strip() or f"INTERVIEW TYPE: {interview_type_str}\nCONVERSATION SO FAR:\n{conversation}"
+        resume_mode_rule = ""
+        if interview_type == InterviewType.RESUME_BASED:
+            resume_mode_rule = (
+                "\nResume deep-dive mode:\n"
+                "- Every question must trace to a specific resume claim.\n"
+                "- Probe metrics, constraints, ownership, and tradeoffs before moving on.\n"
+                "- If an answer is vague, ask a tighter follow-up on that same claim."
+            )
 
         return f"""SYSTEM PROMPT FOR INTERVIEWER LLM:
 
@@ -47,6 +55,7 @@ Even a single word ("Right.") is enough. Never skip this.
 
 THE CONTEXT BELOW IS YOUR REALITY. Trust it completely.
 Adapt everything you say to what it tells you about this candidate right now.
+{resume_mode_rule}
 
 {context_block}
 
@@ -143,30 +152,55 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
             target_role = target_context.get("target_role")
             interview_focus = target_context.get("interview_focus")
             jd_fit = target_context.get("jd_fit_context") or {}
+            resume_probe = target_context.get("resume_probe_context") or {}
             job_description = (target_context.get("job_description") or "")[:1800]
-            context += "\n\nROLE-TARGETED CONTEXT:"
-            if target_company:
-                context += f"\nTarget Company: {target_company}"
-            if target_role:
-                context += f"\nTarget Role: {target_role}"
-            if interview_focus:
-                context += f"\nInterview Focus: {str(interview_focus).replace('_', ' ')}"
-            if job_description:
-                context += f"\nJob Description Excerpt: {job_description}"
-            if isinstance(jd_fit, dict):
-                summary = jd_fit.get("summary")
+            if target_company or target_role or interview_focus or job_description or jd_fit:
+                context += "\n\nROLE-TARGETED CONTEXT:"
+                if target_company:
+                    context += f"\nTarget Company: {target_company}"
+                if target_role:
+                    context += f"\nTarget Role: {target_role}"
+                if interview_focus:
+                    context += f"\nInterview Focus: {str(interview_focus).replace('_', ' ')}"
+                if job_description:
+                    context += f"\nJob Description Excerpt: {job_description}"
+                if isinstance(jd_fit, dict):
+                    summary = jd_fit.get("summary")
+                    if summary:
+                        context += f"\nJD Fit Summary: {summary}"
+                    for label, key in (
+                        ("Required Skills", "required_skills"),
+                        ("Candidate Strengths", "candidate_strengths"),
+                        ("Candidate Gaps", "candidate_gaps"),
+                        ("Probing Areas", "probing_areas"),
+                        ("Interview Plan", "interview_plan"),
+                    ):
+                        values = jd_fit.get(key)
+                        if isinstance(values, list) and values:
+                            context += f"\n{label}: {', '.join([str(v) for v in values[:6]])}"
+            if isinstance(resume_probe, dict) and resume_probe:
+                context += "\n\nRESUME DEEP DIVE CONTEXT:"
+                summary = resume_probe.get("summary")
                 if summary:
-                    context += f"\nJD Fit Summary: {summary}"
+                    context += f"\nSummary: {str(summary)[:600]}"
                 for label, key in (
-                    ("Required Skills", "required_skills"),
-                    ("Candidate Strengths", "candidate_strengths"),
-                    ("Candidate Gaps", "candidate_gaps"),
                     ("Probing Areas", "probing_areas"),
                     ("Interview Plan", "interview_plan"),
+                    ("Candidate Strengths", "candidate_strengths"),
+                    ("Candidate Gaps", "candidate_gaps"),
                 ):
-                    values = jd_fit.get(key)
+                    values = resume_probe.get(key)
                     if isinstance(values, list) and values:
                         context += f"\n{label}: {', '.join([str(v) for v in values[:6]])}"
+                targets = resume_probe.get("probe_targets")
+                if isinstance(targets, list) and targets:
+                    context += "\nProbe Targets:"
+                    for idx, target in enumerate(targets[:5]):
+                        if not isinstance(target, dict):
+                            continue
+                        label = str(target.get("label") or target.get("kind") or f"target_{idx + 1}")
+                        detail = str(target.get("detail") or target.get("resume_ref") or "")[:180]
+                        context += f"\n{idx + 1}. {label} — {detail}"
 
         return context
 

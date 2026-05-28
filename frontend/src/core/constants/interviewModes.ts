@@ -60,7 +60,7 @@ export const MODE_CARDS: ModeCardDefinition[] = [
       "Shorter runway before the conversation moves on.",
       "Useful when the real loop already feels easy—this makes the real day feel slower.",
     ],
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     slug: "resume_deep_dive",

@@ -169,6 +169,7 @@ class InterviewSessionEngine:
                         "job_description": session_data.get("job_description"),
                         "interview_focus": session_data.get("interview_focus"),
                         "jd_fit_context": session_data.get("jd_fit_context"),
+                        "resume_probe_context": session_data.get("resume_probe_context"),
                     },
                 )
             dynamic_context = self.conductor.build_llm_context()
@@ -260,6 +261,7 @@ class InterviewSessionEngine:
                         "job_description": session_data.get("job_description"),
                         "interview_focus": session_data.get("interview_focus"),
                         "jd_fit_context": session_data.get("jd_fit_context"),
+                        "resume_probe_context": session_data.get("resume_probe_context"),
                     },
                 )
                 next_question_raw = await self.interview_service._generate_dsa_question(difficulty, context)
@@ -280,6 +282,7 @@ class InterviewSessionEngine:
                         "job_description": session_data.get("job_description"),
                         "interview_focus": session_data.get("interview_focus"),
                         "jd_fit_context": session_data.get("jd_fit_context"),
+                        "resume_probe_context": session_data.get("resume_probe_context"),
                     },
                 )
                 follow_up_text = await self.interview_service.generate_follow_up(
@@ -348,6 +351,7 @@ class InterviewSessionEngine:
                     "job_description": session_data.get("job_description"),
                     "interview_focus": session_data.get("interview_focus"),
                     "jd_fit_context": session_data.get("jd_fit_context"),
+                    "resume_probe_context": session_data.get("resume_probe_context"),
                 },
             )
             next_question_raw = await self.interview_service._generate_dsa_question(difficulty, context)
@@ -459,6 +463,7 @@ class InterviewSessionEngine:
                 "job_description": session_data.get("job_description"),
                 "interview_focus": session_data.get("interview_focus"),
                 "jd_fit_context": session_data.get("jd_fit_context"),
+                "resume_probe_context": session_data.get("resume_probe_context"),
                 "completion_reason": completion_reason or session_data.get("completion_reason"),
                 "duration": duration_minutes,
                 "responses": session_data.get("responses", []),
@@ -580,6 +585,7 @@ class InterviewSessionEngine:
                         "job_description": session_data.get("job_description"),
                         "interview_focus": session_data.get("interview_focus"),
                         "jd_fit_context": session_data.get("jd_fit_context"),
+                        "resume_probe_context": session_data.get("resume_probe_context"),
                         "duration": duration_minutes,
                         "responses": session_data.get("responses", []),
                         "code_submissions": session_data.get("code_submissions", []),

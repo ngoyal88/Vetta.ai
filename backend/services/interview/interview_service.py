@@ -12,6 +12,7 @@ from services.interview.jd_context_service import JDContextService
 from services.interview.llm_engine import LLMEngine
 from services.interview.prompt_engine import PromptEngine
 from services.interview.question_service import QuestionService
+from services.interview.resume_context_service import ResumeContextService
 from utils.logger import get_logger
 
 logger = get_logger("InterviewService")
@@ -84,6 +85,7 @@ class InterviewService:
         self._prompt = PromptEngine(self._engine)
         self._questions = QuestionService(self._engine)
         self._jd_context = JDContextService(self._engine)
+        self._resume_context = ResumeContextService()
         self._evaluator = AnswerEvaluator(self._engine)
         self._feedback = FeedbackService(self._engine)
         self._answers = AnswerProcessor(self._prompt, session_ttl)
@@ -158,6 +160,32 @@ class InterviewService:
             years_experience=years_experience,
         )
 
+    def build_resume_probe_context(
+        self,
+        *,
+        resume_data: Optional[Dict[str, Any]],
+        years_experience: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return self._resume_context.build_context(
+            resume_data=resume_data,
+            years_experience=years_experience,
+        )
+
+    async def generate_resume_deep_dive_questions(
+        self,
+        *,
+        difficulty: DifficultyLevel,
+        context: str,
+        probe_targets: List[Dict[str, Any]],
+        count: int = 3,
+    ) -> List[Dict[str, Any]]:
+        return await self._questions.generate_resume_deep_dive_questions(
+            difficulty=difficulty,
+            context=context,
+            probe_targets=probe_targets,
+            count=count,
+        )
+
     async def _generate_dsa_question(self, difficulty: DifficultyLevel, context: str) -> Dict[str, Any]:
         return await self._questions._generate_dsa_question(difficulty, context)
 
@@ -199,3 +227,6 @@ class InterviewService:
 
     async def generate_final_feedback(self, session_data: Dict) -> Dict[str, Any]:
         return await self._feedback.generate_final_feedback(session_data)
+
+    async def generate_replay_highlights(self, session_data: Dict) -> List[Dict[str, Any]]:
+        return await self._feedback.generate_replay_highlights(session_data)

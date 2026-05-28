@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 from utils.logger import get_logger
@@ -7,6 +8,9 @@ from services.interview.transcript_service import extract_live_transcription
 logger = get_logger("FeedbackService")
 
 _TRANSCRIPT_TURN_LIMIT = 40
+_HIGHLIGHT_LIMIT = 3
+_HIGHLIGHT_Q_MAX = 240
+_HIGHLIGHT_A_MAX = 500
 
 class FeedbackService:
     def __init__(self, engine:LLMEngine):
@@ -75,6 +79,96 @@ class FeedbackService:
             "RECOMMENDATION: Needs Review\n"
             "Please re-run a short follow-up interview to generate complete scoring."
         )
+
+    def _build_highlight_context(self, session_data: Dict) -> str:
+        from services.interview.interview_service import _extract_question_text
+
+        responses = session_data.get("responses", []) or []
+        chunks: List[str] = []
+        for idx, qa in enumerate(responses):
+            if not isinstance(qa, dict):
+                continue
+            q_text = _extract_question_text(qa.get("question", {}))
+            a_text = str(qa.get("response") or "").strip()
+            if not q_text or not a_text:
+                continue
+            chunks.append(
+                f"PAIR {idx + 1}\nInterviewer Question: {q_text[:400]}\nCandidate Answer: {a_text[:700]}"
+            )
+
+        if chunks:
+            return "\n\n".join(chunks[:12])
+
+        live = session_data.get("live_transcription")
+        if isinstance(live, list) and live:
+            return self._format_transcript_summary(live, limit=60)
+
+        extracted = extract_live_transcription(session_data)
+        if extracted:
+            return self._format_transcript_summary(extracted, limit=60)
+
+        return ""
+
+    def _sanitize_replay_highlights(self, raw: Any) -> List[Dict[str, Any]]:
+        highlights: List[Dict[str, Any]] = []
+        if not isinstance(raw, list):
+            return highlights
+
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            question = str(item.get("question") or "").strip()[:_HIGHLIGHT_Q_MAX]
+            answer = str(item.get("answer") or "").strip()[:_HIGHLIGHT_A_MAX]
+            if not question or not answer:
+                continue
+
+            sanitized: Dict[str, Any] = {
+                "question": question,
+                "answer": answer,
+                "source": "llm",
+            }
+
+            confidence = item.get("confidence")
+            if isinstance(confidence, (int, float)):
+                c = max(0.0, min(float(confidence), 1.0))
+                sanitized["confidence"] = round(c, 3)
+
+            highlights.append(sanitized)
+            if len(highlights) >= _HIGHLIGHT_LIMIT:
+                break
+
+        return highlights
+
+    async def generate_replay_highlights(self, session_data: Dict) -> List[Dict[str, Any]]:
+        context = self._build_highlight_context(session_data)
+        if not context.strip():
+            return []
+
+        prompt = f"""Extract exactly up to {_HIGHLIGHT_LIMIT} replay highlights from this interview.
+Return ONLY a JSON array. No markdown. No prose.
+
+Output JSON item schema:
+{{
+  "question": "string",
+  "answer": "string",
+  "confidence": 0.0
+}}
+
+Rules:
+- Each item must be one interviewer question and the candidate's direct answer.
+- Keep wording faithful and concise.
+- Omit weak/empty exchanges.
+- Maximum {_HIGHLIGHT_LIMIT} items.
+
+Conversation context:
+{context}
+"""
+        try:
+            raw = await self._engine.generate_raw(prompt, 0.0, empty_fallback="[]")
+            parsed = json.loads(raw)
+            return self._sanitize_replay_highlights(parsed)
+        except Exception:
+            return []
 
     def _insufficient_data_feedback(self, session_data: Dict, reason: str) -> str:
         role = session_data.get("target_role") or session_data.get("custom_role") or "this role"
@@ -161,7 +255,7 @@ AREAS FOR IMPROVEMENT:
 - [area 3 with specific action]
 
 ROLE READINESS:
-[If this was role_targeted, give role readiness for the target JD/company, top gaps, and the next focused practice plan. Otherwise keep this brief.]
+[If this was role_targeted, give role readiness for the target JD/company, top gaps, and the next focused practice plan. If this was resume-based, evaluate whether answers showed real ownership and depth for resume claims (metrics, constraints, tradeoffs, lessons learned). Otherwise keep this brief.]
 
 RECOMMENDATION: [Hire / Strong Maybe / Needs Improvement]
 [One sentence rationale]"""
