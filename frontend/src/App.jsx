@@ -1,9 +1,11 @@
-import React, { Suspense, lazy } from 'react';
-import { Routes, Route, Navigate, useSearchParams } from "react-router-dom";
+import React, { Suspense, lazy, useEffect, useRef } from 'react';
+import { Routes, Route, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { Toaster } from 'react-hot-toast';
-import Navbar from 'shared/components/Navbar';
+import AppShell from 'shared/layout/AppShell';
 import ErrorBoundary from 'shared/components/ErrorBoundary';
 import Home from "shared/pages/Home";
+import ContactPage from "features/landing/ContactPage";
+import PricingPage from "features/landing/PricingPage";
 import SignIn from "features/auth/pages/SignIn";
 import SignUp from "features/auth/pages/SignUp";
 import Dashboard from 'features/dashboard/pages/Dashboard';
@@ -23,6 +25,7 @@ import PressureModePage from 'features/modes/pressure-mode/pages/PressureModePag
 import ResumeDeepDivePage from 'features/modes/resume-deep-dive/pages/ResumeDeepDivePage';
 import BlindModePage from 'features/modes/blind-mode/pages/BlindModePage';
 import PairProgrammingPage from 'features/modes/pair-programming/pages/PairProgrammingPage';
+import SignalIntelligencePage from 'features/signal/pages/SignalIntelligencePage';
 import PrivateRoute from 'shared/components/PrivateRoute';
 import GuestRoute from 'shared/components/GuestRoute';
 import NotFound from 'shared/pages/NotFound';
@@ -61,6 +64,24 @@ function InterviewRoute() {
 }
 
 function App() {
+  const scrollRef = useRef(null);
+  const location = useLocation();
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    if (location.hash) {
+      const target = document.querySelector(location.hash);
+      if (target) {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+        return;
+      }
+    }
+
+    container.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [location.pathname, location.hash]);
+
   return (
     <>
       <Toaster
@@ -81,11 +102,12 @@ function App() {
         containerStyle={{ marginTop: 56 }}
       />
 
-      <Navbar />
-
-      <ErrorBoundary>
-        <Routes>
+      <div className="app-scroll" ref={scrollRef}>
+        <ErrorBoundary>
+          <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/contact" element={<ContactPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
           <Route
             path="/docs"
             element={<Navigate to={{ pathname: '/', hash: '#assessment' }} replace />}
@@ -118,7 +140,9 @@ function App() {
             path="/dashboard"
             element={
               <PrivateRoute>
-                <Dashboard />
+                <AppShell>
+                  <Dashboard />
+                </AppShell>
               </PrivateRoute>
             }
           />
@@ -126,7 +150,9 @@ function App() {
             path="/resume-vault"
             element={
               <PrivateRoute>
-                <VaultLayout />
+                <AppShell>
+                  <VaultLayout />
+                </AppShell>
               </PrivateRoute>
             }
           >
@@ -141,7 +167,9 @@ function App() {
             path="/profile"
             element={
               <PrivateRoute>
-                <Profile />
+                <AppShell>
+                  <Profile />
+                </AppShell>
               </PrivateRoute>
             }
           />
@@ -149,7 +177,9 @@ function App() {
             path="/history"
             element={
               <PrivateRoute>
-                <HistoryPage />
+                <AppShell>
+                  <HistoryPage />
+                </AppShell>
               </PrivateRoute>
             }
           />
@@ -157,59 +187,89 @@ function App() {
             path="/analytics"
             element={
               <PrivateRoute>
-                <AnalyticsPage />
+                <AppShell>
+                  <AnalyticsPage />
+                </AppShell>
               </PrivateRoute>
             }
           />
           <Route
-            path="/modes"
+            path="/signal-intelligence"
             element={
               <PrivateRoute>
-                <ModesPage />
+                <AppShell>
+                  <SignalIntelligencePage />
+                </AppShell>
               </PrivateRoute>
             }
           />
           <Route
-            path="/modes/role-targeted"
+            path="/ai-interview"
             element={
               <PrivateRoute>
-                <RoleTargetedPage />
-              </PrivateRoute>
-            }
-          />
-          <Route path="/role-targeted" element={<Navigate to="/modes/role-targeted" replace />} />
-          <Route
-            path="/modes/pressure-mode"
-            element={
-              <PrivateRoute>
-                <PressureModePage />
+                <AppShell>
+                  <ModesPage />
+                </AppShell>
               </PrivateRoute>
             }
           />
           <Route
-            path="/modes/resume-deep-dive"
+            path="/ai-interview/role-targeted"
             element={
               <PrivateRoute>
-                <ResumeDeepDivePage />
+                <AppShell>
+                  <RoleTargetedPage />
+                </AppShell>
+              </PrivateRoute>
+            }
+          />
+          <Route path="/role-targeted" element={<Navigate to="/ai-interview/role-targeted" replace />} />
+          <Route
+            path="/ai-interview/pressure-mode"
+            element={
+              <PrivateRoute>
+                <AppShell>
+                  <PressureModePage />
+                </AppShell>
               </PrivateRoute>
             }
           />
           <Route
-            path="/modes/blind-mode"
+            path="/ai-interview/resume-deep-dive"
             element={
               <PrivateRoute>
-                <BlindModePage />
+                <AppShell>
+                  <ResumeDeepDivePage />
+                </AppShell>
               </PrivateRoute>
             }
           />
           <Route
-            path="/modes/pair-programming"
+            path="/ai-interview/blind-mode"
             element={
               <PrivateRoute>
-                <PairProgrammingPage />
+                <AppShell>
+                  <BlindModePage />
+                </AppShell>
               </PrivateRoute>
             }
           />
+          <Route
+            path="/ai-interview/pair-programming"
+            element={
+              <PrivateRoute>
+                <AppShell>
+                  <PairProgrammingPage />
+                </AppShell>
+              </PrivateRoute>
+            }
+          />
+          <Route path="/modes" element={<Navigate to="/ai-interview" replace />} />
+          <Route path="/modes/role-targeted" element={<Navigate to="/ai-interview/role-targeted" replace />} />
+          <Route path="/modes/pressure-mode" element={<Navigate to="/ai-interview/pressure-mode" replace />} />
+          <Route path="/modes/resume-deep-dive" element={<Navigate to="/ai-interview/resume-deep-dive" replace />} />
+          <Route path="/modes/blind-mode" element={<Navigate to="/ai-interview/blind-mode" replace />} />
+          <Route path="/modes/pair-programming" element={<Navigate to="/ai-interview/pair-programming" replace />} />
           <Route
             path="/interview/:sessionId"
             element={
@@ -222,7 +282,8 @@ function App() {
           />
           <Route path="*" element={<NotFound />} />
         </Routes>
-      </ErrorBoundary>
+        </ErrorBoundary>
+      </div>
     </>
   );
 }
