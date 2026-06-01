@@ -1,7 +1,6 @@
 import type { TimestampLike } from '../types';
 
 export const MAX_RESUMES = 5;
-export const MAX_VERSIONS = 5;
 export const MAX_RESUME_SIZE_BYTES = 5 * 1024 * 1024;
 export const ALLOWED_FILE_EXTENSIONS = new Set(['pdf', 'docx', 'txt']);
 
