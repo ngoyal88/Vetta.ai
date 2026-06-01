@@ -12,6 +12,7 @@ from firebase_admin import firestore
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewType
 from services.interview.session_conductor import SessionConductor
+from services.interview.candidate_enrichment_service import run_enrichment_pipeline
 from services.interview.contracts.session_events import SessionEvent, SessionEventType
 from services.interview.contracts.fallback_contracts import InterviewEndedEvent, SessionStatusEvent
 from services.interview.session_state_machine import SessionStateMachine
@@ -534,6 +535,19 @@ class InterviewSessionEngine:
             except Exception as fe:
                 logger.warning("Firestore persist failed: %s", fe)
 
+            async def _run_enrichment_task() -> None:
+                try:
+                    await run_enrichment_pipeline(
+                        uid=str(session_data.get("user_id") or self.user_id),
+                        session_id=self.session_id,
+                        session_data=session_data,
+                        engine=self.interview_service._engine,  # noqa: SLF001
+                    )
+                except Exception as enrichment_error:
+                    logger.warning("Session enrichment pipeline failed: %s", enrichment_error)
+
+            asyncio.create_task(_run_enrichment_task())
+
             await self.transport.send_message(
                 InterviewEndedEvent(
                     completion_reason=completion_reason,
@@ -623,6 +637,19 @@ class InterviewSessionEngine:
             session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
             session_data["live_transcription"] = session_data.get("live_transcription", [])
             await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+
+            async def _run_enrichment_task() -> None:
+                try:
+                    await run_enrichment_pipeline(
+                        uid=str(session_data.get("user_id") or self.user_id),
+                        session_id=self.session_id,
+                        session_data=session_data,
+                        engine=self.interview_service._engine,  # noqa: SLF001
+                    )
+                except Exception as enrichment_error:
+                    logger.warning("Disconnect enrichment pipeline failed: %s", enrichment_error)
+
+            asyncio.create_task(_run_enrichment_task())
             try:
                 scores = parse_scores_from_feedback(
                     session_data.get("final_feedback", {}).get("feedback")

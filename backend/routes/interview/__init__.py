@@ -15,5 +15,5 @@ code_service = CodeExecutionService()
 SESSION_TTL = getattr(settings, "interview_session_ttl_seconds", 7200)
 
 # Import submodules so their route handlers are registered on `router`
-from . import start, complete, code, history, account, ws_ticket  # noqa: F401,E402
+from . import start, complete, code, history, account, ws_ticket, enrichments, readiness  # noqa: F401,E402
 

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException
@@ -6,6 +7,7 @@ from firebase_admin import firestore
 
 from firebase_config import db
 from models.interview import InterviewSession
+from services.interview.candidate_enrichment_service import run_enrichment_pipeline
 from services.interview.contracts.session_events import SessionEvent, SessionEventType
 from services.interview.session_state_machine import SessionStateMachine
 from utils.auth import verify_firebase_token
@@ -104,6 +106,19 @@ async def complete_interview(
             db.collection("interviews").document(session_id).set(payload, merge=True)
         except Exception as e:
             logger.warning("Failed to persist interview completion to Firestore: %s", e)
+
+        async def _run_enrichment_task() -> None:
+            try:
+                await run_enrichment_pipeline(
+                    uid=uid,
+                    session_id=session_id,
+                    session_data=session_dict,
+                    engine=interview_service._engine,  # noqa: SLF001
+                )
+            except Exception as enrichment_error:
+                logger.warning("Enrichment pipeline failed for session %s: %s", session_id, enrichment_error)
+
+        asyncio.create_task(_run_enrichment_task())
 
         return {
             "message": "Interview completed",

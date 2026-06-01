@@ -153,6 +153,29 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
                         detail = str(target.get("detail") or target.get("resume_ref") or "")[:180]
                         context += f"\n{idx + 1}. {label} — {detail}"
 
+            enrichment_summary = target_context.get("enrichment_summary") or {}
+            if isinstance(enrichment_summary, dict):
+                projects = enrichment_summary.get("projects") or []
+                skills = enrichment_summary.get("skills") or []
+                soft_signals = enrichment_summary.get("soft_signals") or []
+                if projects or skills or soft_signals:
+                    context += "\n\nLIVING_PROFILE_ENRICHMENTS:"
+                    if isinstance(projects, list) and projects:
+                        values = [str(x.get("value") if isinstance(x, dict) else x) for x in projects[:6]]
+                        values = [v for v in values if v and v != "None"]
+                        if values:
+                            context += f"\nProjects from past interviews: {', '.join(values)}"
+                    if isinstance(skills, list) and skills:
+                        values = [str(x.get("value") if isinstance(x, dict) else x) for x in skills[:8]]
+                        values = [v for v in values if v and v != "None"]
+                        if values:
+                            context += f"\nDemonstrated skills: {', '.join(values)}"
+                    if isinstance(soft_signals, list) and soft_signals:
+                        values = [str(x.get("value") if isinstance(x, dict) else x) for x in soft_signals[:6]]
+                        values = [v for v in values if v and v != "None"]
+                        if values:
+                            context += f"\nSoft-skill signals: {', '.join(values)}"
+
         return context
 
 

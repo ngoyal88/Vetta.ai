@@ -17,6 +17,7 @@ from firebase_config import db
 from models.interview import DifficultyLevel, InterviewType
 from services.interview.contracts.session_events import SessionEvent, SessionEventType
 from services.interview.contracts.fallback_contracts import InterviewEndedEvent, SessionStatusEvent
+from services.interview.candidate_enrichment_service import run_enrichment_pipeline
 from services.interview.interview_service import InterviewService
 from services.interview.session_conductor import SessionConductor
 from services.interview.session_state_machine import SessionStateMachine
@@ -788,6 +789,19 @@ async def _handle_end_interview(
     })
     await _update_session(session_key, session_data)
 
+    async def _run_enrichment_task() -> None:
+        try:
+            await run_enrichment_pipeline(
+                uid=str(session_data.get("user_id") or ""),
+                session_id=session_id,
+                session_data=session_data,
+                engine=interview_service._engine,  # noqa: SLF001
+            )
+        except Exception as enrichment_error:
+            log.warning("Agent enrichment pipeline failed: %s", enrichment_error)
+
+    asyncio.create_task(_run_enrichment_task())
+
     try:
         db.collection("interviews").document(session_id).set({
             "status": terminal_state,
@@ -892,6 +906,19 @@ async def _handle_candidate_disconnect(
     session_data["questions_answered"] = len(responses)
     session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
     await _update_session(session_key, session_data)
+
+    async def _run_enrichment_task() -> None:
+        try:
+            await run_enrichment_pipeline(
+                uid=str(session_data.get("user_id") or ""),
+                session_id=session_id,
+                session_data=session_data,
+                engine=interview_service._engine,  # noqa: SLF001
+            )
+        except Exception as enrichment_error:
+            log.warning("Disconnect enrichment pipeline failed: %s", enrichment_error)
+
+    asyncio.create_task(_run_enrichment_task())
 
     try:
         scores = parse_scores_from_feedback(
@@ -1132,7 +1159,6 @@ async def entrypoint(ctx: JobContext) -> None:
         )
 
     def _on_participant_connected(participant: Any) -> None:
-        nonlocal disconnect_task
         if str(getattr(participant, "identity", "")) != str(session_data.get("user_id")):
             return
         if disconnect_task and not disconnect_task.done():

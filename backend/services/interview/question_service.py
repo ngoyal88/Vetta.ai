@@ -201,7 +201,6 @@ Rules:
 - Every "input" must be {param_count} JSON lines joined by newline. Every "output" must be one JSON line.
 - All inputs/outputs must be correct for the problem above."""
 
-        response = await self._engine.generate_raw(prompt, 0.3, empty_fallback="{}")
         contract = await execute_json_contract(
             template_id="first_question_dsa_testcases",
             engine=self._engine,

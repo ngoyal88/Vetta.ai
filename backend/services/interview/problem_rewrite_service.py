@@ -11,7 +11,7 @@ Function signature schema:
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from utils.logger import get_logger
 
@@ -334,10 +334,10 @@ def _go_template(
         lines.append(f'\tvar {p} {pt}')
         lines.append(f'\tif len(lines) > {i} {{')
         lines.append(f'\t\tif err := json.Unmarshal([]byte(lines[{i}]), &{p}); err != nil {{')
-        lines.append(f'\t\t\tfmt.Fprintf(os.Stderr, "json error: %v\\n", err)')
-        lines.append(f'\t\t\tos.Exit(1)')
-        lines.append(f'\t\t}}')
-        lines.append(f'\t}}')
+        lines.append('\t\t\tfmt.Fprintf(os.Stderr, "json error: %v\\n", err)')
+        lines.append('\t\t\tos.Exit(1)')
+        lines.append('\t\t}')
+        lines.append('\t}')
     args_str = ", ".join(param_names)
     lines.append(f'\tresult := {func_name}({args_str})')
     lines.append('\tout, _ := json.Marshal(result)')
@@ -372,7 +372,6 @@ def _java_template(
     stub_return = "new java.util.HashMap<String,Object>()" if default_return == "dict" else "new java.util.ArrayList<>()"
     param_types = [_schema_type_to_java(p.get("type") or "any") for p in params]
     param_decls = ", ".join(f"{jt} {p}" for jt, p in zip(param_types, param_names))
-    n = len(param_names)
     lines = [
         "import java.util.*;",
         "import com.fasterxml.jackson.databind.ObjectMapper;",
@@ -414,8 +413,6 @@ def _cpp_template(
 ) -> str:
     param_types = [_schema_type_to_cpp(p.get("type") or "any") for p in params]
     ret_cpp = _schema_type_to_cpp(return_type)
-    n = len(param_names)
-
     # Stub return: native type literal
     if ret_cpp == "json":
         stub_return = "{}" if default_return == "dict" else "json::array()"

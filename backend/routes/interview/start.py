@@ -2,12 +2,12 @@ import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException
-from fastapi.encoders import jsonable_encoder
 from firebase_admin import firestore
 from pydantic import BaseModel, Field
 
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewSession, InterviewType
+from services.interview.candidate_enrichment_service import get_enrichment_summary
 from services.interview.contracts.session_events import SessionEvent, SessionEventType
 from services.interview.modes.capabilities import get_mode_capabilities
 from services.interview.session_state_machine import SessionStateMachine
@@ -119,7 +119,10 @@ async def start_interview(
         )
         jd_fit_context = start_payload["jd_fit_context"]
         resume_probe_context = start_payload["resume_probe_context"]
-        target_context = start_payload["target_context"]
+        target_context = start_payload["target_context"] or {}
+        enrichment_summary = await get_enrichment_summary(uid)
+        if enrichment_summary:
+            target_context["enrichment_summary"] = enrichment_summary
         seeded_questions: list[Dict[str, Any]] = start_payload["seeded_questions"]
 
         if not seeded_questions:
