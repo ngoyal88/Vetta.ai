@@ -38,6 +38,8 @@ else:
         db=getattr(settings, "redis_db", 0),
         decode_responses=True,
         ssl=_redis_ssl,
+        socket_connect_timeout=5,
+        socket_timeout=5,
     )
 
 
