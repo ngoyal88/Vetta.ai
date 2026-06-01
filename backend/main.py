@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
-from routes import livekit, vault
+from routes import contact, livekit, vault
 from routes.interview import router as interview_router
 from utils.logger import setup_logging, get_logger
 from utils.redis_client import test_connection, close_redis
@@ -140,6 +140,7 @@ app.add_middleware(
 
 app.include_router(vault.router)
 app.include_router(livekit.router)
+app.include_router(contact.router)
 app.include_router(interview_router)
 
 

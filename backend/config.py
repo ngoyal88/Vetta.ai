@@ -80,6 +80,19 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "console"
 
+    # Contact form (free options: Firestore only, Resend free tier, Gmail SMTP, Discord webhook)
+    contact_recipient_email: str = "hello@vetta.ai"
+    contact_from_email: str = ""
+    resend_api_key: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    contact_discord_webhook_url: str = ""
+    contact_rate_limit: int = 5
+    contact_rate_window_seconds: int = 3600
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
