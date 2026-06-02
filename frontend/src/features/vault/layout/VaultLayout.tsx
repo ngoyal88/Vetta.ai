@@ -6,7 +6,7 @@ import { VaultLibraryProvider } from '../context/VaultLibraryContext';
 export default function VaultLayout() {
   return (
     <VaultLibraryProvider>
-      <div className="relative min-h-screen overflow-x-hidden bg-[var(--bg-0)] pt-16 text-[var(--cream-1)]">
+      <div className="relative min-h-screen overflow-x-hidden bg-[var(--bg-0)] text-[var(--cream-1)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.35]"
           style={{

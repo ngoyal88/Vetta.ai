@@ -56,7 +56,7 @@ const AnalyticsPage: React.FC = () => {
   const summary = useMemo(() => computeSummary(items), [items]);
 
   return (
-    <div className="min-h-screen bg-base px-5 py-6 pt-16">
+    <div className="min-h-screen bg-base px-5 py-6">
       <div className="mx-auto max-w-6xl">
         <div className="mb-4 flex items-center justify-between gap-3">
           <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">
@@ -90,7 +90,7 @@ const AnalyticsPage: React.FC = () => {
           ) : summary.totalSessions === 0 ? (
             <div className="rounded-2xl border border-[var(--border-subtle)] bg-raised p-8 text-center">
               <p className="mb-4 text-zinc-500">Complete a session to see trends here</p>
-              <Link to="/modes" className="btn-outline-cyan inline-flex h-10 items-center px-4 text-sm">
+              <Link to="/ai-interview" className="btn-outline-cyan inline-flex h-10 items-center px-4 text-sm">
                 Start practicing
               </Link>
             </div>
@@ -157,7 +157,7 @@ const AnalyticsPage: React.FC = () => {
               ) : null}
 
               <Link
-                to="/history"
+                to="/ai-interview/history"
                 className="inline-flex items-center gap-1 text-sm text-[var(--teal-1)] hover:text-[var(--cream-0)]"
               >
                 View session details
