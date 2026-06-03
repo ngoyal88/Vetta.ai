@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from models.resume import ResumeCoverageCounts, ResumeScorecardMeta, ResumeScorecardResponse
-from services.integrations.groq_service import GroqService
+from services.llm.platform_llm import get_platform_llm
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -195,8 +195,7 @@ async def _llm_score(
         f"has_responsibilities={any((w.get('responsibilities') for w in (normalized.get('work_experience') or [])))}\n"
         f"role_hint={role_hint or ''}\n"
     )
-    groq = GroqService()
-    raw = await groq.json_completion(system_prompt, user_prompt)
+    raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
     data = _extract_json_obj(raw)
     score = data.get("score")
     role_hint_text = data.get("role_hint_text")
@@ -225,8 +224,7 @@ async def _llm_polish_suggestions(
         f"role_hint={role_hint or ''}\n"
         f"suggestions={json.dumps(base_suggestions)}"
     )
-    groq = GroqService()
-    raw = await groq.json_completion(system_prompt, user_prompt)
+    raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
     payload = _extract_json_obj(raw)
     items = payload.get("suggestions")
     if not isinstance(items, list):

@@ -2,7 +2,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from services.integrations.groq_service import GroqService
+from services.llm.platform_llm import get_platform_llm
 from services.resume.scorecard_service import normalize_resume_for_scorecard, build_resume_scorecard
 from services.vault.analysis_service import _compact_resume_text
 
@@ -69,9 +69,10 @@ async def compare_profiles(
         f"score_a={score_a} score_b={score_b}"
     )
 
-    groq = GroqService()
-    groq.model = "llama-3.3-70b-versatile"
-    raw = await groq.chat([
+    llm_client = get_platform_llm().eval_llm
+    if hasattr(llm_client, "model"):
+        llm_client.model = "llama-3.3-70b-versatile"
+    raw = await llm_client.chat([
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ])

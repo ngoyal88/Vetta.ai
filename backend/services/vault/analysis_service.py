@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from models.vault import VaultScorecard
-from services.integrations.groq_service import GroqService
+from services.llm.platform_llm import get_platform_llm
 from services.resume.scorecard_service import build_resume_scorecard
 
 
@@ -95,8 +95,7 @@ async def extract_ats_flags(profile: Dict[str, Any]) -> List[str]:
         "You detect ATS red flags in resumes. Return ONLY JSON: {\"flags\": [string, ...]}."
     )
     user_prompt = "Resume data:\n" + _compact_resume_text(profile)
-    groq = GroqService()
-    raw = await groq.json_completion(system_prompt, user_prompt)
+    raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
     payload = _extract_json_obj(raw)
     return _safe_list(payload.get("flags"))
 
@@ -109,8 +108,7 @@ async def extract_role_fit(role: Optional[str], profile: Dict[str, Any]) -> Tupl
         "You score role fit for a resume. Return ONLY JSON: {\"role_fit_score\": int, \"fit_reason\": string}."
     )
     user_prompt = f"role={role}\nresume=\n{_compact_resume_text(profile)}"
-    groq = GroqService()
-    raw = await groq.json_completion(system_prompt, user_prompt)
+    raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
     payload = _extract_json_obj(raw)
     score = payload.get("role_fit_score")
     if isinstance(score, (int, float)):
@@ -128,8 +126,7 @@ async def generate_diff_summary(prev_profile: Dict[str, Any], next_profile: Dict
         "PREVIOUS:\n" + _compact_resume_text(prev_profile) + "\n\n" +
         "CURRENT:\n" + _compact_resume_text(next_profile)
     )
-    groq = GroqService()
-    raw = await groq.json_completion(system_prompt, user_prompt)
+    raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
     payload = _extract_json_obj(raw)
     summary = payload.get("diff_summary")
     if isinstance(summary, str) and summary.strip():
