@@ -37,7 +37,7 @@ function getTranscriptSnippet(lines: TranscriptLine[]): {
   return { aiLine, candidateLine };
 }
 
-const SessionHistoryDetailPanel: React.FC<SessionHistoryDetailPanelProps> = ({
+function SessionHistoryDetailPanelComponent({
   interview,
   onOpenFullTranscript,
   onPracticeAgain,
@@ -45,7 +45,7 @@ const SessionHistoryDetailPanel: React.FC<SessionHistoryDetailPanelProps> = ({
   isPracticing,
   isDeleting,
   canPracticeAgain,
-}) => {
+}: SessionHistoryDetailPanelProps) {
   if (!interview) {
     return (
       <div className="history-detail-panel history-detail-panel--empty">
@@ -205,6 +205,7 @@ const SessionHistoryDetailPanel: React.FC<SessionHistoryDetailPanelProps> = ({
       </div>
     </div>
   );
-};
+}
 
+const SessionHistoryDetailPanel = React.memo(SessionHistoryDetailPanelComponent);
 export default SessionHistoryDetailPanel;
