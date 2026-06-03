@@ -10,7 +10,7 @@ import RoleTargetedPage from 'features/modes/role-targeted/pages/RoleTargetedPag
 import AnalyticsPage from 'features/dashboard/pages/AnalyticsPage';
 import Dashboard from 'features/dashboard/pages/Dashboard';
 import HistoryPage from 'features/dashboard/pages/HistoryPage';
-import Profile from 'features/dashboard/pages/Profile';
+import SettingsPage from 'features/dashboard/pages/SettingsPage';
 import SignalIntelligencePage from 'features/signal/pages/SignalIntelligencePage';
 import VaultLayout from 'features/vault/layout/VaultLayout';
 import VaultComparePage from 'features/vault/pages/VaultComparePage';
@@ -76,7 +76,7 @@ export const appRoutes = (
       <Route path="r/:resumeId" element={<VaultVersionsPage />} />
       <Route path="r/:resumeId/:versionId" element={<VaultVersionDetailPage />} />
     </Route>
-    <Route path="/profile" element={privateShell(<Profile />)} />
+    <Route path="/profile" element={privateShell(<SettingsPage />)} />
     <Route path="/analytics" element={privateShell(<AnalyticsPage />)} />
     <Route path="/signal-intelligence" element={privateShell(<SignalIntelligencePage />)} />
     <Route path="/ai-interview/history" element={privateShell(<HistoryPage />)} />
