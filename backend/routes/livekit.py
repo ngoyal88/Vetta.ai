@@ -10,6 +10,7 @@ from config import get_settings
 from utils.auth import verify_firebase_token
 from utils.logger import get_logger
 from utils.redis_client import get_session
+from utils.session_access import require_session_owner
 
 router = APIRouter(prefix="/livekit", tags=["LiveKit"])
 log = get_logger(__name__)
@@ -49,12 +50,7 @@ class LiveKitAttachRequest(BaseModel):
 async def _resolve_session(session_id: str, uid: str) -> Dict[str, Any]:
     """Load and authorise a session; raises 404/403 on failure."""
     session_data = await get_session(f"interview:{session_id}")
-    if not session_data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    owner = session_data.get("user_id") or session_data.get("uid")
-    if owner and str(owner) != str(uid):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Session does not belong to you")
-    return session_data
+    return require_session_owner(session_data, uid)
 
 
 def _agent_name() -> str:

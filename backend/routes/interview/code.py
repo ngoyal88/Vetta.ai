@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field
 
 from models.interview import CodeSubmission, InterviewSession, TestCase
 from utils.auth import verify_firebase_token
+from utils.http_errors import raise_internal_error
 from utils.rate_limit import check_rate_limit
 from utils.redis_client import get_session, update_session
+from utils.session_access import require_session_owner
 
 from . import SESSION_TTL, code_service, logger, router
 
@@ -29,11 +31,7 @@ async def submit_code(
         await check_rate_limit(uid, "submit_code", limit=30, window_seconds=60)
 
         session_data = await get_session(f"interview:{request.session_id}")
-        if not session_data:
-            raise HTTPException(404, "Session not found")
-
-        if session_data.get("user_id") and session_data.get("user_id") != uid:
-            raise HTTPException(403, "Not authorized for this session")
+        require_session_owner(session_data, uid)
 
         session = InterviewSession(**session_data)
 
@@ -114,5 +112,4 @@ async def submit_code(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error executing code: %s", e, exc_info=True)
-        raise HTTPException(500, str(e))
+        raise_internal_error(logger, e, message="Failed to execute code")
