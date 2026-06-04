@@ -1,10 +1,12 @@
 """Redis client and session helpers."""
 import json
 import os
-from typing import Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 from fastapi.encoders import jsonable_encoder
 from redis.asyncio import Redis
+from redis.exceptions import WatchError
 
 from config import get_settings
 from utils.logger import get_logger
@@ -107,6 +109,86 @@ async def update_session(session_key: str, data: dict, expire_seconds: int = 360
     except Exception as e:
         log.error("Error updating session %s: %s", session_key, e, exc_info=True)
         raise
+
+
+async def merge_session(
+    session_key: str,
+    patch: dict,
+    expire_seconds: int = 3600,
+    *,
+    redis_client: Optional[Any] = None,
+) -> dict:
+    """Shallow-merge patch into the existing session blob."""
+
+    def _mutator(current: dict) -> dict:
+        base = current if isinstance(current, dict) else {}
+        merged = {**base, **patch}
+        return merged
+
+    return await update_session_atomic(
+        session_key,
+        _mutator,
+        expire_seconds=expire_seconds,
+        redis_client=redis_client,
+    )
+
+
+async def update_session_atomic(
+    session_key: str,
+    mutator: Callable[[dict], dict],
+    expire_seconds: int = 3600,
+    max_retries: int = 3,
+    *,
+    redis_client: Optional[Any] = None,
+) -> dict:
+    """Optimistic read-modify-write with Redis WATCH to reduce lost updates."""
+    client = redis_client or redis
+    last_error: Optional[Exception] = None
+
+    for _ in range(max_retries):
+        try:
+            await client.watch(session_key)
+            raw = await client.get(session_key)
+            current: dict = json.loads(raw) if raw else {}
+            updated = mutator(dict(current))
+            if not isinstance(updated, dict):
+                raise TypeError("Session mutator must return a dict")
+            updated["_version"] = int(current.get("_version", 0)) + 1
+            safe = jsonable_encoder(updated)
+            pipe = client.pipeline()
+            pipe.multi()
+            pipe.set(session_key, json.dumps(safe), ex=expire_seconds)
+            await pipe.execute()
+            log.info("Session %s updated atomically (v=%s)", session_key, updated.get("_version"))
+            return updated
+        except WatchError as e:
+            last_error = e
+            continue
+        except Exception as e:
+            last_error = e
+            log.error("Error in atomic session update %s: %s", session_key, e, exc_info=True)
+            raise
+        finally:
+            try:
+                await client.unwatch()
+            except Exception:
+                pass
+
+    log.warning(
+        "Atomic session update exhausted retries for %s; falling back to SET",
+        session_key,
+    )
+    raw = await client.get(session_key)
+    current = json.loads(raw) if raw else {}
+    updated = mutator(dict(current))
+    if not isinstance(updated, dict):
+        raise TypeError("Session mutator must return a dict")
+    updated["_version"] = int(current.get("_version", 0)) + 1
+    safe = jsonable_encoder(updated)
+    await client.set(session_key, json.dumps(safe), ex=expire_seconds)
+    if last_error:
+        log.debug("Last atomic retry error for %s: %s", session_key, last_error)
+    return updated
 
 
 async def delete_session(session_id: str) -> bool:

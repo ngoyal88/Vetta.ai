@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     max_questions_per_interview: int = 15
     dsa_time_limit_minutes: int = 45
     interview_session_ttl_seconds: int = 7200
+    transcript_merge_gap_ms: int = 1500
+    transcript_merge_max_chars: int = 1200
 
     # LiveKit: when True, TTS is streamed as tts_chunk (requires client handlers). False = single
     # question message with base64 audio (and optional chunking); works with useInterviewLiveKit AudioPlayer.

@@ -24,6 +24,7 @@ from services.interview.session_state_machine import SessionStateMachine
 from services.interview.transcript_service import attach_transcript_to_session, extract_assistant_transcript_text
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
+from services.interview.session_store import SessionStore
 from redis.asyncio import Redis
 
 from livekit.agents import Agent, AgentServer, AgentSession, AutoSubscribe, JobContext, JobProcess, llm
@@ -92,11 +93,13 @@ async def _ensure_redis() -> Redis:
     return _worker_redis
 
 
+async def _session_store(session_key: str, ttl: int = SESSION_TTL) -> SessionStore:
+    return SessionStore(session_key, redis_client=await _ensure_redis(), ttl=ttl)
+
+
 async def _get_session(session_key: str) -> Optional[Dict[str, Any]]:
     try:
-        redis = await _ensure_redis()
-        raw = await redis.get(session_key)
-        return json.loads(raw) if raw else None
+        return await (await _session_store(session_key)).get()
     except Exception as e:
         log.error("Error retrieving session %s: %s", session_key, e, exc_info=True)
         return None
@@ -104,8 +107,7 @@ async def _get_session(session_key: str) -> Optional[Dict[str, Any]]:
 
 async def _update_session(session_key: str, data: Dict[str, Any], ttl: int = SESSION_TTL) -> None:
     try:
-        redis = await _ensure_redis()
-        await redis.set(session_key, json.dumps(data, default=str), ex=ttl)
+        await (await _session_store(session_key, ttl=ttl)).replace(data)
     except Exception as e:
         log.error("Error updating session %s: %s", session_key, e, exc_info=True)
 
@@ -289,9 +291,17 @@ async def _handle_user_turn(
     if not session_data:
         return
     conductor = SessionConductor.load(session_data.get("session_conductor"))
+    merge_gap_ms = int(getattr(settings, "transcript_merge_gap_ms", 1500))
+    merge_max_chars = int(getattr(settings, "transcript_merge_max_chars", 1200))
     answer_duration = max(0.0, time.monotonic() - answer_started_at[0])
     conductor.turn_count += 1
-    conductor.append_turn("candidate", transcript)
+    conductor.append_or_merge_turn(
+        "candidate",
+        transcript,
+        timestamp=time.time(),
+        gap_ms=merge_gap_ms,
+        max_chars=merge_max_chars,
+    )
     conductor.last_answer_duration = answer_duration
 
     questions = session_data.get("questions", []) or []
@@ -344,7 +354,15 @@ async def _handle_agent_turn(session_id: str, text: str) -> None:
     if not session_data:
         return
     conductor = SessionConductor.load(session_data.get("session_conductor"))
-    conductor.append_turn("interviewer", clean)
+    merge_gap_ms = int(getattr(settings, "transcript_merge_gap_ms", 1500))
+    merge_max_chars = int(getattr(settings, "transcript_merge_max_chars", 1200))
+    conductor.append_or_merge_turn(
+        "interviewer",
+        clean,
+        timestamp=time.time(),
+        gap_ms=merge_gap_ms,
+        max_chars=merge_max_chars,
+    )
     session_data["session_conductor"] = conductor.serialize()
     await _update_session(session_key, session_data)
 
