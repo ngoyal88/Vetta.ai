@@ -84,12 +84,95 @@ export type InterviewHistoryResponse = {
   [key: string]: unknown;
 };
 
+export type BackendHealthResponse = {
+  services?: {
+    livekit?: boolean;
+    agent?: boolean;
+    [key: string]: unknown;
+  };
+  livekit_url?: string | null;
+  detail?: string;
+  message?: string;
+  [key: string]: unknown;
+};
+
+export type LivekitTokenResponse = {
+  token: string;
+  url: string;
+  room_name?: string;
+};
+
+export type LivekitHealthResponse = {
+  ok?: boolean;
+  detail?: string;
+  [key: string]: unknown;
+};
+
 const getAuthHeaders = async (isForm = false): Promise<AuthHeaders> => {
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
   const token = await user.getIdToken();
   const base: AuthHeaders = { Authorization: `Bearer ${token}` };
   return isForm ? base : { "Content-Type": "application/json", ...base };
+};
+
+const parseErrorDetail = async (response: Response, fallback: string): Promise<string> => {
+  try {
+    const body = (await response.json()) as { detail?: string; message?: string };
+    if (typeof body?.detail === "string") return body.detail;
+    if (typeof body?.message === "string") return body.message;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+};
+
+const getBackendHealth = async (signal?: AbortSignal): Promise<BackendHealthResponse> => {
+  const response = await fetch(`${API_URL}/health`, { method: "GET", signal });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as BackendHealthResponse;
+    throw new Error(body?.detail || body?.message || `Health check failed (${response.status})`);
+  }
+  return response.json() as Promise<BackendHealthResponse>;
+};
+
+const getLivekitHealth = async (authToken?: string | null, signal?: AbortSignal): Promise<LivekitHealthResponse> => {
+  const headers: AuthHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+  const response = await fetch(`${API_URL}/livekit/health`, { method: "GET", headers, signal });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json() as Promise<LivekitHealthResponse>;
+};
+
+const createLivekitToken = async (
+  sessionId: string,
+  options: { dispatchAgent?: boolean } = {},
+): Promise<LivekitTokenResponse> => {
+  const response = await fetch(`${API_URL}/livekit/token`, {
+    method: "POST",
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({
+      session_id: sessionId,
+      dispatch_agent: Boolean(options.dispatchAgent),
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorDetail(response, "Failed to get LiveKit token"));
+  }
+  return response.json() as Promise<LivekitTokenResponse>;
+};
+
+const attachLivekitAgent = async (sessionId: string): Promise<Record<string, unknown>> => {
+  const response = await fetch(`${API_URL}/livekit/attach`, {
+    method: "POST",
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorDetail(response, "Failed to dispatch LiveKit interview agent"));
+  }
+  return response.json() as Promise<Record<string, unknown>>;
 };
 
 const startInterview = async (
@@ -213,6 +296,10 @@ const deleteAccountData = async (): Promise<Record<string, unknown>> => {
 };
 
 export const api = {
+  getBackendHealth,
+  getLivekitHealth,
+  createLivekitToken,
+  attachLivekitAgent,
   startInterview,
   submitCode,
   completeInterview,

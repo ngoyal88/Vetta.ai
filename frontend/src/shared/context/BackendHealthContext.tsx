@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { api, type BackendHealthResponse } from "shared/services/api";
 
 type BackendHealthValue = {
   healthLoading: boolean;
@@ -11,16 +11,6 @@ type BackendHealthValue = {
 
 type BackendHealthProviderProps = {
   children: React.ReactNode;
-};
-
-type HealthResponse = {
-  services?: {
-    livekit?: boolean;
-    agent?: boolean;
-  };
-  livekit_url?: string | null;
-  detail?: string;
-  message?: string;
 };
 
 const BackendHealthContext = createContext<BackendHealthValue | undefined>(undefined);
@@ -42,19 +32,9 @@ export const BackendHealthProvider = ({ children }: BackendHealthProviderProps) 
 
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/health`, { method: "GET" });
+        const data = (await api.getBackendHealth()) as BackendHealthResponse;
         if (cancelled) return;
 
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as HealthResponse;
-          const message = data?.detail || data?.message || `Health check failed (${res.status})`;
-          setHealthError(message);
-          setLivekitAvailable(false);
-          setLivekitUrl(null);
-          return;
-        }
-
-        const data = (await res.json().catch(() => ({}))) as HealthResponse;
         setHealthError(null);
         setLivekitAvailable(Boolean(data?.services?.livekit && data?.services?.agent));
         setLivekitUrl(data?.livekit_url ?? null);

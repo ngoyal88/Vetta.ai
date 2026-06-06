@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Room, RoomEvent, createLocalAudioTrack, RemoteTrack } from "livekit-client";
-import { auth } from "firebaseConfig";
 import { decodeJsonMessage, encodeJsonMessage } from "./utils/messageCodec";
+import { api } from "shared/services/api";
 import toast from "react-hot-toast";
 import type { TransportOptions } from "../types";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const isDev = import.meta.env.DEV;
 
 export const useTransportConnection = (options: TransportOptions) => {
@@ -42,24 +40,7 @@ export const useTransportConnection = (options: TransportOptions) => {
     const { sessionId } = optionsRef.current;
     if (!sessionId) return;
     try {
-      const user = auth.currentUser;
-      const token = user ? await user.getIdToken() : null;
-      if (!token) {
-        setError("Not authenticated");
-        toast.error("Please sign in to join the interview");
-        return;
-      }
-      const tokenRes = await fetch(`${API_URL}/livekit/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: sessionId }),
-      });
-      if (!tokenRes.ok) {
-        const err = await tokenRes.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to get LiveKit token");
-      }
-
-      const { token: lkToken, url: lkUrl } = await tokenRes.json();
+      const { token: lkToken, url: lkUrl } = await api.createLivekitToken(sessionId);
       const wsUrl = (lkUrl || import.meta.env.VITE_LIVEKIT_URL || "").trim();
       if (!wsUrl) throw new Error("LiveKit URL is not configured");
 
@@ -162,15 +143,7 @@ export const useTransportConnection = (options: TransportOptions) => {
 
       await room.connect(wsUrl, lkToken);
       try {
-        const attachRes = await fetch(`${API_URL}/livekit/attach`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ session_id: sessionId }),
-        });
-        if (!attachRes.ok) {
-          const attachErr = await attachRes.json().catch(() => ({}));
-          throw new Error(attachErr.detail || "Failed to dispatch LiveKit interview agent");
-        }
+        await api.attachLivekitAgent(sessionId);
       } catch (attachError) {
         const message = attachError instanceof Error ? attachError.message : "Failed to dispatch LiveKit interview agent";
         if (isDev) console.error("LiveKit attach request failed", attachError);
