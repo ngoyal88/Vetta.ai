@@ -4,6 +4,14 @@ AgentServer registers with LiveKit Cloud and dispatches an AgentSession per room
 Room name equals session_id; session data must exist in Redis before the user joins.
 Pipeline: Deepgram STT → Groq LLM → Edge TTS (via EdgeTTSPlugin) → Silero VAD.
 """
+import sys
+from pathlib import Path
+
+# Allow `python services/interview/agent.py dev` from backend/ (cwd on sys.path).
+_backend_root = Path(__file__).resolve().parents[2]
+if str(_backend_root) not in sys.path:
+    sys.path.insert(0, str(_backend_root))
+
 import asyncio
 import json
 import os
