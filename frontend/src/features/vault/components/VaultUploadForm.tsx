@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
+import { Upload } from 'lucide-react';
 
 import type { VaultEntry } from '../types';
 import { getErrorMessage, validateResumeFile } from '../utils/vaultUtils';
@@ -28,12 +29,14 @@ export default function VaultUploadForm({
   uploading,
   onUpload,
 }: VaultUploadFormProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<UploadMode>(initialMode);
   const [name, setName] = useState('');
   const [tags, setTags] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [resumeId, setResumeId] = useState(initialResumeId || entries[0]?.id || '');
   const [userNote, setUserNote] = useState('');
+  const [dragActive, setDragActive] = useState(false);
 
   React.useEffect(() => {
     if (initialMode) setMode(initialMode);
@@ -44,36 +47,77 @@ export default function VaultUploadForm({
   }, [initialResumeId]);
 
   const selectedEntry = entries.find((e) => e.id === resumeId);
+  const canAddVersion = entries.length > 0;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-    const validation = validateResumeFile(file);
+  const pickFile = useCallback((next: File | null) => {
+    if (!next) {
+      setFile(null);
+      return;
+    }
+    const validation = validateResumeFile(next);
     if (validation) {
-      throw new Error(validation);
+      toast.error(validation);
+      return;
     }
-    if (!file) return;
+    setFile(next);
+  }, []);
 
-    if (mode === 'new' && !name.trim()) {
-      throw new Error('Name is required');
-    }
-    if (mode === 'version' && !resumeId) {
-      throw new Error('Select a resume');
-    }
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    setDragActive(true);
+  }, []);
 
-    await onUpload({
-      mode,
-      file,
-      name: mode === 'new' ? name.trim() : selectedEntry?.name || name.trim(),
-      tags: mode === 'new' ? tags : (selectedEntry?.tags || []).join(', '),
-      resumeId: mode === 'version' ? resumeId : undefined,
-      userNote: mode === 'version' ? userNote : undefined,
-    });
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    setDragActive(false);
+  }, []);
 
-    setFile(null);
-    setName('');
-    setTags('');
-    setUserNote('');
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      setDragActive(false);
+      const dropped = event.dataTransfer.files?.[0] ?? null;
+      pickFile(dropped);
+    },
+    [pickFile],
+  );
+
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try {
+      const validation = validateResumeFile(file);
+      if (validation) {
+        throw new Error(validation);
+      }
+      if (!file) return;
+
+      if (mode === 'new' && !name.trim()) {
+        throw new Error('Name is required');
+      }
+      if (mode === 'version' && !resumeId) {
+        throw new Error('Select a resume');
+      }
+
+      await onUpload({
+        mode,
+        file,
+        name: mode === 'new' ? name.trim() : selectedEntry?.name || name.trim(),
+        tags: mode === 'new' ? tags : (selectedEntry?.tags || []).join(', '),
+        resumeId: mode === 'version' ? resumeId : undefined,
+        userNote: mode === 'version' ? userNote : undefined,
+      });
+
+      setFile(null);
+      setName('');
+      setTags('');
+      setUserNote('');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     } catch (err) {
       toast.error(getErrorMessage(err, 'Upload failed'));
     }
@@ -81,94 +125,149 @@ export default function VaultUploadForm({
 
   return (
     <form
-      onSubmit={(e) => {
-        void handleSubmit(e);
+      onSubmit={(event) => {
+        void handleSubmit(event);
       }}
-      className="rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-1)] p-6 shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
+      className="glass-panel flex h-full min-h-[32rem] flex-col overflow-hidden rounded-2xl"
     >
-      <div className="flex flex-wrap gap-2">
-        {(['new', 'version'] as UploadMode[]).map((value) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setMode(value)}
-            className={[
-              'rounded-full border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.12em] transition',
-              mode === value
-                ? 'border-[var(--teal-2)] bg-[var(--emerald-dim)] text-[var(--cream-0)]'
-                : 'border-[var(--border)] bg-[var(--bg-2)] text-[var(--cream-3)] hover:border-[var(--teal-2)]/50',
-            ].join(' ')}
-          >
-            {value === 'new' ? 'New resume' : 'New version'}
-          </button>
-        ))}
+      <div
+        className="flex border-b border-[var(--border-subtle)] bg-[color-mix(in_srgb,var(--color-surface-container-lowest)_80%,transparent)]"
+        role="tablist"
+        aria-label="Upload mode"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'new'}
+          onClick={() => setMode('new')}
+          className={['vault-hub-tab', mode === 'new' ? 'vault-hub-tab--active' : ''].join(' ')}
+        >
+          New Resume
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'version'}
+          onClick={() => canAddVersion && setMode('version')}
+          disabled={!canAddVersion}
+          title={canAddVersion ? undefined : 'Upload a resume first to add versions'}
+          className={['vault-hub-tab', mode === 'version' ? 'vault-hub-tab--active' : ''].join(' ')}
+        >
+          New Version
+        </button>
       </div>
 
-      <div className="mt-6 space-y-4">
+      <div className="flex flex-1 flex-col gap-6 p-5 md:p-6">
         {mode === 'new' ? (
-          <>
-            <label className="block text-xs text-[var(--cream-3)]">
-              Resume name
+          <div className="animate-fade-in grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <label htmlFor="vault-resume-name" className="type-label-sm text-[var(--color-on-surface-variant)]">
+                Resume Name
+              </label>
               <input
+                id="vault-resume-name"
                 value={name}
-                onChange={(ev) => setName(ev.target.value)}
-                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-0)] px-3 py-2 text-sm text-[var(--cream-1)] outline-none focus:border-[var(--teal-2)]"
+                onChange={(event) => setName(event.target.value)}
+                placeholder="e.g., Frontend Dev - Tech Corp"
+                className="vault-hub-field"
               />
-            </label>
-            <label className="block text-xs text-[var(--cream-3)]">
-              Tags (comma-separated)
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="vault-resume-tags" className="type-label-sm text-[var(--color-on-surface-variant)]">
+                Tags (Optional)
+              </label>
               <input
+                id="vault-resume-tags"
                 value={tags}
-                onChange={(ev) => setTags(ev.target.value)}
-                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-0)] px-3 py-2 text-sm text-[var(--cream-1)] outline-none focus:border-[var(--teal-2)]"
+                onChange={(event) => setTags(event.target.value)}
+                placeholder="e.g., React, UI/UX, 2024"
+                className="vault-hub-field"
               />
-            </label>
-          </>
+            </div>
+          </div>
         ) : (
-          <>
-            <label className="block text-xs text-[var(--cream-3)]">
-              Resume
+          <div className="animate-fade-in flex flex-col gap-4">
+            <div className="space-y-2">
+              <label htmlFor="vault-base-resume" className="type-label-sm text-[var(--color-on-surface-variant)]">
+                Select Base Resume
+              </label>
               <select
+                id="vault-base-resume"
                 value={resumeId}
-                onChange={(ev) => setResumeId(ev.target.value)}
-                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-0)] px-3 py-2 text-sm text-[var(--cream-1)] outline-none focus:border-[var(--teal-2)]"
+                onChange={(event) => setResumeId(event.target.value)}
+                className="vault-hub-field"
               >
                 {entries.map((entry) => (
                   <option key={entry.id} value={entry.id}>
                     {entry.name}
+                    {entry.is_active ? ' (Active)' : ''}
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="block text-xs text-[var(--cream-3)]">
-              Version note (optional)
-              <input
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="vault-version-notes" className="type-label-sm text-[var(--color-on-surface-variant)]">
+                Version Notes
+              </label>
+              <textarea
+                id="vault-version-notes"
                 value={userNote}
-                onChange={(ev) => setUserNote(ev.target.value)}
-                className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-0)] px-3 py-2 text-sm text-[var(--cream-1)] outline-none focus:border-[var(--teal-2)]"
+                onChange={(event) => setUserNote(event.target.value)}
+                placeholder="What changed in this version? (e.g., Tailored for Google PM role, added recent metric)"
+                rows={2}
+                className="vault-hub-field resize-none"
               />
-            </label>
-          </>
+            </div>
+          </div>
         )}
 
-        <label className="block text-xs text-[var(--cream-3)]">
-          File (PDF, DOCX, TXT — max 5 MB)
-          <input
-            type="file"
-            accept=".pdf,.docx,.txt"
-            onChange={(ev) => setFile(ev.target.files?.[0] || null)}
-            className="mt-2 block w-full text-sm text-[var(--cream-2)] file:mr-4 file:rounded-lg file:border-0 file:bg-[var(--bg-2)] file:px-4 file:py-2 file:text-xs file:uppercase file:tracking-[0.12em] file:text-[var(--cream-1)]"
-          />
-        </label>
-      </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.docx,.txt"
+          className="sr-only"
+          onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
+        />
 
-      <button
-        type="submit"
-        disabled={uploading}
-        className="mt-6 w-full rounded-xl bg-[var(--teal-2)] px-4 py-3 text-sm font-medium text-[var(--cream-0)] transition hover:opacity-90 disabled:opacity-40"
-      >
-        {uploading ? 'Uploading…' : mode === 'new' ? 'Upload resume' : 'Add version'}
-      </button>
+        <div
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openFilePicker();
+            }
+          }}
+          onClick={openFilePicker}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={['vault-hub-dropzone group', dragActive ? 'vault-hub-dropzone--active' : ''].join(' ')}
+        >
+          <div className="vault-hub-dropzone__icon" aria-hidden>
+            <Upload className="h-7 w-7" />
+          </div>
+          <h3 className="type-headline-md text-[var(--color-on-surface)]">
+            {file ? file.name : 'Drag & drop your file here'}
+          </h3>
+          <p className="type-body-md mt-2 max-w-md text-[var(--color-on-surface-variant)]">
+            Supports PDF, DOCX, or TXT. Our AI will automatically parse and analyze the structure.
+          </p>
+          <span className="glass-panel type-label-md mt-6 inline-flex items-center justify-center rounded-lg border border-[var(--border-strong)] px-6 py-2.5 text-[var(--color-on-surface)] transition-colors group-hover:border-[color-mix(in_srgb,var(--color-primary)_40%,transparent)] group-hover:text-[var(--color-primary)]">
+            Browse Files
+          </span>
+        </div>
+
+        {file ? (
+          <button
+            type="submit"
+            disabled={uploading}
+            className="inline-flex w-full items-center justify-center rounded-lg bg-[var(--color-primary-container)] px-5 py-3 text-sm font-semibold text-[var(--color-on-primary-container)] shadow-luminous transition-colors hover:bg-[var(--color-primary)] hover:text-[var(--color-on-primary)] disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {uploading ? 'Uploading…' : mode === 'new' ? 'Upload Resume' : 'Add Version'}
+          </button>
+        ) : null}
+      </div>
     </form>
   );
 }

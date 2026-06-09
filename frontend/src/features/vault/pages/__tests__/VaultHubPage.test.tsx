@@ -17,6 +17,7 @@ vi.mock('react-router-dom', () => ({
   ),
   useNavigate: () => vi.fn(),
   useSearchParams: () => [new URLSearchParams()],
+  useLocation: () => ({ pathname: '/resume-vault' }),
 }));
 
 function baseLibrary(overrides = {}) {
@@ -43,10 +44,12 @@ describe('VaultHubPage', () => {
     mockUseVaultLibraryContext.mockReset();
   });
 
-  it('shows empty vault prompt when no resumes', () => {
+  it('shows upload form and shortcut cards when vault is empty', () => {
     mockUseVaultLibraryContext.mockReturnValue(baseLibrary());
     render(<VaultHubPage />);
-    expect(screen.getByText(/upload your first resume/i)).toBeInTheDocument();
+    expect(screen.getByText(/drag & drop your file here/i)).toBeInTheDocument();
+    expect(screen.getByText('Compare Versions')).toBeInTheDocument();
+    expect(screen.getByText('My Library')).toBeInTheDocument();
   });
 
   it('shows compare and library shortcuts when resumes exist', () => {
@@ -65,7 +68,8 @@ describe('VaultHubPage', () => {
       }),
     );
     render(<VaultHubPage />);
-    expect(screen.getByText('Compare')).toBeInTheDocument();
-    expect(screen.getByText('My library')).toBeInTheDocument();
+    expect(screen.getByText('Compare Versions')).toBeInTheDocument();
+    expect(screen.getByText('My Library')).toBeInTheDocument();
+    expect(screen.getByText('Vault Capacity')).toBeInTheDocument();
   });
 });

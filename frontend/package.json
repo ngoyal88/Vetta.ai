@@ -5,6 +5,7 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@sentry/react": "^8.50.0",
+    "dompurify": "^3.4.7",
     "firebase": "^11.9.0",
     "framer-motion": "^12.23.24",
     "livekit-client": "^2.6.0",
