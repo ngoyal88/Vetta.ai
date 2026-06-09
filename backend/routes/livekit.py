@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from config import get_settings
 from utils.auth import verify_firebase_token
+from utils.http_errors import raise_internal_error
 from utils.logger import get_logger
 from utils.redis_client import get_session
 from utils.session_access import require_session_owner
@@ -75,27 +76,32 @@ async def create_livekit_token(
     if body.user_id and body.user_id != uid:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_id mismatch")
 
-    await _resolve_session(room_name, uid)
+    try:
+        await _resolve_session(room_name, uid)
 
-    lk_api = _livekit_api()
-    token = (
-        lk_api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
-        .with_identity(uid)
-        .with_grants(lk_api.VideoGrants(room_join=True, room=room_name))
-        .with_ttl(timedelta(hours=4))
-    )
-    if body.dispatch_agent:
-        token = token.with_room_config(
-            lk_api.RoomConfiguration(
-                agents=[
-                    lk_api.RoomAgentDispatch(
-                        agent_name=_agent_name(),
-                        metadata=_dispatch_metadata(room_name, uid),
-                    )
-                ]
-            )
+        lk_api = _livekit_api()
+        token = (
+            lk_api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
+            .with_identity(uid)
+            .with_grants(lk_api.VideoGrants(room_join=True, room=room_name))
+            .with_ttl(timedelta(hours=4))
         )
-    jwt = token.to_jwt()
+        if body.dispatch_agent:
+            token = token.with_room_config(
+                lk_api.RoomConfiguration(
+                    agents=[
+                        lk_api.RoomAgentDispatch(
+                            agent_name=_agent_name(),
+                            metadata=_dispatch_metadata(room_name, uid),
+                        )
+                    ]
+                )
+            )
+        jwt = token.to_jwt()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise_internal_error(log, exc, message="Failed to create LiveKit token")
 
     return LiveKitTokenResponse(token=jwt, url=settings.livekit_url, room_name=room_name)
 

@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
     livekit_agent_name: str = "vetta-interviewer"
+    # When False (default), run the agent in a separate process:
+    #   python run_livekit_agent.py dev
+    # Embedding the agent inside uvicorn corrupts the async Redis pool on Windows.
+    livekit_agent_embedded: bool = False
 
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-2"
@@ -111,7 +115,21 @@ class Settings(BaseSettings):
 
     def allowed_origin_regex_value(self) -> Optional[str]:
         value = (self.allowed_origin_regex or "").strip()
-        return value or None
+        if value:
+            return value
+        # Dev fallback: allow any localhost / 127.0.0.1 port when explicit origins are set.
+        if any("localhost" in o or "127.0.0.1" in o for o in self.allowed_origins_list()):
+            return r"http://(localhost|127\.0\.0\.1)(:\d+)?"
+        return None
+
+    def expose_api_error_details(self) -> bool:
+        """When True, 500 responses include exception type/message (local dev default)."""
+        flag = os.getenv("EXPOSE_API_ERRORS", "").strip().lower()
+        if flag in ("1", "true", "yes"):
+            return True
+        if flag in ("0", "false", "no"):
+            return False
+        return any("localhost" in o or "127.0.0.1" in o for o in self.allowed_origins_list())
 
 
 @lru_cache

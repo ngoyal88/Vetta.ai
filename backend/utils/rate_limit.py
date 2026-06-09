@@ -4,7 +4,7 @@ import time
 from fastapi import HTTPException, Request, status
 
 from utils.logger import get_logger
-from utils.redis_client import redis
+from utils.redis_client import get_redis
 
 _log = get_logger(__name__)
 _REDIS_RATE_LIMIT_TIMEOUT_SEC = 2.0
@@ -12,10 +12,11 @@ _REDIS_RATE_LIMIT_TIMEOUT_SEC = 2.0
 
 async def _increment_rate_bucket(bucket: str, limit: int, window_seconds: int) -> None:
     try:
-        current = await asyncio.wait_for(redis.incr(bucket), timeout=_REDIS_RATE_LIMIT_TIMEOUT_SEC)
+        client = await get_redis()
+        current = await asyncio.wait_for(client.incr(bucket), timeout=_REDIS_RATE_LIMIT_TIMEOUT_SEC)
         if current == 1:
             await asyncio.wait_for(
-                redis.expire(bucket, window_seconds),
+                client.expire(bucket, window_seconds),
                 timeout=_REDIS_RATE_LIMIT_TIMEOUT_SEC,
             )
         if current > limit:
