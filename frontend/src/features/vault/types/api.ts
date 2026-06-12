@@ -19,6 +19,54 @@ export interface VaultAnalyzeResponse {
   entry_scorecard_updated: boolean;
 }
 
+export type CompareSectionVerdict = "improved" | "regressed" | "unchanged" | "mixed";
+
+export type CompareSectionDiffVerdict = "a_stronger" | "b_stronger" | "unchanged" | "mixed";
+
+export interface CompareChangedItem {
+  label: string;
+  before: string;
+  after: string;
+}
+
+export interface CompareSectionDiff {
+  section: string;
+  label: string;
+  only_in_a: string[];
+  only_in_b: string[];
+  changed: CompareChangedItem[];
+  verdict?: CompareSectionDiffVerdict;
+}
+
+export interface ComparePaneSectionGroup {
+  section: string;
+  label: string;
+  items: string[];
+}
+
+export interface ComparePaneChanges {
+  a: ComparePaneSectionGroup[];
+  b: ComparePaneSectionGroup[];
+}
+
+/** Legacy API shape — `baseline_summary` / `target_summary` map to resume A / resume B. */
+export interface CompareSectionComparison {
+  section: string;
+  label: string;
+  baseline_summary: string;
+  target_summary: string;
+  verdict: CompareSectionVerdict;
+}
+
+/** Resume A/B view of {@link CompareSectionComparison} for UI and helpers. */
+export type ResumePeerSectionComparison = Omit<
+  CompareSectionComparison,
+  'baseline_summary' | 'target_summary'
+> & {
+  resume_a_summary: string;
+  resume_b_summary: string;
+};
+
 export interface VaultCompareResponse {
   score_a: number;
   score_b: number;
@@ -30,6 +78,9 @@ export interface VaultCompareResponse {
   section_verdicts: Record<string, unknown>;
   diff_summary?: string | null;
   section_highlights?: Record<string, string> | null;
+  section_comparisons?: CompareSectionComparison[];
+  section_diffs?: CompareSectionDiff[];
+  pane_changes?: ComparePaneChanges;
   resume_a_id?: string;
   resume_b_id?: string;
   resume_a_version_id?: string;

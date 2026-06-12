@@ -1,41 +1,32 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronRight, FileText } from 'lucide-react';
+import { FileText } from 'lucide-react';
 
-import { MAX_RESUMES } from '../../utils/vaultUtils';
+import { VAULT_HUB_COPY } from 'features/vault/constants/hubContent';
+import { MAX_RESUMES } from 'features/vault/utils/vaultUtils';
 
-interface VaultHubHeaderProps {
+type VaultHubHeaderProps = {
   resumeCount: number;
-}
+};
 
 export default function VaultHubHeader({ resumeCount }: VaultHubHeaderProps) {
   const atCapacity = resumeCount >= MAX_RESUMES;
 
   return (
     <header className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-      <div className="min-w-0">
-        <nav
-          aria-label="Breadcrumb"
-          className="mb-3 flex items-center gap-1.5 type-label-sm text-[var(--color-outline)]"
-        >
-          <Link
-            to="/dashboard"
-            className="transition-colors hover:text-[var(--color-on-surface)]"
-          >
-            Workspace
-          </Link>
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
-          <span className="text-[var(--color-primary)]">Resume Vault</span>
-        </nav>
-
-        <h1 className="type-headline-lg text-[var(--color-on-surface)]">Resume Vault</h1>
-        <p className="type-body-md mt-2 max-w-2xl text-[var(--color-on-surface-variant)]">
-          Store, version, and compare your resumes. Keep one active to power your interview
-          intelligence.
+      <div className="max-w-3xl min-w-0">
+        <p className="type-label-sm uppercase tracking-[0.24em] text-[var(--color-secondary)]">
+          {VAULT_HUB_COPY.eyebrow}
+        </p>
+        <h1 className="type-display-lg mt-2 text-[var(--color-on-surface)]">{VAULT_HUB_COPY.title}</h1>
+        <p className="type-body-lg mt-4 text-[var(--color-on-surface-variant)]">
+          {VAULT_HUB_COPY.subtitle}
         </p>
       </div>
 
-      <div className="vault-hub-capacity shrink-0" aria-label={`${resumeCount} of ${MAX_RESUMES} resumes used`}>
+      <div
+        className="vault-hub-capacity shrink-0"
+        aria-label={`${resumeCount} of ${MAX_RESUMES} resumes used`}
+      >
         <div className="vault-hub-capacity__icon" aria-hidden>
           <FileText className="h-4 w-4" />
         </div>

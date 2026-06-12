@@ -66,6 +66,47 @@ export function formatShortDate(value: TimestampLike | undefined): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+export function formatVersionDate(value: TimestampLike | undefined): string {
+  const date = toDate(value);
+  if (!date) return 'Unknown';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export function truncateFilename(name: string, maxLength = 24): string {
+  if (name.length <= maxLength) return name;
+  return `${name.slice(0, maxLength - 3)}...`;
+}
+
+export function formatRelativeUpdatedAt(value: TimestampLike | undefined): string {
+  const date = toDate(value);
+  if (!date) return 'Update date unknown';
+
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.round(diffMs / 60_000);
+
+  if (diffMinutes < 1) return 'Updated just now';
+  if (diffMinutes < 60) {
+    return `Updated ${diffMinutes} min ago`;
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `Updated ${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  if (diffDays < 30) {
+    return `Updated ${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+  }
+
+  const diffWeeks = Math.round(diffDays / 7);
+  if (diffWeeks < 8) {
+    return `Updated ${diffWeeks} week${diffWeeks === 1 ? '' : 's'} ago`;
+  }
+
+  return `Updated on ${formatShortDate(value)}`;
+}
+
 export function formatCoverageCounts(coverageCounts?: Record<string, number> | null): string {
   if (!coverageCounts) return 'Not available';
 
