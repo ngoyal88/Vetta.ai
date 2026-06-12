@@ -28,6 +28,7 @@ from services.vault.analysis_service import build_vault_scorecard
 from services.vault import file_storage
 from services.vault.vault_service import normalize_tags, set_vault_meta
 from utils.auth import verify_firebase_token
+from utils.http_errors import raise_service_error
 from utils.logger import get_logger
 from utils.rate_limit import check_rate_limit
 
@@ -44,6 +45,13 @@ ALLOWED_CONTENT_TYPES = {
     "text/plain; charset=utf-8",
 }
 EDITABLE_ENTRY_FIELDS = {"name", "tags"}
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _allowed_file(filename: Optional[str], content_type: Optional[str]) -> bool:
@@ -162,6 +170,8 @@ async def upload_to_vault(
     role: Optional[str] = Form(None),
     uid: str = Depends(verify_firebase_token),
 ):
+    await check_rate_limit(uid, "vault_upload", limit=10, window_seconds=60)
+
     if not _allowed_file(file.filename, file.content_type):
         raise HTTPException(400, "Unsupported file type. Allowed: PDF, DOCX, TXT.")
     blob = await file.read(MAX_RESUME_SIZE_BYTES + 1)
@@ -176,7 +186,7 @@ async def upload_to_vault(
     normalized_user_note = (user_note or "").strip()
 
     meta = await get_vault_meta(uid)
-    resume_count = int(meta.get("resume_count", 0))
+    resume_count = _coerce_int(meta.get("resume_count", 0))
     active_resume_id = meta.get("active_resume_id")
     created_new_entry = False
 
@@ -217,14 +227,18 @@ async def upload_to_vault(
     except Exception as exc:
         if created_new_entry and normalized_resume_id:
             await _rollback_created_entry(uid, normalized_resume_id)
-        logger.exception("Vault resume parse failed for uid=%s filename=%s", uid, file.filename)
-        raise HTTPException(500, "Resume parsing failed. Please try again.") from exc
+        raise_service_error(
+            logger,
+            exc,
+            message="Resume parsing failed. Please try again.",
+            log_event=f"Vault resume parse failed uid={uid} file={file.filename}",
+        )
 
     try:
         version, scorecard = await add_version(
             uid,
             normalized_resume_id,
-            parsed.profile.dict(),
+            parsed.profile.model_dump(),
             normalized_user_note,
             role=normalized_role,
             source_filename=file.filename,
@@ -242,8 +256,12 @@ async def upload_to_vault(
     except Exception as exc:
         if created_new_entry and normalized_resume_id:
             await _rollback_created_entry(uid, normalized_resume_id)
-        logger.exception("Vault version creation failed for uid=%s resume_id=%s", uid, normalized_resume_id)
-        raise HTTPException(500, "Failed to create resume version. Please try again.") from exc
+        raise_service_error(
+            logger,
+            exc,
+            message="Failed to create resume version. Please try again.",
+            log_event=f"Vault version creation failed uid={uid} resume_id={normalized_resume_id}",
+        )
 
     entry = await get_vault_entry(uid, normalized_resume_id)
     return {"entry": entry, "version": version, "scorecard": scorecard.model_dump()}
@@ -356,13 +374,20 @@ async def download_version_file(version_id: str, uid: str = Depends(verify_fireb
     media_type = version.get("content_type") or file_storage.content_type_for_filename(source_filename)
     headers = {}
     if source_filename:
-        headers["Content-Disposition"] = f'inline; filename="{source_filename}"'
+        safe_filename = (
+            source_filename.replace('"', "")
+            .replace("\r", "")
+            .replace("\n", "")
+        )
+        headers["Content-Disposition"] = f'inline; filename="{safe_filename}"'
 
     return Response(content=blob, media_type=media_type, headers=headers)
 
 
 @router.post("/restore/{version_id}")
 async def restore(version_id: str, payload: Dict[str, Any], uid: str = Depends(verify_firebase_token)):
+    await check_rate_limit(uid, "vault_restore", limit=30, window_seconds=60)
+
     if not isinstance(payload, dict):
         raise HTTPException(400, "Invalid request body")
 
@@ -386,6 +411,8 @@ async def restore(version_id: str, payload: Dict[str, Any], uid: str = Depends(v
 
 @router.post("/analyze")
 async def analyze(payload: Dict[str, Any], uid: str = Depends(verify_firebase_token)):
+    await check_rate_limit(uid, "vault_analyze", limit=20, window_seconds=60)
+
     if not isinstance(payload, dict):
         raise HTTPException(400, "Invalid request body")
 
@@ -458,6 +485,8 @@ async def analyze(payload: Dict[str, Any], uid: str = Depends(verify_firebase_to
 
 @router.post("/compare")
 async def compare(payload: Dict[str, Any], uid: str = Depends(verify_firebase_token)):
+    await check_rate_limit(uid, "vault_compare", limit=10, window_seconds=60)
+
     if not isinstance(payload, dict):
         raise HTTPException(400, "Invalid request body")
 
@@ -481,6 +510,9 @@ async def compare(payload: Dict[str, Any], uid: str = Depends(verify_firebase_to
         version_b_id = entry_b.get("current_version_id")
     if not version_a_id or not version_b_id:
         raise HTTPException(404, "Both resumes must have a version")
+
+    if version_a_id == version_b_id:
+        raise HTTPException(400, "Select two different versions to compare")
 
     try:
         version_a = await _require_linked_version(

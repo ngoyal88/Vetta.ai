@@ -273,15 +273,18 @@ async def get_version_for_resume(uid: str, resume_id: str, version_id: str) -> O
 
 
 async def get_version_by_id(uid: str, version_id: str) -> Optional[Dict[str, Any]]:
-    query = db.collection_group("versions").where("id", "==", version_id).limit(1).stream()
-    for doc in query:
-        path = doc.reference.path
-        if not path.startswith(f"users/{uid}/"):
-            continue
-        payload = doc.to_dict() or {}
-        payload.setdefault("id", doc.id)
-        return payload
-    return None
+    def _read():
+        query = db.collection_group("versions").where("id", "==", version_id).limit(1).stream()
+        for doc in query:
+            path = doc.reference.path
+            if not path.startswith(f"users/{uid}/"):
+                continue
+            payload = doc.to_dict() or {}
+            payload.setdefault("id", doc.id)
+            return payload
+        return None
+
+    return await asyncio.to_thread(_read)
 
 
 async def restore_version(uid: str, version_id: str, role: Optional[str] = None) -> Dict[str, Any]:
