@@ -15,6 +15,8 @@ export function useSettingsPage() {
     updateProfileInfo,
     deleteAccount,
     refreshUser,
+    reauthenticateWithPassword,
+    reauthenticateWithGoogle,
   } = useAuth();
   const navigate = useNavigate();
 
@@ -135,19 +137,42 @@ export function useSettingsPage() {
     }
   }, [currentUser?.email, resetPassword]);
 
-  const handleDeleteAccount = useCallback(async () => {
-    setDeleting(true);
-    try {
-      await api.deleteAccountData();
-      await deleteAccount();
-      toast.success('Account deleted');
-      navigate('/');
-    } catch {
-      toast.error('Failed to delete account');
-    } finally {
-      setDeleting(false);
-    }
-  }, [deleteAccount, navigate]);
+  const handleDeleteAccount = useCallback(
+    async (options: { password?: string; useGoogle: boolean }) => {
+      if (!currentUser) {
+        toast.error('Please sign in again');
+        return;
+      }
+
+      setDeleting(true);
+      try {
+        if (options.useGoogle) {
+          await reauthenticateWithGoogle();
+        } else if (options.password && currentUser.email) {
+          await reauthenticateWithPassword(currentUser.email, options.password);
+        } else {
+          throw new Error('Re-authentication required');
+        }
+
+        await api.deleteAccountData();
+        await deleteAccount();
+        toast.success('Account deleted');
+        navigate('/');
+      } catch {
+        toast.error('Failed to delete account');
+        throw new Error('delete failed');
+      } finally {
+        setDeleting(false);
+      }
+    },
+    [
+      currentUser,
+      deleteAccount,
+      navigate,
+      reauthenticateWithGoogle,
+      reauthenticateWithPassword,
+    ],
+  );
 
   return {
     currentUser,

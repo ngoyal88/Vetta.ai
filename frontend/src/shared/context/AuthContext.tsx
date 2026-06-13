@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import {
+  EmailAuthProvider,
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   deleteUser,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   reload,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -34,6 +36,8 @@ type AuthContextValue = {
   resetPassword: (email: string) => Promise<void>;
   updateProfileInfo: (input: UpdateProfileInput) => Promise<void>;
   deleteAccount: () => Promise<void>;
+  reauthenticateWithPassword: (email: string, password: string) => Promise<void>;
+  reauthenticateWithGoogle: () => Promise<void>;
 };
 
 type AuthProviderProps = {
@@ -97,6 +101,22 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     await deleteUser(auth.currentUser);
   }, []);
 
+  const reauthenticateWithPassword = useCallback(async (email: string, password: string) => {
+    if (!auth.currentUser) throw new Error("Not signed in");
+    const credential = EmailAuthProvider.credential(email, password);
+    await reauthenticateWithCredential(auth.currentUser, credential);
+  }, []);
+
+  const reauthenticateWithGoogle = useCallback(async () => {
+    if (!auth.currentUser) throw new Error("Not signed in");
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "login" });
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential) throw new Error("Google re-authentication failed");
+    await reauthenticateWithCredential(auth.currentUser, credential);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       currentUser,
@@ -110,8 +130,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       resetPassword,
       updateProfileInfo,
       deleteAccount,
+      reauthenticateWithPassword,
+      reauthenticateWithGoogle,
     }),
-    [currentUser, authReady, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount],
+    [currentUser, authReady, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount, reauthenticateWithPassword, reauthenticateWithGoogle],
   );
 
   return (

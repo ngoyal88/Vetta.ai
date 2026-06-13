@@ -21,7 +21,7 @@ const DATA_LINKS = [
   {
     href: '/signal-intelligence',
     label: 'Signal Intelligence',
-    description: 'Enrichments, readiness, and profile memory.',
+    description: 'Verified claims, readiness, and profile memory.',
     icon: LineChart,
   },
 ] as const;

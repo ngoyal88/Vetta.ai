@@ -100,7 +100,11 @@ const SettingsPage: React.FC = () => {
           <div className="settings-page__secondary">
             <SettingsPlanSection />
             <SettingsDataSection />
-            <SettingsDangerSection deleting={settings.deleting} onDeleteAccount={settings.handleDeleteAccount} />
+            <SettingsDangerSection
+              user={user}
+              deleting={settings.deleting}
+              onDeleteAccount={settings.handleDeleteAccount}
+            />
           </div>
         </motion.div>
       </div>

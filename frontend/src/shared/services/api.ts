@@ -287,9 +287,16 @@ const deleteInterview = async (sessionId: string): Promise<Record<string, unknow
 };
 
 const deleteAccountData = async (): Promise<Record<string, unknown>> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Not authenticated");
+  const token = await user.getIdToken(true);
   const response = await fetch(`${API_URL}/interview/account/purge`, {
     method: "DELETE",
-    headers: await getAuthHeaders(),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ confirmation: "DELETE" }),
   });
   if (!response.ok) throw new Error("Failed to delete account data");
   return response.json() as Promise<Record<string, unknown>>;

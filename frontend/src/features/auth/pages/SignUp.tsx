@@ -83,7 +83,7 @@ export default function SignUp() {
 
       await sendVerification();
       toast.success('Account created! Check your email to verify.');
-      navigate('/signin');
+      navigate('/verify-email');
     } catch (err) {
       setError(formatAuthError(err, 'Failed to create account. Please try again.'));
     } finally {
