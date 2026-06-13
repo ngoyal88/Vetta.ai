@@ -1,8 +1,11 @@
 import { Link, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { Clock, Lock, Sparkles } from "lucide-react";
+import { BarChart3, Clock, Lock, Sparkles } from "lucide-react";
 
-import { AI_INTERVIEW_HISTORY_PATH } from "core/constants/interviewModes";
+import {
+  AI_INTERVIEW_ANALYTICS_PATH,
+  AI_INTERVIEW_HISTORY_PATH,
+} from "core/constants/interviewModes";
 
 import {
   ACTIVE_MODES,
@@ -45,6 +48,9 @@ const CTA_STYLES = {
   outline:
     "border border-[var(--border-strong)] bg-transparent text-[var(--color-on-surface)] hover:bg-[var(--color-surface-container)]",
 } as const;
+
+const HEADER_ACTION_CLASS =
+  "glass-panel inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-5 py-3 text-sm font-semibold text-[var(--color-on-surface)] transition-colors hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-container)]";
 
 function ActiveModeCard({
   mode,
@@ -195,13 +201,16 @@ export default function AiInterviewPage() {
               fortify your narrative under pressure.
             </p>
           </div>
-          <Link
-            to={AI_INTERVIEW_HISTORY_PATH}
-            className="glass-panel inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-5 py-3 text-sm font-semibold text-[var(--color-on-surface)] transition-colors hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-container)]"
-          >
-            <Clock className="h-4 w-4 text-[var(--color-secondary)]" aria-hidden="true" />
-            Session history
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link to={AI_INTERVIEW_HISTORY_PATH} className={HEADER_ACTION_CLASS}>
+              <Clock className="h-4 w-4 text-[var(--color-secondary)]" aria-hidden="true" />
+              Session history
+            </Link>
+            <Link to={AI_INTERVIEW_ANALYTICS_PATH} className={HEADER_ACTION_CLASS}>
+              <BarChart3 className="h-4 w-4 text-[var(--color-primary)]" aria-hidden="true" />
+              Your progress
+            </Link>
+          </div>
         </motion.header>
 
         <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">

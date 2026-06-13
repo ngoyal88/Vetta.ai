@@ -10,5 +10,6 @@ export const legacyRedirects = (
     <Route path="/modes/blind-mode" element={<Navigate to="/ai-interview/blind-mode" replace />} />
     <Route path="/modes/pair-programming" element={<Navigate to="/ai-interview/pair-programming" replace />} />
     <Route path="/history" element={<Navigate to="/ai-interview/history" replace />} />
+    <Route path="/analytics" element={<Navigate to="/ai-interview/analytics" replace />} />
   </>
 );

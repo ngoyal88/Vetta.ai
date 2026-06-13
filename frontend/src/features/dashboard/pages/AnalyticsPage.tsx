@@ -1,16 +1,28 @@
 import React, { useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { BarChart3, ChevronRight, RefreshCw } from 'lucide-react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { ArrowLeft, BarChart3, ChevronRight, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
+
+import {
+  AI_INTERVIEW_HISTORY_PATH,
+  AI_INTERVIEW_HUB_PATH,
+} from 'core/constants/interviewModes';
 
 import { useInterviewHistory } from '../hooks/useInterviewHistory';
 import { computeSummary } from '../utils/interviewAnalytics';
 
+const fadeUpTransition = {
+  duration: 0.45,
+  ease: 'easeOut' as const,
+};
+
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--bg-1)] p-4">
-      <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--cream-4)]">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-[var(--cream-0)]">{value}</p>
+    <div className="glass-panel rounded-xl p-5">
+      <p className="type-label-sm uppercase tracking-[0.18em] text-[var(--color-on-surface-variant)]">
+        {label}
+      </p>
+      <p className="type-headline-lg mt-2 text-[var(--color-on-surface)]">{value}</p>
     </div>
   );
 }
@@ -21,26 +33,30 @@ function BreakdownBars({ title, data }: { title: string; data: Record<string, nu
 
   if (!entries.length) {
     return (
-      <div className="rounded-sm border border-[var(--border)] bg-[var(--bg-1)] p-4">
-        <p className="mb-2 font-mono text-[10px] uppercase tracking-wider text-[var(--cream-4)]">{title}</p>
-        <p className="text-sm text-[var(--cream-4)]">No data yet</p>
+      <div className="glass-panel rounded-xl p-5">
+        <p className="type-label-sm uppercase tracking-[0.18em] text-[var(--color-on-surface-variant)]">
+          {title}
+        </p>
+        <p className="type-body-md mt-3 text-[var(--color-on-surface-variant)]">No data yet</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-sm border border-[var(--border)] bg-[var(--bg-1)] p-4">
-      <p className="mb-4 font-mono text-[10px] uppercase tracking-wider text-[var(--cream-4)]">{title}</p>
-      <div className="space-y-3">
+    <div className="glass-panel rounded-xl p-5">
+      <p className="type-label-sm uppercase tracking-[0.18em] text-[var(--color-on-surface-variant)]">
+        {title}
+      </p>
+      <div className="mt-4 space-y-3">
         {entries.map(([key, count]) => (
           <div key={key}>
-            <div className="mb-1 flex justify-between text-xs text-[var(--cream-3)]">
-              <span className="truncate pr-2">{key.replace(/_/g, ' ')}</span>
-              <span>{count}</span>
+            <div className="mb-1 flex justify-between text-xs text-[var(--color-on-surface-variant)]">
+              <span className="truncate pr-2 capitalize">{key.replace(/_/g, ' ')}</span>
+              <span className="font-semibold text-[var(--color-on-surface)]">{count}</span>
             </div>
-            <div className="h-1.5 rounded-full bg-[var(--bg-3)]">
+            <div className="h-1.5 rounded-full bg-[var(--color-surface-bright)]">
               <div
-                className="h-full rounded-full bg-[var(--teal-2)]"
+                className="h-full rounded-full bg-[var(--color-primary)]"
                 style={{ width: `${Math.max(8, (count / max) * 100)}%` }}
               />
             </div>
@@ -52,120 +68,162 @@ function BreakdownBars({ title, data }: { title: string; data: Record<string, nu
 }
 
 const AnalyticsPage: React.FC = () => {
+  const reduceMotion = useReducedMotion();
   const { items, loading, refresh } = useInterviewHistory({ limit: 50 });
   const summary = useMemo(() => computeSummary(items), [items]);
 
+  const headerMotion = reduceMotion
+    ? {}
+    : {
+        initial: { opacity: 0, y: 12 },
+        animate: { opacity: 1, y: 0 },
+        transition: fadeUpTransition,
+      };
+
   return (
-    <div className="min-h-screen bg-base px-5 py-6">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">
-            Analytics
-          </p>
+    <div className="relative min-h-[calc(100vh-4rem)] overflow-hidden pb-16 pt-10">
+      <div
+        className="pointer-events-none absolute -top-20 right-1/4 h-[360px] w-[360px] rounded-full bg-[var(--color-secondary)]/10 blur-[120px]"
+        aria-hidden
+      />
+
+      <div className="app-container relative z-10">
+        <Link
+          to={AI_INTERVIEW_HUB_PATH}
+          className="mb-6 inline-flex w-fit items-center gap-2 text-sm font-medium text-[var(--color-on-surface-variant)] transition-colors hover:text-[var(--color-on-surface)]"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          Back to training modes
+        </Link>
+
+        <motion.header
+          {...headerMotion}
+          className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"
+        >
+          <div>
+            <p className="type-label-sm uppercase tracking-[0.24em] text-[var(--color-secondary)]">
+              AI Interview
+            </p>
+            <div className="mt-2 flex items-center gap-3">
+              <BarChart3 className="h-6 w-6 text-[var(--color-primary)]" aria-hidden />
+              <h1 className="type-headline-lg text-[var(--color-on-surface)]">Your progress</h1>
+            </div>
+            <p className="type-body-md mt-2 max-w-2xl text-[var(--color-on-surface-variant)]">
+              Track scores, session volume, and practice patterns across your interview training.
+            </p>
+          </div>
+
           <button
             type="button"
             onClick={refresh}
-            className="flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm text-zinc-400 transition-colors hover:border-zinc-600 hover:text-white"
+            disabled={loading}
+            className="glass-panel inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-5 py-3 text-sm font-semibold text-[var(--color-on-surface)] transition-colors hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-container)] disabled:opacity-60"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className={`h-4 w-4 text-[var(--color-secondary)] ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
+        </motion.header>
 
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-6"
-        >
-          <div className="flex items-center gap-3">
-            <BarChart3 className="h-5 w-5 text-[var(--teal-1)]" />
-            <h1 className="text-xl font-semibold text-[var(--cream-0)]">Your progress</h1>
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-24">
+            <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
+            <p className="type-body-md text-[var(--color-on-surface-variant)]">Loading analytics...</p>
           </div>
-
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-16">
-              <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
-              <p className="text-sm text-zinc-500">Loading analytics...</p>
+        ) : summary.totalSessions === 0 ? (
+          <div className="glass-panel rounded-xl py-20 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
+              <BarChart3 className="h-6 w-6" aria-hidden />
             </div>
-          ) : summary.totalSessions === 0 ? (
-            <div className="rounded-2xl border border-[var(--border-subtle)] bg-raised p-8 text-center">
-              <p className="mb-4 text-zinc-500">Complete a session to see trends here</p>
-              <Link to="/ai-interview" className="btn-outline-cyan inline-flex h-10 items-center px-4 text-sm">
-                Start practicing
-              </Link>
+            <p className="type-body-lg text-[var(--color-on-surface-variant)]">
+              Complete a session to see trends here
+            </p>
+            <Link
+              to={AI_INTERVIEW_HUB_PATH}
+              className="mt-6 inline-flex items-center justify-center rounded-lg bg-[var(--color-primary-container)] px-5 py-3 text-sm font-semibold text-[var(--color-on-primary-container)] shadow-[var(--shadow-luminous)] transition-colors hover:bg-[var(--color-primary)] hover:text-[var(--color-on-primary)]"
+            >
+              Start practicing
+            </Link>
+          </div>
+        ) : (
+          <motion.div
+            initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...fadeUpTransition, delay: 0.06 }}
+            className="space-y-6"
+          >
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <SummaryCard label="Total sessions" value={String(summary.totalSessions)} />
+              <SummaryCard
+                label="Avg score"
+                value={summary.avgOverallScore != null ? `${summary.avgOverallScore}/10` : '—'}
+              />
+              <SummaryCard label="Last 30 days" value={String(summary.sessionsLast30Days)} />
+              <SummaryCard
+                label="Pass rate"
+                value={summary.passRate != null ? `${summary.passRate}%` : '—'}
+              />
             </div>
-          ) : (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <SummaryCard label="Total sessions" value={String(summary.totalSessions)} />
-                <SummaryCard
-                  label="Avg score"
-                  value={summary.avgOverallScore != null ? `${summary.avgOverallScore}/10` : '—'}
-                />
-                <SummaryCard label="Last 30 days" value={String(summary.sessionsLast30Days)} />
-                <SummaryCard
-                  label="Pass rate"
-                  value={summary.passRate != null ? `${summary.passRate}%` : '—'}
-                />
-              </div>
 
-              <div className="rounded-sm border border-[var(--border)] bg-[var(--bg-1)] p-4">
-                <p className="mb-4 font-mono text-[10px] uppercase tracking-wider text-[var(--cream-4)]">
-                  Score trend (recent)
+            <div className="glass-panel rounded-xl p-5">
+              <p className="type-label-sm uppercase tracking-[0.18em] text-[var(--color-on-surface-variant)]">
+                Score trend (recent)
+              </p>
+              {summary.scoreTrend.length === 0 ? (
+                <p className="type-body-md mt-3 text-[var(--color-on-surface-variant)]">
+                  No scored sessions yet
                 </p>
-                {summary.scoreTrend.length === 0 ? (
-                  <p className="text-sm text-[var(--cream-4)]">No scored sessions yet</p>
-                ) : (
-                  <div className="flex items-end gap-2 overflow-x-auto pb-2">
-                    {summary.scoreTrend.map((point) => (
-                      <div key={point.date} className="flex min-w-[48px] flex-col items-center gap-2">
-                        <div className="flex h-24 w-8 items-end rounded-sm bg-[var(--bg-3)]">
-                          <div
-                            className="w-full rounded-sm bg-[var(--teal-2)]"
-                            style={{ height: `${Math.max(8, (point.score / 10) * 100)}%` }}
-                            title={`${point.label}: ${point.score}/10`}
-                          />
-                        </div>
-                        <span className="font-mono text-[9px] text-[var(--cream-4)]">{point.label}</span>
+              ) : (
+                <div className="mt-4 flex items-end gap-2 overflow-x-auto pb-2">
+                  {summary.scoreTrend.map((point) => (
+                    <div key={point.date} className="flex min-w-[48px] flex-col items-center gap-2">
+                      <div className="flex h-24 w-8 items-end rounded-sm bg-[var(--color-surface-bright)]">
+                        <div
+                          className="w-full rounded-sm bg-[var(--color-primary)]"
+                          style={{ height: `${Math.max(8, (point.score / 10) * 100)}%` }}
+                          title={`${point.label}: ${point.score}/10`}
+                        />
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <BreakdownBars title="By interview type" data={summary.byInterviewType} />
-                <BreakdownBars title="By difficulty" data={summary.byDifficulty} />
-              </div>
-
-              {summary.topRoles.length > 0 ? (
-                <div className="rounded-sm border border-[var(--border)] bg-[var(--bg-1)] p-4">
-                  <p className="mb-3 font-mono text-[10px] uppercase tracking-wider text-[var(--cream-4)]">
-                    Top practice roles
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {summary.topRoles.map(({ role, count }) => (
-                      <span
-                        key={role}
-                        className="rounded-sm border border-[var(--border)] px-2 py-1 text-xs text-[var(--cream-2)]"
-                      >
-                        {role} · {count}
+                      <span className="type-label-sm text-[var(--color-on-surface-variant)]">
+                        {point.label}
                       </span>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              ) : null}
+              )}
+            </div>
 
-              <Link
-                to="/ai-interview/history"
-                className="inline-flex items-center gap-1 text-sm text-[var(--teal-1)] hover:text-[var(--cream-0)]"
-              >
-                View session details
-                <ChevronRight className="h-4 w-4" />
-              </Link>
-            </>
-          )}
-        </motion.div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <BreakdownBars title="By interview type" data={summary.byInterviewType} />
+              <BreakdownBars title="By difficulty" data={summary.byDifficulty} />
+            </div>
+
+            {summary.topRoles.length > 0 ? (
+              <div className="glass-panel rounded-xl p-5">
+                <p className="type-label-sm uppercase tracking-[0.18em] text-[var(--color-on-surface-variant)]">
+                  Top practice roles
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {summary.topRoles.map(({ role, count }) => (
+                    <span
+                      key={role}
+                      className="rounded-lg border border-[var(--border-strong)] bg-[var(--color-surface-container)] px-3 py-1.5 text-xs font-medium text-[var(--color-on-surface)]"
+                    >
+                      {role} · {count}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <Link
+              to={AI_INTERVIEW_HISTORY_PATH}
+              className="inline-flex items-center gap-1 text-sm font-semibold text-[var(--color-primary)] transition-colors hover:text-[var(--color-on-surface)]"
+            >
+              View session details
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          </motion.div>
+        )}
       </div>
     </div>
   );

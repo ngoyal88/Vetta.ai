@@ -304,7 +304,7 @@ const Dashboard: React.FC = () => {
         description: 'Execute the initial scan to identify skill gaps.',
         complete: hasGapAnalysis,
         actionLabel: 'Run Gap Analysis',
-        actionHref: '/analytics',
+        actionHref: '/ai-interview/analytics',
       },
     ];
 

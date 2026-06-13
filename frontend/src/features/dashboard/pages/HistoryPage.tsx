@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { ArrowLeft, Clock } from 'lucide-react';
+import { ArrowLeft, BarChart3, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import SessionHistoryDetailPanel from '../components/history/SessionHistoryDetailPanel';
@@ -9,7 +9,10 @@ import { HistoryToolbar } from '../components/history/HistoryToolbar';
 import { TranscriptOverlay } from '../components/history/TranscriptOverlay';
 import { useHistoryPageState } from '../hooks/useHistoryPageState';
 import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
-import { AI_INTERVIEW_HUB_PATH } from 'core/constants/interviewModes';
+import {
+  AI_INTERVIEW_ANALYTICS_PATH,
+  AI_INTERVIEW_HUB_PATH,
+} from 'core/constants/interviewModes';
 
 const fadeUpTransition = {
   duration: 0.45,
@@ -61,14 +64,23 @@ const HistoryPage: React.FC = () => {
             </p>
           </div>
 
-          <HistoryToolbar
-            filterTab={state.filterTab}
-            dateRange={state.dateRange}
-            loading={state.loading}
-            onFilterTabChange={state.setFilterTab}
-            onDateRangeChange={state.setDateRange}
-            onRefresh={state.refresh}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Link
+              to={AI_INTERVIEW_ANALYTICS_PATH}
+              className="glass-panel inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-5 py-3 text-sm font-semibold text-[var(--color-on-surface)] transition-colors hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-container)]"
+            >
+              <BarChart3 className="h-4 w-4 text-[var(--color-primary)]" aria-hidden />
+              Your progress
+            </Link>
+            <HistoryToolbar
+              filterTab={state.filterTab}
+              dateRange={state.dateRange}
+              loading={state.loading}
+              onFilterTabChange={state.setFilterTab}
+              onDateRangeChange={state.setDateRange}
+              onRefresh={state.refresh}
+            />
+          </div>
         </motion.header>
 
         {state.loading ? (

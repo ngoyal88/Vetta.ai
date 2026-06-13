@@ -4,6 +4,7 @@
 
 export const AI_INTERVIEW_HUB_PATH = '/ai-interview';
 export const AI_INTERVIEW_HISTORY_PATH = '/ai-interview/history';
+export const AI_INTERVIEW_ANALYTICS_PATH = '/ai-interview/analytics';
 
 export type ModeSlug =
   | 'role_targeted'

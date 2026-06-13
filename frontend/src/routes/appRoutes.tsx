@@ -1,5 +1,5 @@
-import { Suspense, lazy, type ReactNode } from 'react';
-import { Route, useSearchParams } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
+import { Outlet, Route, useSearchParams } from 'react-router-dom';
 
 import AiInterviewPage from 'features/modes/pages/AiInterviewPage';
 import BlindModePage from 'features/modes/blind-mode/pages/BlindModePage';
@@ -57,35 +57,39 @@ function InterviewRoute() {
   return useLiveKit ? <InterviewRoomLiveKit /> : <InterviewRoom />;
 }
 
-function privateShell(children: ReactNode) {
+function PrivateAppShell() {
   return (
     <PrivateRoute>
-      <AppShell>{children}</AppShell>
+      <AppShell>
+        <Outlet />
+      </AppShell>
     </PrivateRoute>
   );
 }
 
 export const appRoutes = (
   <>
-    <Route path="/dashboard" element={privateShell(<Dashboard />)} />
-    <Route path="/resume-vault" element={privateShell(<VaultLayout />)}>
-      <Route index element={<VaultHubPage />} />
-      <Route path="compare" element={<VaultComparePage />} />
-      <Route path="compare/result" element={<VaultCompareResultPage />} />
-      <Route path="library" element={<VaultLibraryPage />} />
-      <Route path="r/:resumeId" element={<VaultVersionsPage />} />
-      <Route path="r/:resumeId/:versionId" element={<VaultVersionDetailPage />} />
+    <Route element={<PrivateAppShell />}>
+      <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/resume-vault" element={<VaultLayout />}>
+        <Route index element={<VaultHubPage />} />
+        <Route path="compare" element={<VaultComparePage />} />
+        <Route path="compare/result" element={<VaultCompareResultPage />} />
+        <Route path="library" element={<VaultLibraryPage />} />
+        <Route path="r/:resumeId" element={<VaultVersionsPage />} />
+        <Route path="r/:resumeId/:versionId" element={<VaultVersionDetailPage />} />
+      </Route>
+      <Route path="/profile" element={<SettingsPage />} />
+      <Route path="/signal-intelligence" element={<SignalIntelligencePage />} />
+      <Route path="/ai-interview/analytics" element={<AnalyticsPage />} />
+      <Route path="/ai-interview/history" element={<HistoryPage />} />
+      <Route path="/ai-interview" element={<AiInterviewPage />} />
+      <Route path="/ai-interview/role-targeted" element={<RoleTargetedPage />} />
+      <Route path="/ai-interview/pressure-mode" element={<PressureModePage />} />
+      <Route path="/ai-interview/resume-deep-dive" element={<ResumeDeepDivePage />} />
+      <Route path="/ai-interview/blind-mode" element={<BlindModePage />} />
+      <Route path="/ai-interview/pair-programming" element={<PairProgrammingPage />} />
     </Route>
-    <Route path="/profile" element={privateShell(<SettingsPage />)} />
-    <Route path="/analytics" element={privateShell(<AnalyticsPage />)} />
-    <Route path="/signal-intelligence" element={privateShell(<SignalIntelligencePage />)} />
-    <Route path="/ai-interview/history" element={privateShell(<HistoryPage />)} />
-    <Route path="/ai-interview" element={privateShell(<AiInterviewPage />)} />
-    <Route path="/ai-interview/role-targeted" element={privateShell(<RoleTargetedPage />)} />
-    <Route path="/ai-interview/pressure-mode" element={privateShell(<PressureModePage />)} />
-    <Route path="/ai-interview/resume-deep-dive" element={privateShell(<ResumeDeepDivePage />)} />
-    <Route path="/ai-interview/blind-mode" element={privateShell(<BlindModePage />)} />
-    <Route path="/ai-interview/pair-programming" element={privateShell(<PairProgrammingPage />)} />
     <Route
       path="/interview/:sessionId"
       element={
