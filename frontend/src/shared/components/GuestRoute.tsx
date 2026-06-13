@@ -11,7 +11,12 @@ type GuestRouteProps = {
  * If already authenticated, redirects to the app (avoids /signin and /signup while logged in).
  */
 const GuestRoute = ({ children }: GuestRouteProps) => {
-  const { currentUser } = useAuth();
+  const { currentUser, authReady } = useAuth();
+
+  if (!authReady) {
+    return null;
+  }
+
   return currentUser ? <Navigate to="/dashboard" replace /> : <>{children}</>;
 };
 

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import {
-  BarChart3,
   Bell,
   BookOpen,
   Folder,
@@ -28,7 +27,6 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutGrid, end: true },
   { label: 'AI Interview', href: '/ai-interview', icon: Rocket },
   { label: 'Resume Vault', href: '/resume-vault', icon: Folder },
-  { label: 'Analytics', href: '/analytics', icon: BarChart3 },
   { label: 'Signal', href: '/signal-intelligence', icon: Sparkles },
 ];
 
@@ -119,7 +117,7 @@ const AppShell = ({ children }: AppShellProps) => {
             <div className="mb-6 flex items-center justify-end px-4">
               <button
                 type="button"
-                className="dashboard-icon-btn"
+                className="dashboard-icon-btn inline-flex"
                 onClick={() => setMobileOpen(false)}
                 aria-label="Close menu"
               >
@@ -168,7 +166,7 @@ const AppShell = ({ children }: AppShellProps) => {
           <div className="dashboard-topbar__left">
             <button
               type="button"
-              className="dashboard-icon-btn lg:hidden"
+              className="dashboard-icon-btn inline-flex lg:hidden"
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation"
             >
@@ -199,7 +197,7 @@ const AppShell = ({ children }: AppShellProps) => {
             </div>
             <button
               type="button"
-              className="dashboard-icon-btn"
+              className="dashboard-icon-btn inline-flex"
               aria-label="Notifications"
             >
               <Bell className="h-5 w-5" />

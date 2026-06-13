@@ -23,6 +23,8 @@ type UpdateProfileInput = {
 
 type AuthContextValue = {
   currentUser: User | null;
+  /** False until Firebase emits the first auth state (including restored sessions). */
+  authReady: boolean;
   signup: (email: string, password: string) => Promise<UserCredential>;
   signin: (email: string, password: string) => Promise<UserCredential>;
   signInWithGoogle: () => Promise<UserCredential>;
@@ -47,13 +49,13 @@ export const useAuth = (): AuthContextValue => {
 };
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => auth.currentUser);
+  const [authReady, setAuthReady] = useState(() => Boolean(auth.currentUser));
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
-      setLoading(false);
+      setAuthReady(true);
     });
     return unsubscribe;
   }, []);
@@ -98,6 +100,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const value = useMemo<AuthContextValue>(
     () => ({
       currentUser,
+      authReady,
       signup,
       signin,
       signInWithGoogle,
@@ -108,21 +111,24 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       updateProfileInfo,
       deleteAccount,
     }),
-    [currentUser, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount],
+    [currentUser, authReady, signup, signin, signInWithGoogle, logout, sendVerification, refreshUser, resetPassword, updateProfileInfo, deleteAccount],
   );
 
-  if (loading) {
-    return (
-      <AuthContext.Provider value={value}>
-        <div className="flex min-h-screen items-center justify-center bg-[var(--bg-0)]" aria-busy="true" aria-live="polite">
-          <div className="flex flex-col items-center gap-4">
-            <div className="h-12 w-12 animate-spin rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
-            <p className="text-sm text-[var(--cream-3)]">Checking auth...</p>
+  return (
+    <AuthContext.Provider value={value}>
+      {!authReady ? (
+        <div
+          className="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--bg-0)]/80 backdrop-blur-[2px]"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-10 w-10 animate-spin rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
+            <p className="text-sm text-[var(--cream-3)]">Checking auth…</p>
           </div>
         </div>
-      </AuthContext.Provider>
-    );
-  }
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+      ) : null}
+      {children}
+    </AuthContext.Provider>
+  );
 };

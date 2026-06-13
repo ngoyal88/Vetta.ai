@@ -7,8 +7,13 @@ type PrivateRouteProps = {
 };
 
 const PrivateRoute = ({ children }: PrivateRouteProps) => {
-  const { currentUser } = useAuth();
+  const { currentUser, authReady } = useAuth();
   const location = useLocation();
+
+  if (!authReady) {
+    return null;
+  }
+
   return currentUser ? (
     <>{children}</>
   ) : (
