@@ -10,9 +10,11 @@ from services.interview.answer_processor import AnswerProcessor
 from services.interview.feedback_service import FeedbackService
 from services.interview.jd_context_service import JDContextService
 from services.interview.llm_engine import LLMEngine
+from services.interview.modes.registry import ModeStrategyRegistry
 from services.interview.prompt_engine import PromptEngine
 from services.interview.question_service import QuestionService
 from services.interview.resume_context_service import ResumeContextService
+from services.interview.contracts.mode_contexts import JdFitContext, ResumeProbeContext
 from utils.logger import get_logger
 
 logger = get_logger("InterviewService")
@@ -79,13 +81,12 @@ class InterviewService:
 
         self._engine = LLMEngine(settings)
         self.llm = self._engine.primary
-        self.eval_llm = self._engine.eval_llm
-        self._fallback_llm = self._engine.fallback
 
         self._prompt = PromptEngine(self._engine)
         self._questions = QuestionService(self._engine)
         self._jd_context = JDContextService(self._engine)
         self._resume_context = ResumeContextService()
+        self._mode_registry = ModeStrategyRegistry()
         self._evaluator = AnswerEvaluator(self._engine)
         self._feedback = FeedbackService(self._engine)
         self._answers = AnswerProcessor(self._prompt, session_ttl)
@@ -151,7 +152,7 @@ class InterviewService:
         resume_data: Optional[Dict[str, Any]] = None,
         years_experience: Optional[int] = None,
     ) -> Dict[str, Any]:
-        return await self._jd_context.build_context(
+        context = await self._jd_context.build_context(
             target_company=target_company,
             target_role=target_role,
             job_description=job_description,
@@ -159,6 +160,7 @@ class InterviewService:
             resume_data=resume_data,
             years_experience=years_experience,
         )
+        return JdFitContext(**context).model_dump()
 
     def build_resume_probe_context(
         self,
@@ -166,10 +168,43 @@ class InterviewService:
         resume_data: Optional[Dict[str, Any]],
         years_experience: Optional[int] = None,
     ) -> Dict[str, Any]:
-        return self._resume_context.build_context(
+        context = self._resume_context.build_context(
             resume_data=resume_data,
             years_experience=years_experience,
         )
+        return ResumeProbeContext(**context).model_dump()
+
+    async def prepare_mode_start(
+        self,
+        *,
+        interview_type: InterviewType,
+        difficulty: DifficultyLevel,
+        resume_data: Dict[str, Any],
+        custom_role: Optional[str],
+        years_experience: Optional[int],
+        target_company: Optional[str],
+        target_role: Optional[str],
+        job_description: Optional[str],
+        interview_focus: Optional[str],
+    ) -> Dict[str, Any]:
+        strategy = self._mode_registry.get(interview_type)
+        result = await strategy.prepare_start(
+            interview_service=self,
+            difficulty=difficulty,
+            resume_data=resume_data,
+            custom_role=custom_role,
+            years_experience=years_experience,
+            target_company=target_company,
+            target_role=target_role,
+            job_description=job_description,
+            interview_focus=interview_focus,
+        )
+        return {
+            "target_context": result.target_context,
+            "jd_fit_context": result.jd_fit_context,
+            "resume_probe_context": result.resume_probe_context,
+            "seeded_questions": result.seeded_questions,
+        }
 
     async def generate_resume_deep_dive_questions(
         self,
@@ -188,14 +223,6 @@ class InterviewService:
 
     async def _generate_dsa_question(self, difficulty: DifficultyLevel, context: str) -> Dict[str, Any]:
         return await self._questions._generate_dsa_question(difficulty, context)
-
-    async def analyze_response(
-        self,
-        question: str,
-        candidate_response: str,
-        interview_type: InterviewType,
-    ) -> Dict[str, Any]:
-        return await self._evaluator.analyze_response(question, candidate_response, interview_type)
 
     async def generate_follow_up(
         self,

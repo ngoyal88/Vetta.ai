@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Lightbulb, Tag } from "lucide-react";
 
+import { sanitizeProblemHtml } from "shared/utils/sanitizeHtml";
+
 
 const TABS = ["Problem", "Examples", "Hints"];
 
@@ -123,7 +125,7 @@ const DSAQuestionDisplay = ({ question }) => {
                 question.description_is_html ? (
                   <div
                     className="lc-content text-sm"
-                    dangerouslySetInnerHTML={{ __html: question.description }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeProblemHtml(question.description) }}
                   />
                 ) : (
                   <div className="lc-content text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono">

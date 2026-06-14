@@ -3,9 +3,11 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from config import get_settings
 from utils.logger import get_logger
 
 logger = get_logger("TranscriptService")
+settings = get_settings()
 
 MAX_TRANSCRIPT_ENTRIES = 300
 MAX_TEXT_CHARS = 2000
@@ -39,6 +41,56 @@ def _normalize_speaker(role: Any) -> Optional[str]:
     if not key:
         return None
     return _SPEAKER_MAP.get(key, "interviewer")
+
+
+def _to_epoch_seconds(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return datetime.now(timezone.utc).timestamp()
+    return datetime.now(timezone.utc).timestamp()
+
+
+def _compact_adjacent_turns(
+    entries: List[Dict[str, str]],
+    *,
+    gap_ms: int,
+    max_chars: int,
+) -> List[Dict[str, str]]:
+    if not entries:
+        return []
+
+    compacted: List[Dict[str, str]] = [entries[0].copy()]
+    allowed_gap_seconds = max(0, int(gap_ms)) / 1000.0
+    max_chars = max(1, int(max_chars))
+
+    for entry in entries[1:]:
+        if not compacted:
+            compacted.append(entry.copy())
+            continue
+
+        prev = compacted[-1]
+        if prev.get("speaker") != entry.get("speaker"):
+            compacted.append(entry.copy())
+            continue
+
+        merged_text = f"{prev.get('text', '').strip()} {entry.get('text', '').strip()}".strip()
+        if len(merged_text) > max_chars:
+            compacted.append(entry.copy())
+            continue
+
+        gap = _to_epoch_seconds(entry.get("timestamp")) - _to_epoch_seconds(prev.get("timestamp"))
+        if gap > allowed_gap_seconds:
+            compacted.append(entry.copy())
+            continue
+
+        prev["text"] = merged_text
+        prev["timestamp"] = entry.get("timestamp") or prev.get("timestamp") or _normalize_timestamp(None)
+
+    return compacted
 
 
 def extract_assistant_transcript_text(item: Any) -> str:
@@ -117,7 +169,11 @@ def extract_live_transcription(session_data: Optional[Dict[str, Any]]) -> List[D
             out.pop()
             break
 
-    return out
+    return _compact_adjacent_turns(
+        out,
+        gap_ms=int(getattr(settings, "transcript_merge_gap_ms", 1500)),
+        max_chars=int(getattr(settings, "transcript_merge_max_chars", 1200)),
+    )
 
 
 def attach_transcript_to_session(session_data: Dict[str, Any]) -> Dict[str, Any]:

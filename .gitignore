@@ -4,7 +4,8 @@
 !.env.example
 backend/.env
 backend/serviceAccount.json
-
+test_*
+*/__tests__/
 # --- Python ---
 __pycache__/
 *.py[cod]

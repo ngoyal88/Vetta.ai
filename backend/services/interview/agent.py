@@ -4,6 +4,14 @@ AgentServer registers with LiveKit Cloud and dispatches an AgentSession per room
 Room name equals session_id; session data must exist in Redis before the user joins.
 Pipeline: Deepgram STT → Groq LLM → Edge TTS (via EdgeTTSPlugin) → Silero VAD.
 """
+import sys
+from pathlib import Path
+
+# Allow `python services/interview/agent.py dev` from backend/ (cwd on sys.path).
+_backend_root = Path(__file__).resolve().parents[2]
+if str(_backend_root) not in sys.path:
+    sys.path.insert(0, str(_backend_root))
+
 import asyncio
 import json
 import os
@@ -15,11 +23,20 @@ from config import get_settings
 from firebase_admin import firestore
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewType
+from services.interview.contracts.session_events import (
+    InterviewEndedEvent,
+    SessionEvent,
+    SessionEventType,
+    SessionStateMachine,
+    SessionStatusEvent,
+)
+from services.profile_memory.profile_claims_service import run_profile_claims_pipeline
 from services.interview.interview_service import InterviewService
 from services.interview.session_conductor import SessionConductor
 from services.interview.transcript_service import attach_transcript_to_session, extract_assistant_transcript_text
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
+from services.interview.session_store import SessionStore
 from redis.asyncio import Redis
 
 from livekit.agents import Agent, AgentServer, AgentSession, AutoSubscribe, JobContext, JobProcess, llm
@@ -88,11 +105,13 @@ async def _ensure_redis() -> Redis:
     return _worker_redis
 
 
+async def _session_store(session_key: str, ttl: int = SESSION_TTL) -> SessionStore:
+    return SessionStore(session_key, redis_client=await _ensure_redis(), ttl=ttl)
+
+
 async def _get_session(session_key: str) -> Optional[Dict[str, Any]]:
     try:
-        redis = await _ensure_redis()
-        raw = await redis.get(session_key)
-        return json.loads(raw) if raw else None
+        return await (await _session_store(session_key)).get()
     except Exception as e:
         log.error("Error retrieving session %s: %s", session_key, e, exc_info=True)
         return None
@@ -100,8 +119,7 @@ async def _get_session(session_key: str) -> Optional[Dict[str, Any]]:
 
 async def _update_session(session_key: str, data: Dict[str, Any], ttl: int = SESSION_TTL) -> None:
     try:
-        redis = await _ensure_redis()
-        await redis.set(session_key, json.dumps(data, default=str), ex=ttl)
+        await (await _session_store(session_key, ttl=ttl)).replace(data)
     except Exception as e:
         log.error("Error updating session %s: %s", session_key, e, exc_info=True)
 
@@ -285,9 +303,17 @@ async def _handle_user_turn(
     if not session_data:
         return
     conductor = SessionConductor.load(session_data.get("session_conductor"))
+    merge_gap_ms = int(getattr(settings, "transcript_merge_gap_ms", 1500))
+    merge_max_chars = int(getattr(settings, "transcript_merge_max_chars", 1200))
     answer_duration = max(0.0, time.monotonic() - answer_started_at[0])
     conductor.turn_count += 1
-    conductor.append_turn("candidate", transcript)
+    conductor.append_or_merge_turn(
+        "candidate",
+        transcript,
+        timestamp=time.time(),
+        gap_ms=merge_gap_ms,
+        max_chars=merge_max_chars,
+    )
     conductor.last_answer_duration = answer_duration
 
     questions = session_data.get("questions", []) or []
@@ -340,7 +366,15 @@ async def _handle_agent_turn(session_id: str, text: str) -> None:
     if not session_data:
         return
     conductor = SessionConductor.load(session_data.get("session_conductor"))
-    conductor.append_turn("interviewer", clean)
+    merge_gap_ms = int(getattr(settings, "transcript_merge_gap_ms", 1500))
+    merge_max_chars = int(getattr(settings, "transcript_merge_max_chars", 1200))
+    conductor.append_or_merge_turn(
+        "interviewer",
+        clean,
+        timestamp=time.time(),
+        gap_ms=merge_gap_ms,
+        max_chars=merge_max_chars,
+    )
     session_data["session_conductor"] = conductor.serialize()
     await _update_session(session_key, session_data)
 
@@ -377,7 +411,7 @@ async def _emit_session_status(ctx: JobContext, session_data: Dict[str, Any]) ->
             payload["full"] = final_feedback
         else:
             payload["final_feedback"] = final_feedback
-    await _send_control(ctx.room, payload)
+    await _send_control(ctx.room, SessionStatusEvent(**payload).model_dump(exclude_none=True))
 
 
 async def _maybe_restore_stt(session_id: str, ctx: JobContext) -> None:
@@ -758,8 +792,22 @@ async def _handle_end_interview(
     )
 
     completed_ts = datetime.now(timezone.utc).isoformat()
+    if completion_reason == "silence_timeout":
+        end_event = SessionEventType.SILENCE_TIMEOUT
+    elif completion_reason == "tab_away_timeout":
+        end_event = SessionEventType.TAB_AWAY_TIMEOUT
+    elif completion_reason == "max_duration":
+        end_event = SessionEventType.MAX_DURATION
+    elif completion_reason in {"error", "candidate_disconnected"}:
+        end_event = SessionEventType.ERROR_END
+    else:
+        end_event = SessionEventType.MANUAL_END
+    terminal_state = SessionStateMachine.transition(
+        session_data.get("status", "active"),
+        SessionEvent(type=end_event, reason=completion_reason),
+    ).value
     session_data.update({
-        "status": "ended_early",
+        "status": terminal_state,
         "completion_reason": completion_reason,
         "completed_at": completed_ts,
         "last_updated": completed_ts,
@@ -771,9 +819,30 @@ async def _handle_end_interview(
     })
     await _update_session(session_key, session_data)
 
+    async def _run_vpm_task() -> None:
+        if not get_settings().vpm_enabled:
+            return
+        try:
+            result = await run_profile_claims_pipeline(
+                uid=str(session_data.get("user_id") or ""),
+                session_id=session_id,
+                session_data=session_data,
+                engine=interview_service._engine,  # noqa: SLF001
+            )
+            if result.get("failed") or result.get("pipeline_status") == "failed":
+                log.warning(
+                    "Agent VPM pipeline failed session=%s reason=%s",
+                    session_id,
+                    result.get("reason"),
+                )
+        except Exception as vpm_error:
+            log.warning("Agent VPM pipeline failed: %s", vpm_error)
+
+    asyncio.create_task(_run_vpm_task())
+
     try:
         db.collection("interviews").document(session_id).set({
-            "status": "ended_early",
+            "status": terminal_state,
             "completion_reason": completion_reason,
             "completed_at": firestore.SERVER_TIMESTAMP,
             "last_updated": firestore.SERVER_TIMESTAMP,
@@ -790,13 +859,12 @@ async def _handle_end_interview(
     except Exception as e:
         log.warning("Firestore persist failed: %s", e)
 
-    await _send_control(ctx.room, {
-        "type": "interview_ended",
-        "completion_reason": completion_reason,
-        "duration_minutes": duration_minutes,
-        "questions_answered": session_data["questions_answered"],
-        "timestamp": completed_ts,
-    })
+    await _send_control(ctx.room, InterviewEndedEvent(
+        completion_reason=completion_reason,
+        duration_minutes=duration_minutes,
+        questions_answered=session_data["questions_answered"],
+        timestamp=completed_ts,
+    ).model_dump())
     await _send_control(ctx.room, {
         "type": "feedback",
         "feedback": final_feedback.get("feedback") if isinstance(final_feedback, dict) else final_feedback,
@@ -804,7 +872,7 @@ async def _handle_end_interview(
         "duration_minutes": duration_minutes,
         "questions_answered": session_data["questions_answered"],
         "code_problems_attempted": session_data["code_problems_attempted"],
-        "status": "ended_early",
+        "status": terminal_state,
         "completion_reason": completion_reason,
         "timestamp": completed_ts,
     })
@@ -826,7 +894,10 @@ async def _handle_candidate_disconnect(
     if session_data.get("status") in {"ended_early", "completed", "incomplete_exit"}:
         return
 
-    session_data["status"] = "incomplete_exit"
+    session_data["status"] = SessionStateMachine.transition(
+        session_data.get("status", "active"),
+        SessionEvent(type=SessionEventType.DISCONNECT_TIMEOUT, reason="candidate_disconnected"),
+    ).value
     session_data["completion_reason"] = "candidate_disconnected"
     completed_ts = datetime.now(timezone.utc).isoformat()
     session_data["completed_at"] = completed_ts
@@ -873,6 +944,27 @@ async def _handle_candidate_disconnect(
     session_data["questions_answered"] = len(responses)
     session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
     await _update_session(session_key, session_data)
+
+    async def _run_vpm_task() -> None:
+        if not get_settings().vpm_enabled:
+            return
+        try:
+            result = await run_profile_claims_pipeline(
+                uid=str(session_data.get("user_id") or ""),
+                session_id=session_id,
+                session_data=session_data,
+                engine=interview_service._engine,  # noqa: SLF001
+            )
+            if result.get("failed") or result.get("pipeline_status") == "failed":
+                log.warning(
+                    "Disconnect VPM pipeline failed session=%s reason=%s",
+                    session_id,
+                    result.get("reason"),
+                )
+        except Exception as vpm_error:
+            log.warning("Disconnect VPM pipeline failed: %s", vpm_error)
+
+    asyncio.create_task(_run_vpm_task())
 
     try:
         scores = parse_scores_from_feedback(
@@ -1113,7 +1205,6 @@ async def entrypoint(ctx: JobContext) -> None:
         )
 
     def _on_participant_connected(participant: Any) -> None:
-        nonlocal disconnect_task
         if str(getattr(participant, "identity", "")) != str(session_data.get("user_id")):
             return
         if disconnect_task and not disconnect_task.done():
@@ -1164,3 +1255,9 @@ async def entrypoint(ctx: JobContext) -> None:
                 await session.say(first_question_text)
 
     log.info("Greeting delivered for session %s — agent is live", session_id)
+
+
+if __name__ == "__main__":
+    from livekit.agents import cli
+
+    cli.run_app(server)

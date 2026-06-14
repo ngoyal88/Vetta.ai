@@ -57,18 +57,4 @@ class GeminiService:
         except Exception as e:
             logger.error(f"Gemini generation error: {e}", exc_info=True)
             return f"Error generating response: {str(e)}"
-    
-    async def chat(self, messages: List[Dict[str, str]]) -> str:
-        """Chat with conversation history"""
-        if not self.model:
-            return "LLM service not configured"
-        
-        try:
-            # Convert messages to prompt
-            prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-            return await self.generate_text(prompt)
-            
-        except Exception as e:
-            logger.error(f"Chat error: {e}", exc_info=True)
-            return f"Error in chat: {str(e)}"
 

@@ -10,7 +10,7 @@ from docx.oxml.ns import qn
 
 from firebase_config import db
 from models.resume import ParsedResumeResponse, ResumeProfile
-from services.integrations.groq_service import GroqService
+from services.interview.llm_engine import get_platform_llm
 
 def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     """
@@ -163,8 +163,7 @@ async def parse_resume_llm(
     truncated_text = raw_text[:6000]
     user_prompt = f"Resume text (UTF-8):\\n\\n{truncated_text}"
 
-    groq = GroqService()
-    json_str = await groq.json_completion(system_prompt, user_prompt)
+    json_str = await get_platform_llm().json_completion(system_prompt, user_prompt)
 
     try:
         payload = json.loads(json_str or "{}")

@@ -277,7 +277,7 @@ const InterviewRoomLiveKitContent = ({ sessionId, onBack }) => {
     error.includes("Could not start")
   );
 
-  if (interviewEnded) return <SessionReportScreen feedback={feedback} onBack={onBack} />;
+  if (interviewEnded) return <SessionReportScreen feedback={feedback} sessionId={sessionId} onBack={onBack} />;
 
   return (
     <div className="h-screen flex flex-col bg-base overflow-hidden">

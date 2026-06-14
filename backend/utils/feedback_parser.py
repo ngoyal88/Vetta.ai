@@ -4,11 +4,7 @@ from typing import Dict, Optional
 
 
 def parse_scores_from_feedback(feedback_text: Optional[str]) -> Dict[str, float]:
-    """Extract numeric scores from final feedback text (best effort).
 
-    Looks for TECHNICAL SKILLS: X/10, COMMUNICATION: X/10, SCORE: X/10.
-    Returns a dict with keys 'technical', 'communication', 'overall'.
-    """
     if not feedback_text:
         return {}
 

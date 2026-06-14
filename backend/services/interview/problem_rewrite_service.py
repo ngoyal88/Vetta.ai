@@ -11,8 +11,9 @@ Function signature schema:
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
+from services.interview.llm_engine import get_platform_llm
 from utils.logger import get_logger
 
 logger = get_logger("ProblemRewriteService")
@@ -23,11 +24,6 @@ DEFAULT_FUNCTION_SIGNATURE = {
     "params": [{"name": "nums", "type": "list[int]"}, {"name": "target", "type": "int"}],
     "return_type": "list[int]",
 }
-
-
-def _get_groq():
-    from services.integrations.groq_service import GroqService
-    return GroqService()
 
 
 async def rewrite_to_story(question_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -62,8 +58,7 @@ Original description:
 Return JSON: rewritten_title, rewritten_description (plain text), and function_signature with name, params (list of {{name, type}}), and return_type. Preserve the exact contract so test cases (stdin: one JSON line per param, stdout: one JSON line for return value) still apply."""
 
     try:
-        groq = _get_groq()
-        raw = await groq.json_completion(system_prompt, user_prompt)
+        raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
         data = json.loads(raw) if isinstance(raw, str) else raw
 
         rewritten_title = data.get("rewritten_title") or title
@@ -334,10 +329,10 @@ def _go_template(
         lines.append(f'\tvar {p} {pt}')
         lines.append(f'\tif len(lines) > {i} {{')
         lines.append(f'\t\tif err := json.Unmarshal([]byte(lines[{i}]), &{p}); err != nil {{')
-        lines.append(f'\t\t\tfmt.Fprintf(os.Stderr, "json error: %v\\n", err)')
-        lines.append(f'\t\t\tos.Exit(1)')
-        lines.append(f'\t\t}}')
-        lines.append(f'\t}}')
+        lines.append('\t\t\tfmt.Fprintf(os.Stderr, "json error: %v\\n", err)')
+        lines.append('\t\t\tos.Exit(1)')
+        lines.append('\t\t}')
+        lines.append('\t}')
     args_str = ", ".join(param_names)
     lines.append(f'\tresult := {func_name}({args_str})')
     lines.append('\tout, _ := json.Marshal(result)')
@@ -372,7 +367,6 @@ def _java_template(
     stub_return = "new java.util.HashMap<String,Object>()" if default_return == "dict" else "new java.util.ArrayList<>()"
     param_types = [_schema_type_to_java(p.get("type") or "any") for p in params]
     param_decls = ", ".join(f"{jt} {p}" for jt, p in zip(param_types, param_names))
-    n = len(param_names)
     lines = [
         "import java.util.*;",
         "import com.fasterxml.jackson.databind.ObjectMapper;",
@@ -414,8 +408,6 @@ def _cpp_template(
 ) -> str:
     param_types = [_schema_type_to_cpp(p.get("type") or "any") for p in params]
     ret_cpp = _schema_type_to_cpp(return_type)
-    n = len(param_names)
-
     # Stub return: native type literal
     if ret_cpp == "json":
         stub_return = "{}" if default_return == "dict" else "json::array()"

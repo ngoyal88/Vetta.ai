@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { mergeVaultEntryLists, mergeVaultEntryScores } from '../utils/scorePresentation';
 import { vaultApi } from '../services/vaultApi';
 import type {
   UploadResumePayload,
@@ -25,7 +26,8 @@ export const useVaultLibrary = () => {
       setLoading(true);
       setError('');
       const data = await vaultApi.listEntries();
-      setEntries(data.entries || []);
+      const incoming = data.entries || [];
+      setEntries((previous) => mergeVaultEntryLists(previous, incoming));
       setMeta(data.meta || { resume_count: 0, active_resume_id: null });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load vault';
@@ -41,7 +43,18 @@ export const useVaultLibrary = () => {
 
   const uploadResume = async (payload: UploadResumePayload): Promise<VaultUploadResponse> => {
     const res = await vaultApi.uploadResume(payload);
-    await refresh();
+    setEntries((previous) => {
+      const existing = previous.find((entry) => entry.id === res.entry.id);
+      const merged = mergeVaultEntryScores(existing, {
+        ...res.entry,
+        scorecard: res.entry.scorecard ?? res.scorecard,
+      });
+      if (existing) {
+        return previous.map((entry) => (entry.id === res.entry.id ? merged : entry));
+      }
+      return [merged, ...previous];
+    });
+    void refresh();
     return res;
   };
 
@@ -69,7 +82,14 @@ export const useVaultLibrary = () => {
     role?: string,
   ): Promise<VaultAnalyzeResponse> => {
     const res = await vaultApi.analyze(resumeId, versionId, role);
-    await refresh();
+    if (res.entry_scorecard_updated) {
+      setEntries((previous) =>
+        previous.map((entry) =>
+          entry.id === resumeId ? { ...entry, scorecard: res.scorecard } : entry,
+        ),
+      );
+    }
+    void refresh();
     return res;
   };
 

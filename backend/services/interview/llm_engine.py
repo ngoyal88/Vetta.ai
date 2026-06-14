@@ -1,8 +1,9 @@
 """LLM provider selection and call orchestration for interview flows."""
 import asyncio
+from functools import lru_cache
 from typing import Any, AsyncGenerator, Optional
 
-from config import Settings
+from config import Settings, get_settings
 from services.integrations import GeminiService, GroqService
 from utils.logger import get_logger
 from utils.response_validator import process_response
@@ -200,3 +201,8 @@ class LLMEngine:
             fallback_llm=self.fallback,
             empty_fallback="{}",
         )
+
+
+@lru_cache(maxsize=1)
+def get_platform_llm() -> LLMEngine:
+    return LLMEngine(get_settings())

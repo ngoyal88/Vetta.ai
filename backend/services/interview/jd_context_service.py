@@ -1,8 +1,8 @@
 import json
-import re
 from typing import Any, Dict, List, Optional
 
 from services.interview.llm_engine import LLMEngine
+from services.interview.prompt_contracts import extract_json_dict
 from utils.logger import get_logger
 
 logger = get_logger("JDContextService")
@@ -20,23 +20,6 @@ def clean_optional_text(value: Optional[str], max_len: int = 8000) -> Optional[s
     if not cleaned:
         return None
     return cleaned[:max_len]
-
-
-def extract_json_object(raw: str) -> Dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            return {}
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return {}
-
 
 def _safe_list(value: Any, limit: int = 8) -> List[str]:
     if not isinstance(value, list):
@@ -223,7 +206,7 @@ JSON schema:
 }}"""
         try:
             raw = await self._engine.generate_raw(prompt, 0.25, empty_fallback="{}")
-            parsed = extract_json_object(raw)
+            parsed = extract_json_dict(raw)
             if not parsed:
                 return fallback
             return _merge_jd_context(parsed, fallback)

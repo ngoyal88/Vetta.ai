@@ -14,6 +14,9 @@ class InterviewType(str, Enum):
     RESUME_BASED = "resume"
     CUSTOM = "custom"
     ROLE_TARGETED = "role_targeted"
+    PRESSURE = "pressure"
+    BLIND = "blind"
+    PAIR_PROGRAMMING = "pair_programming"
 
 
 class DifficultyLevel(str, Enum):
@@ -79,6 +82,8 @@ class InterviewSession(BaseModel):
     resume_probe_context: Dict[str, Any] = Field(default_factory=dict)
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
     status: str = "active"
+    completion_reason: Optional[str] = None
+    last_event_id: Optional[str] = None
     current_question_index: int = 0
     questions: List[Dict[str, Any]] = []
     responses: List[Dict[str, Any]] = []

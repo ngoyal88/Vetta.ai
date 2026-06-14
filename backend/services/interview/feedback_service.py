@@ -1,9 +1,12 @@
-import json
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 from utils.logger import get_logger
 from services.interview.llm_engine import LLMEngine
 from services.interview.transcript_service import extract_live_transcription
+from services.interview.prompt_contracts import (
+    execute_json_contract,
+    normalize_replay_highlights,
+)
 
 logger = get_logger("FeedbackService")
 
@@ -109,36 +112,6 @@ class FeedbackService:
 
         return ""
 
-    def _sanitize_replay_highlights(self, raw: Any) -> List[Dict[str, Any]]:
-        highlights: List[Dict[str, Any]] = []
-        if not isinstance(raw, list):
-            return highlights
-
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            question = str(item.get("question") or "").strip()[:_HIGHLIGHT_Q_MAX]
-            answer = str(item.get("answer") or "").strip()[:_HIGHLIGHT_A_MAX]
-            if not question or not answer:
-                continue
-
-            sanitized: Dict[str, Any] = {
-                "question": question,
-                "answer": answer,
-                "source": "llm",
-            }
-
-            confidence = item.get("confidence")
-            if isinstance(confidence, (int, float)):
-                c = max(0.0, min(float(confidence), 1.0))
-                sanitized["confidence"] = round(c, 3)
-
-            highlights.append(sanitized)
-            if len(highlights) >= _HIGHLIGHT_LIMIT:
-                break
-
-        return highlights
-
     async def generate_replay_highlights(self, session_data: Dict) -> List[Dict[str, Any]]:
         context = self._build_highlight_context(session_data)
         if not context.strip():
@@ -164,9 +137,21 @@ Conversation context:
 {context}
 """
         try:
-            raw = await self._engine.generate_raw(prompt, 0.0, empty_fallback="[]")
-            parsed = json.loads(raw)
-            return self._sanitize_replay_highlights(parsed)
+            contract = await execute_json_contract(
+                template_id="replay_highlights",
+                engine=self._engine,
+                prompt=prompt,
+                temperature=0.0,
+                fallback=[],
+                normalizer=lambda p: normalize_replay_highlights(
+                    p,
+                    q_max=_HIGHLIGHT_Q_MAX,
+                    a_max=_HIGHLIGHT_A_MAX,
+                    limit=_HIGHLIGHT_LIMIT,
+                ),
+                empty_fallback="[]",
+            )
+            return contract.value
         except Exception:
             return []
 
@@ -260,7 +245,24 @@ ROLE READINESS:
 RECOMMENDATION: [Hire / Strong Maybe / Needs Improvement]
 [One sentence rationale]"""
 
-        feedback = await self._engine.generate(prompt, 0.3)
+        contract = await execute_json_contract(
+            template_id="final_feedback",
+            engine=self._engine,
+            prompt=f"""Return ONLY valid JSON:
+{{
+  "feedback": "string"
+}}
+
+{prompt}
+""",
+            temperature=0.3,
+            fallback={"feedback": self._fallback_feedback(session_data)},
+            normalizer=lambda p: p if isinstance(p, dict) else {"feedback": self._fallback_feedback(session_data)},
+            empty_fallback="{}",
+        )
+        feedback = str((contract.value or {}).get("feedback") or "")
+        if not feedback.strip():
+            feedback = self._fallback_feedback(session_data)
         if self._is_invalid_feedback_text(feedback):
             logger.warning("Feedback generation returned invalid/provider-error text; using safe fallback")
             feedback = self._fallback_feedback(session_data)

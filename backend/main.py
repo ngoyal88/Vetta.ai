@@ -3,15 +3,18 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from config import get_settings
-from routes import livekit, vault
+from routes import contact, livekit, vault
 from routes.interview import router as interview_router
-from utils.logger import setup_logging, get_logger
-from utils.redis_client import test_connection, close_redis
 from services.interview import InterviewService
+from utils.cors import apply_cors_headers
+from utils.http_errors import client_error_detail, json_error_content
+from utils.logger import setup_logging, get_logger
+from utils.redis_client import close_redis, test_connection
 
 try:
     from livekit.agents import AgentServer
@@ -24,6 +27,8 @@ settings = get_settings()
 
 _agent_server: Optional[Any] = None
 _agent_task: Optional[asyncio.Task] = None
+
+_ACCESS_LOG_SKIP_PATHS = frozenset({"/health"})
 
 
 @asynccontextmanager
@@ -47,11 +52,22 @@ async def lifespan(app: FastAPI):
 
     if (
         AgentServer is not None
+        and settings.livekit_agent_embedded
         and settings.livekit_url
         and settings.livekit_api_key
         and settings.livekit_api_secret
     ):
         _start_agent_worker()
+    elif (
+        settings.livekit_url
+        and settings.livekit_api_key
+        and settings.livekit_api_secret
+        and not settings.livekit_agent_embedded
+    ):
+        log.info(
+            "LiveKit agent not embedded in API process — run separately: "
+            "python run_livekit_agent.py dev"
+        )
 
     yield
 
@@ -88,7 +104,7 @@ def _log_service_status() -> None:
     if settings.judge0_api_key:
         services.append("Judge0 Code Execution")
 
-    tts_provider = (getattr(settings, "tts_provider", "edge") or "edge").lower()
+    tts_provider = (settings.tts_provider or "edge").lower()
     if tts_provider == "edge":
         services.append("Edge TTS")
     elif settings.elevenlabs_api_key:
@@ -123,6 +139,12 @@ def _start_agent_worker() -> None:
         log.warning("LiveKit Agent failed to start: %s", e)
 
 
+def _cors_json_response(request: Request, status_code: int, detail: object) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content=json_error_content(detail))
+    apply_cors_headers(response, request.headers.get("origin") or "")
+    return response
+
+
 app = FastAPI(
     title="Vetta.ai AI Interviewer API",
     version="1.0.0",
@@ -133,13 +155,41 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list(),
+    allow_origin_regex=settings.allowed_origin_regex_value(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    return _cors_json_response(request, exc.status_code, exc.detail)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    if isinstance(exc, HTTPException):
+        return _cors_json_response(request, exc.status_code, exc.detail)
+    log.error("Unhandled API error on %s %s", request.method, request.url.path, exc_info=True)
+    return _cors_json_response(
+        request,
+        500,
+        client_error_detail("Internal server error", exc),
+    )
+
+
+@app.middleware("http")
+async def access_log(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path not in _ACCESS_LOG_SKIP_PATHS:
+        log.info("%s %s -> %s", request.method, request.url.path, response.status_code)
+    return response
+
+
 app.include_router(vault.router)
 app.include_router(livekit.router)
+app.include_router(contact.router)
 app.include_router(interview_router)
 
 
@@ -169,7 +219,7 @@ async def health_check():
     services = {
         "llm": bool(settings.llm_api_key or settings.groq_api_key),
         "deepgram": bool(settings.deepgram_api_key),
-        "edge_tts": (getattr(settings, "tts_provider", "edge") or "edge").lower() == "edge",
+        "edge_tts": (settings.tts_provider or "edge").lower() == "edge",
         "elevenlabs": bool(settings.elevenlabs_api_key),
         "judge0": bool(settings.judge0_api_key),
         "redis": redis_ok,
@@ -190,4 +240,5 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

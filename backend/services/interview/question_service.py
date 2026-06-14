@@ -1,4 +1,3 @@
-import json
 from utils.logger import get_logger
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
@@ -6,6 +5,10 @@ from services.interview.llm_engine import LLMEngine
 from models.interview import InterviewType, DifficultyLevel
 from services.interview.leetcode_service import DSA_EXCLUDE_TOPICS, LeetCodeService
 from services.interview.problem_rewrite_service import rewrite_to_story, generate_starter_code
+from services.interview.prompt_contracts import (
+    execute_json_contract,
+    normalize_question_payload,
+)
 
 logger = get_logger("QuestionService")
 
@@ -87,20 +90,18 @@ Rules:
 - Every question must point to a concrete role/project/achievement/weak area in probe targets.
 - Avoid generic introductions such as \"tell me about yourself\".
 """
-        response = await self._engine.generate_raw(prompt, 0.55, empty_fallback="{}")
-        parsed: list[Dict[str, Any]] = []
-        try:
-            resp = response.strip().strip("`").strip()
-            if resp.lower().startswith("json"):
-                resp = resp[4:]
-            start = resp.find("{")
-            end = resp.rfind("}") + 1
-            obj = json.loads(resp[start:end])
-            questions = obj.get("questions") if isinstance(obj, dict) else []
-            if isinstance(questions, list):
-                parsed = [q for q in questions if isinstance(q, dict)]
-        except Exception:
-            parsed = []
+        contract = await execute_json_contract(
+            template_id="first_question_resume_deep_dive",
+            engine=self._engine,
+            prompt=prompt,
+            temperature=0.55,
+            fallback={"questions": []},
+            normalizer=lambda p: p if isinstance(p, dict) else {"questions": []},
+            empty_fallback="{}",
+        )
+        parsed_obj = contract.value if isinstance(contract.value, dict) else {"questions": []}
+        questions_value = parsed_obj.get("questions")
+        parsed: list[Dict[str, Any]] = [q for q in questions_value if isinstance(q, dict)] if isinstance(questions_value, list) else []
 
         out: list[Dict[str, Any]] = []
         for idx, target in enumerate(selected_targets):
@@ -200,12 +201,17 @@ Rules:
 - Every "input" must be {param_count} JSON lines joined by newline. Every "output" must be one JSON line.
 - All inputs/outputs must be correct for the problem above."""
 
-        response = await self._engine.generate_raw(prompt, 0.3, empty_fallback="{}")
+        contract = await execute_json_contract(
+            template_id="first_question_dsa_testcases",
+            engine=self._engine,
+            prompt=prompt,
+            temperature=0.3,
+            fallback={"visible": [], "hidden": []},
+            normalizer=lambda p: p if isinstance(p, dict) else {"visible": [], "hidden": []},
+            empty_fallback="{}",
+        )
         try:
-            resp = response.strip().strip('`').strip()
-            if resp.lower().startswith('json'):
-                resp = resp[4:]
-            data = json.loads(resp[resp.find('{'):resp.rfind('}') + 1])
+            data = contract.value if isinstance(contract.value, dict) else {"visible": [], "hidden": []}
             visible = data.get("visible") or []
             hidden = data.get("hidden") or []
 
@@ -283,16 +289,18 @@ Return ONLY valid JSON (no markdown, no backticks, no explanation):
 Rules: first 2 test_cases must have is_hidden=false (visible), rest is_hidden=true (hidden).
 starter_code is optional."""
 
-        response = await self._engine.generate_raw(prompt, 0.7, empty_fallback="{}")
+        contract = await execute_json_contract(
+            template_id="first_question_dsa_llm",
+            engine=self._engine,
+            prompt=prompt,
+            temperature=0.7,
+            fallback={},
+            normalizer=lambda p: p if isinstance(p, dict) else {},
+            empty_fallback="{}",
+        )
 
         try:
-            resp = response.strip().strip('`').strip()
-            if resp.lower().startswith('json'):
-                resp = resp[4:]
-            json_start = resp.find('{')
-            json_end = resp.rfind('}') + 1
-            json_str = resp[json_start:json_end]
-            question_data = json.loads(json_str)
+            question_data = contract.value if isinstance(contract.value, dict) else {}
 
             question_data['question_id'] = str(uuid.uuid4())
             question_data['type'] = 'coding'
@@ -337,31 +345,23 @@ Return ONLY valid JSON:
     "evaluation_criteria": "Key points to look for in the answer"
 }}"""
 
-        response = await self._engine.generate_raw(prompt, 0.7, empty_fallback="{}")
-
-        try:
-            resp = response.strip().strip('`').strip()
-            if resp.lower().startswith('json'):
-                resp = resp[4:]
-            start = resp.find('{')
-            end = resp.rfind('}') + 1
-            obj = json.loads(resp[start:end])
-
-            return {
-                'type': 'custom_role',
-                'role': role,
-                'question': obj.get('question', response),
-                'evaluation_criteria': obj.get('evaluation_criteria', ''),
-                'difficulty': difficulty.value
-            }
-        except Exception:
-            return {
-                'type': 'custom_role',
-                'role': role,
-                'question': response,
-                'evaluation_criteria': '',
-                'difficulty': difficulty.value
-            }
+        contract = await execute_json_contract(
+            template_id="first_question_custom_role",
+            engine=self._engine,
+            prompt=prompt,
+            temperature=0.7,
+            fallback=normalize_question_payload({}, fallback_question="Tell me about a difficult technical decision you made recently.", difficulty=difficulty, q_type="custom_role"),
+            normalizer=lambda p: normalize_question_payload(
+                p,
+                fallback_question="Tell me about a difficult technical decision you made recently.",
+                difficulty=difficulty,
+                q_type="custom_role",
+            ),
+            empty_fallback="{}",
+        )
+        payload = contract.value
+        payload["role"] = role
+        return payload
 
     async def _generate_role_targeted_question(
         self,
@@ -392,27 +392,21 @@ Return ONLY valid JSON:
     "question": "Your question here",
     "evaluation_criteria": "What to look for in a strong answer"
 }}"""
-        response = await self._engine.generate_raw(prompt, 0.65, empty_fallback="{}")
-        try:
-            resp = response.strip().strip('`').strip()
-            if resp.lower().startswith('json'):
-                resp = resp[4:]
-            start = resp.find('{')
-            end = resp.rfind('}') + 1
-            obj = json.loads(resp[start:end])
-            return {
-                "type": "role_targeted",
-                "question": obj.get("question", response),
-                "evaluation_criteria": obj.get("evaluation_criteria", ""),
-                "difficulty": difficulty.value,
-            }
-        except Exception:
-            return {
-                "type": "role_targeted",
-                "question": response,
-                "evaluation_criteria": "",
-                "difficulty": difficulty.value,
-            }
+        contract = await execute_json_contract(
+            template_id="first_question_role_targeted",
+            engine=self._engine,
+            prompt=prompt,
+            temperature=0.65,
+            fallback=normalize_question_payload({}, fallback_question="What project best shows your fit for this role, and what tradeoffs did you make?", difficulty=difficulty, q_type="role_targeted"),
+            normalizer=lambda p: normalize_question_payload(
+                p,
+                fallback_question="What project best shows your fit for this role, and what tradeoffs did you make?",
+                difficulty=difficulty,
+                q_type="role_targeted",
+            ),
+            empty_fallback="{}",
+        )
+        return contract.value
 
     async def _generate_general_question(
         self,
@@ -440,29 +434,21 @@ Make it conversational and specific. Return ONLY valid JSON:
     "evaluation_criteria": "What to look for in a good answer"
 }}"""
 
-        response = await self._engine.generate_raw(prompt, 0.7, empty_fallback="{}")
-
-        try:
-            resp = response.strip().strip('`').strip()
-            if resp.lower().startswith('json'):
-                resp = resp[4:]
-            start = resp.find('{')
-            end = resp.rfind('}') + 1
-            obj = json.loads(resp[start:end])
-
-            return {
-                'type': interview_type.value,
-                'question': obj.get('question', response),
-                'evaluation_criteria': obj.get('evaluation_criteria', ''),
-                'difficulty': difficulty.value
-            }
-        except Exception:
-            return {
-                'type': interview_type.value,
-                'question': response,
-                'evaluation_criteria': '',
-                'difficulty': difficulty.value
-            }
+        contract = await execute_json_contract(
+            template_id="first_question_general",
+            engine=self._engine,
+            prompt=prompt,
+            temperature=0.7,
+            fallback=normalize_question_payload({}, fallback_question=f"Walk me through a practical {topic} problem you solved recently.", difficulty=difficulty, q_type=interview_type.value),
+            normalizer=lambda p: normalize_question_payload(
+                p,
+                fallback_question=f"Walk me through a practical {topic} problem you solved recently.",
+                difficulty=difficulty,
+                q_type=interview_type.value,
+            ),
+            empty_fallback="{}",
+        )
+        return contract.value
 
     def _get_fallback_dsa_question(self, difficulty: DifficultyLevel) -> Dict[str, Any]:
         """Fallback DSA question if generation fails. Uses canonical I/O and function-only boilerplate."""

@@ -2,31 +2,123 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from services.integrations.groq_service import GroqService
+from services.interview.llm_engine import get_platform_llm
+from services.interview.prompt_contracts import extract_json_dict
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 from services.resume.scorecard_service import normalize_resume_for_scorecard, build_resume_scorecard
 from services.vault.analysis_service import _compact_resume_text
-
-
-def _extract_json_obj(raw: str) -> Dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            return {}
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return {}
-
+from services.vault.compare_diff_extractor import (
+    SECTION_ORDER as DIFF_SECTION_ORDER,
+    _section_row,
+    build_diff_summary_fallback,
+    build_pane_changes,
+    extract_section_diffs,
+    merge_llm_changed,
+    section_diffs_to_legacy_comparisons,
+)
 
 def _skill_set(profile: Dict[str, Any]) -> List[str]:
     normalized = normalize_resume_for_scorecard(profile)
     skills = normalized.get("skills") or []
     return list(dict.fromkeys([s for s in skills if isinstance(s, str) and s.strip()]))
+
+
+SECTION_ORDER = ("summary", "skills", "experience", "projects")
+SECTION_LABELS = {
+    "summary": "Summary",
+    "skills": "Skills",
+    "experience": "Experience",
+    "projects": "Projects",
+}
+VALID_VERDICTS = frozenset({"improved", "regressed", "unchanged", "mixed"})
+
+
+def _clean_text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _normalize_section_comparisons(
+    payload: Dict[str, Any],
+    section_highlights: Dict[str, str],
+    skills_only_in_a: List[str],
+    skills_only_in_b: List[str],
+) -> List[Dict[str, str]]:
+    comparisons: List[Dict[str, str]] = []
+    raw = payload.get("section_comparisons")
+
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            section = _clean_text(item.get("section")).lower()
+            if section not in SECTION_LABELS:
+                continue
+            baseline = _clean_text(item.get("baseline_summary"))
+            target = _clean_text(item.get("target_summary"))
+            if not baseline and not target:
+                continue
+            verdict = _clean_text(item.get("verdict")).lower()
+            if verdict not in VALID_VERDICTS:
+                verdict = "mixed"
+            comparisons.append(
+                {
+                    "section": section,
+                    "label": SECTION_LABELS[section],
+                    "baseline_summary": baseline or "No notable differences detected.",
+                    "target_summary": target or "No notable differences detected.",
+                    "verdict": verdict,
+                }
+            )
+
+    if comparisons:
+        seen = {row["section"] for row in comparisons}
+        for section in SECTION_ORDER:
+            if section in seen:
+                continue
+            highlight = section_highlights.get(section)
+            if not highlight:
+                continue
+            comparisons.append(
+                {
+                    "section": section,
+                    "label": SECTION_LABELS[section],
+                    "baseline_summary": "See resume A for full content.",
+                    "target_summary": highlight,
+                    "verdict": "mixed",
+                }
+            )
+        return sorted(comparisons, key=lambda row: SECTION_ORDER.index(row["section"]))
+
+    for section in SECTION_ORDER:
+        highlight = section_highlights.get(section, "")
+        if section == "skills":
+            baseline = ", ".join(skills_only_in_a[:10]) if skills_only_in_a else ""
+            target = ", ".join(skills_only_in_b[:10]) if skills_only_in_b else ""
+            if baseline or target:
+                comparisons.append(
+                    {
+                        "section": section,
+                        "label": SECTION_LABELS[section],
+                        "baseline_summary": baseline or "No unique skills in resume A.",
+                        "target_summary": target or "No unique skills in resume B.",
+                        "verdict": "mixed" if baseline and target else ("improved" if target else "regressed"),
+                    }
+                )
+                continue
+        if highlight:
+            comparisons.append(
+                {
+                    "section": section,
+                    "label": SECTION_LABELS[section],
+                    "baseline_summary": "See resume A document for full content.",
+                    "target_summary": highlight,
+                    "verdict": "mixed",
+                }
+            )
+
+    return comparisons
 
 
 def _compact_summary(profile: Dict[str, Any]) -> str:
@@ -38,6 +130,45 @@ def _compact_summary(profile: Dict[str, Any]) -> str:
         f"skills={len(skills)} projects={len(projects)} work_experiences={len(work)} "
         f"skills_sample={[s for s in skills[:10]]}"
     )
+
+
+def _parse_llm_section_diffs(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw = payload.get("section_diffs")
+    if not isinstance(raw, list):
+        return []
+    sections: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        section = _clean_text(item.get("section")).lower()
+        if section not in SECTION_LABELS:
+            continue
+        changed: List[Dict[str, str]] = []
+        for row in item.get("changed") or []:
+            if not isinstance(row, dict):
+                continue
+            before = _clean_text(row.get("before"))
+            after = _clean_text(row.get("after"))
+            if before or after:
+                changed.append(
+                    {
+                        "label": _clean_text(row.get("label")) or SECTION_LABELS[section],
+                        "before": before,
+                        "after": after,
+                    }
+                )
+        only_a = [s for s in (_clean_text(v) for v in (item.get("only_in_a") or [])) if s]
+        only_b = [s for s in (_clean_text(v) for v in (item.get("only_in_b") or [])) if s]
+        sections.append(
+            {
+                "section": section,
+                "label": SECTION_LABELS[section],
+                "only_in_a": only_a,
+                "only_in_b": only_b,
+                "changed": changed,
+            }
+        )
+    return sections
 
 
 async def compare_profiles(
@@ -53,12 +184,21 @@ async def compare_profiles(
 
     delta = score_a - score_b
 
+    deterministic_diffs = extract_section_diffs(profile_a, profile_b)
+
     system_prompt = (
-        "You compare two resumes for a role. Return ONLY JSON: "
-        "{\"recommended_id\": \"a\"|\"b\", \"recommendation_reason\": string, "
-        "\"section_verdicts\": object, \"diff_summary\": string, "
-        "\"section_highlights\": {\"summary\": string, \"skills\": string, "
-        "\"experience\": string, \"projects\": string}}."
+        "You compare two peer resumes (resume A and resume B) for a role. "
+        "Return ONLY JSON with this shape: "
+        "{\"recommended_id\":\"a\"|\"b\",\"recommendation_reason\":string,"
+        "\"diff_summary\":string,"
+        "\"section_diffs\":["
+        "{\"section\":\"summary\"|\"skills\"|\"experience\"|\"projects\","
+        "\"only_in_a\":[string],\"only_in_b\":[string],"
+        "\"changed\":[{\"label\":string,\"before\":string,\"after\":string}]}"
+        "]}."
+        " diff_summary must be 2-4 sentences describing actual content differences. "
+        "Never use counts like '3 skills' or 'N items'. "
+        "Describe resume A and resume B as peers — never use baseline or target."
     )
     user_prompt = (
         f"role={role or ''}\n"
@@ -69,13 +209,10 @@ async def compare_profiles(
         f"score_a={score_a} score_b={score_b}"
     )
 
-    groq = GroqService()
-    groq.model = "llama-3.3-70b-versatile"
-    raw = await groq.chat([
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ])
-    payload = _extract_json_obj(raw)
+    raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
+    payload = extract_json_dict(raw)
+    if not payload:
+        logger.warning("Vault compare LLM returned unparseable JSON; using score-based fallbacks")
 
     recommended_id = payload.get("recommended_id")
     if recommended_id not in {"a", "b"}:
@@ -85,37 +222,53 @@ async def compare_profiles(
     if not isinstance(reason, str) or not reason.strip():
         reason = "Recommended based on overall score and skill coverage."
 
-    section_verdicts = payload.get("section_verdicts")
-    if not isinstance(section_verdicts, dict):
-        section_verdicts = {}
+    llm_section_diffs = _parse_llm_section_diffs(payload)
+    section_diffs = merge_llm_changed(deterministic_diffs, llm_section_diffs)
+
+    skills_only_in_a = sorted(list(skills_a - skills_b))
+    skills_only_in_b = sorted(list(skills_b - skills_a))
+    skills_row = next((r for r in section_diffs if r["section"] == "skills"), None)
+    if skills_row:
+        skills_row["only_in_a"] = skills_only_in_a
+        skills_row["only_in_b"] = skills_only_in_b
+    elif skills_only_in_a or skills_only_in_b:
+        section_diffs.append(_section_row("skills", skills_only_in_a, skills_only_in_b, []))
+        section_diffs.sort(key=lambda r: DIFF_SECTION_ORDER.index(r["section"]))
+
+    pane_changes = build_pane_changes(section_diffs)
 
     diff_summary = payload.get("diff_summary")
     if not isinstance(diff_summary, str) or not diff_summary.strip():
-        diff_summary = (
-            f"Resume A scores {score_a} vs Resume B at {score_b}. "
-            f"Key skill differences: {len(skills_a - skills_b)} only in A, "
-            f"{len(skills_b - skills_a)} only in B."
-        )
-
-    section_highlights = payload.get("section_highlights")
-    if not isinstance(section_highlights, dict):
-        section_highlights = {}
+        diff_summary = build_diff_summary_fallback(section_diffs)
     else:
-        section_highlights = {
-            str(k): str(v)
-            for k, v in section_highlights.items()
-            if isinstance(k, str) and isinstance(v, str) and v.strip()
-        }
+        diff_summary = diff_summary.strip()
+        if re.search(r"\b\d+\s+(skills?|items?|projects?|experiences?)\b", diff_summary, re.I):
+            diff_summary = build_diff_summary_fallback(section_diffs)
+
+    section_comparisons = section_diffs_to_legacy_comparisons(section_diffs)
+
+    section_highlights = {
+        row["section"]: "; ".join((row.get("only_in_b") or [])[:3])
+        for row in section_diffs
+        if row.get("only_in_b")
+    }
+
+    section_verdicts = {
+        row["section"]: row.get("verdict", "mixed") for row in section_diffs
+    }
 
     return {
         "score_a": score_a,
         "score_b": score_b,
         "score_delta": delta,
-        "skills_only_in_a": sorted(list(skills_a - skills_b)),
-        "skills_only_in_b": sorted(list(skills_b - skills_a)),
+        "skills_only_in_a": skills_only_in_a,
+        "skills_only_in_b": skills_only_in_b,
         "recommended_id": recommended_id,
         "recommendation_reason": reason,
         "section_verdicts": section_verdicts,
-        "diff_summary": diff_summary.strip(),
+        "diff_summary": diff_summary,
         "section_highlights": section_highlights,
+        "section_comparisons": section_comparisons,
+        "section_diffs": section_diffs,
+        "pane_changes": pane_changes,
     }

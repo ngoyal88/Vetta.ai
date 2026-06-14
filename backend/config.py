@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
     livekit_agent_name: str = "vetta-interviewer"
+    # When False (default), run the agent in a separate process:
+    #   python run_livekit_agent.py dev
+    # Embedding the agent inside uvicorn corrupts the async Redis pool on Windows.
+    livekit_agent_embedded: bool = False
 
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-2"
@@ -72,6 +76,20 @@ class Settings(BaseSettings):
     max_questions_per_interview: int = 15
     dsa_time_limit_minutes: int = 45
     interview_session_ttl_seconds: int = 7200
+    transcript_merge_gap_ms: int = 1500
+    transcript_merge_max_chars: int = 1200
+
+    vpm_enabled: bool = True
+    vpm_max_accepted_claims: int = 50
+    vpm_max_raw_extract: int = 8
+    vpm_pipeline_lease_seconds: int = 600
+    vpm_verify_max_retries: int = 1
+    vpm_verify_chunk_size: int = 5
+    vpm_verify_gate_fallback: bool = True
+    vpm_umbrella_terms: str = (
+        "system design,leadership,communication,problem solving,teamwork,"
+        "microservices,architecture,scalability,cloud,devops,agile,stakeholder management"
+    )
 
     # LiveKit: when True, TTS is streamed as tts_chunk (requires client handlers). False = single
     # question message with base64 audio (and optional chunking); works with useInterviewLiveKit AudioPlayer.
@@ -79,6 +97,23 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
     log_format: str = "console"
+
+    # Contact form (free options: Firestore only, Resend free tier, Gmail SMTP, Discord webhook)
+    contact_recipient_email: str = "hello@vetta.ai"
+    contact_from_email: str = ""
+    resend_api_key: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    contact_discord_webhook_url: str = ""
+    contact_rate_limit: int = 5
+    contact_rate_window_seconds: int = 3600
+
+    # Security
+    trust_proxy_headers: bool = False
+    trusted_proxy_ips: str = "127.0.0.1"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -96,7 +131,45 @@ class Settings(BaseSettings):
 
     def allowed_origin_regex_value(self) -> Optional[str]:
         value = (self.allowed_origin_regex or "").strip()
-        return value or None
+        if value:
+            return value
+        # Dev fallback: allow any localhost / 127.0.0.1 port when explicit origins are set.
+        if any("localhost" in o or "127.0.0.1" in o for o in self.allowed_origins_list()):
+            return r"http://(localhost|127\.0\.0\.1)(:\d+)?"
+        return None
+
+    def _is_local_dev_origins(self) -> bool:
+        return any("localhost" in o or "127.0.0.1" in o for o in self.allowed_origins_list())
+
+    def expose_api_error_details(self) -> bool:
+        """When True, 500 responses include exception type/message (local dev default)."""
+        flag = os.getenv("EXPOSE_API_ERRORS", "").strip().lower()
+        if flag in ("1", "true", "yes"):
+            return True
+        if flag in ("0", "false", "no"):
+            return False
+        return self._is_local_dev_origins()
+
+    def require_email_verified(self) -> bool:
+        """When True, API rejects tokens without email_verified claim."""
+        flag = os.getenv("REQUIRE_EMAIL_VERIFIED", "").strip().lower()
+        if flag in ("1", "true", "yes"):
+            return True
+        if flag in ("0", "false", "no"):
+            return False
+        return not self._is_local_dev_origins()
+
+    def rate_limit_should_fail_open(self) -> bool:
+        """When True, rate limits are skipped if Redis is unavailable (dev default)."""
+        flag = os.getenv("RATE_LIMIT_FAIL_OPEN", "").strip().lower()
+        if flag in ("1", "true", "yes"):
+            return True
+        if flag in ("0", "false", "no"):
+            return False
+        return self._is_local_dev_origins()
+
+    def trusted_proxy_ips_list(self) -> List[str]:
+        return [ip.strip() for ip in self.trusted_proxy_ips.split(",") if ip.strip()]
 
 
 @lru_cache

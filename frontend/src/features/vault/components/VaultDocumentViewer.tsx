@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
+import { VAULT_VERSION_DETAIL_COPY } from '../constants/versionDetailContent';
 import { vaultApi } from '../services/vaultApi';
 import type { VaultVersion } from '../types';
 import { getErrorMessage } from '../utils/vaultUtils';
@@ -7,12 +8,29 @@ import { getErrorMessage } from '../utils/vaultUtils';
 interface VaultDocumentViewerProps {
   version: VaultVersion | null;
   className?: string;
+  embedded?: boolean;
+  onBlobReady?: (blobUrl: string | null) => void;
+  onFileSize?: (sizeBytes: number | null) => void;
 }
 
-export default function VaultDocumentViewer({ version, className = '' }: VaultDocumentViewerProps) {
+export default function VaultDocumentViewer({
+  version,
+  className = '',
+  embedded = false,
+  onBlobReady,
+  onFileSize,
+}: VaultDocumentViewerProps) {
+  const copy = VAULT_VERSION_DETAIL_COPY;
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const onBlobReadyRef = useRef(onBlobReady);
+  const onFileSizeRef = useRef(onFileSize);
+
+  useEffect(() => {
+    onBlobReadyRef.current = onBlobReady;
+    onFileSizeRef.current = onFileSize;
+  }, [onBlobReady, onFileSize]);
 
   useEffect(() => {
     let revoked: string | null = null;
@@ -21,6 +39,8 @@ export default function VaultDocumentViewer({ version, className = '' }: VaultDo
     const load = async () => {
       setBlobUrl(null);
       setError('');
+      onBlobReadyRef.current?.(null);
+      onFileSizeRef.current?.(null);
       if (!version?.has_source_file) return;
 
       try {
@@ -30,6 +50,8 @@ export default function VaultDocumentViewer({ version, className = '' }: VaultDo
         const url = URL.createObjectURL(blob);
         revoked = url;
         setBlobUrl(url);
+        onBlobReadyRef.current?.(url);
+        onFileSizeRef.current?.(blob.size);
       } catch (err) {
         if (!cancelled) setError(getErrorMessage(err, 'Failed to load file'));
       } finally {
@@ -45,19 +67,23 @@ export default function VaultDocumentViewer({ version, className = '' }: VaultDo
     };
   }, [version?.id, version?.has_source_file]);
 
+  const shellClass = embedded
+    ? `vault-document-viewer vault-document-viewer--embedded ${className}`
+    : `flex min-h-[50vh] flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-0)] ${className}`;
+
   if (!version) {
     return (
-      <div className={`flex min-h-[50vh] items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--bg-0)] ${className}`}>
-        <p className="text-sm text-[var(--cream-3)]">Select a version to preview</p>
+      <div className={`${shellClass} vault-document-viewer--empty`}>
+        <p className="text-sm text-[var(--color-on-surface-variant)]">Select a version to preview</p>
       </div>
     );
   }
 
   if (!version.has_source_file) {
     return (
-      <div className={`flex min-h-[50vh] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg-0)] p-6 text-center ${className}`}>
-        <p className="text-sm text-[var(--cream-2)]">No file stored for this version</p>
-        <p className="text-xs text-[var(--cream-4)]">Re-upload this version to enable file preview.</p>
+      <div className={`${shellClass} vault-document-viewer--empty`}>
+        <p className="text-sm text-[var(--color-on-surface)]">{copy.noFileStored}</p>
+        <p className="mt-2 text-xs text-[var(--color-on-surface-variant)]">{copy.reuploadHint}</p>
       </div>
     );
   }
@@ -67,40 +93,34 @@ export default function VaultDocumentViewer({ version, className = '' }: VaultDo
     version.content_type?.includes('pdf') || filename.toLowerCase().endsWith('.pdf');
 
   return (
-    <div className={`flex min-h-[50vh] flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-0)] ${className}`}>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-2">
-        <span className="truncate text-xs text-[var(--cream-3)]">{filename}</span>
-        {blobUrl ? (
-          <a
-            href={blobUrl}
-            download={filename}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 text-[10px] uppercase tracking-[0.12em] text-[var(--teal-1)] hover:text-[var(--cream-0)]"
-          >
-            Download
-          </a>
-        ) : null}
-      </div>
-      <div className="relative min-h-0 flex-1">
-        {loading ? (
-          <div className="flex h-full min-h-[40vh] items-center justify-center text-sm text-[var(--cream-3)]">
-            Loading document…
-          </div>
-        ) : error ? (
-          <div className="flex h-full min-h-[40vh] items-center justify-center p-4 text-center text-sm text-[var(--red-1)]">
-            {error}
-          </div>
-        ) : isPdf && blobUrl ? (
-          <iframe title={filename} src={blobUrl} className="h-full min-h-[70vh] w-full border-0" />
-        ) : blobUrl ? (
-          <div className="flex h-full min-h-[40vh] flex-col items-center justify-center gap-3 p-6 text-center">
-            <p className="text-sm text-[var(--cream-2)]">Preview not available for this file type</p>
+    <div className={shellClass}>
+      {!embedded ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-2">
+          <span className="truncate text-xs text-[var(--cream-3)]">{filename}</span>
+          {blobUrl ? (
             <a
               href={blobUrl}
               download={filename}
-              className="rounded-full bg-[var(--teal-2)] px-4 py-2 text-xs uppercase tracking-[0.12em] text-[var(--cream-0)]"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-[10px] uppercase tracking-[0.12em] text-[var(--teal-1)] hover:text-[var(--cream-0)]"
             >
+              Download
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="vault-document-viewer__canvas">
+        {loading ? (
+          <div className="vault-document-viewer__state">Loading document…</div>
+        ) : error ? (
+          <div className="vault-document-viewer__state vault-document-viewer__state--error">{error}</div>
+        ) : isPdf && blobUrl ? (
+          <iframe title={filename} src={blobUrl} className="vault-document-viewer__frame" />
+        ) : blobUrl ? (
+          <div className="vault-document-viewer__state">
+            <p className="text-sm text-[var(--color-on-surface)]">Preview not available for this file type</p>
+            <a href={blobUrl} download={filename} className="vault-version-detail__download-btn mt-3">
               Download original
             </a>
           </div>

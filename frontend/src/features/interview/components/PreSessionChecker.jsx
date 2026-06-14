@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { Room } from "livekit-client";
 import { setSkipPrecheck } from "features/interview/utils/precheckStorage";
+import { api } from "shared/services/api";
 
 const BROWSER_REQUIREMENTS = {
   audioWorklet: !!(typeof window !== "undefined" && window.AudioWorkletNode),
@@ -184,28 +185,12 @@ export function PreSessionChecker({ sessionId, onAllPassed, onCancel, getAuthTok
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
-      const healthRes = await fetch(`${apiUrl}/livekit/health`, {
-        signal: controller.signal,
-      });
-      if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+      await api.getLivekitHealth(null, controller.signal);
 
       const token = (await getAuthToken?.()) || null;
       if (!token) throw new Error("Authentication token unavailable");
 
-      const tokenRes = await fetch(`${apiUrl}/livekit/token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ session_id: sessionId }),
-      });
-      if (!tokenRes.ok) {
-        const err = await tokenRes.json().catch(() => ({}));
-        throw new Error(err?.detail || `LiveKit token failed (${tokenRes.status})`);
-      }
-      const tokenData = await tokenRes.json();
+      const tokenData = await api.createLivekitToken(sessionId);
       const lkToken = tokenData?.token;
       const lkUrl = (tokenData?.url || "").trim();
       if (!lkToken || !lkUrl) {

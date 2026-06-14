@@ -1,15 +1,17 @@
 import React from "react";
 import { ChevronRight } from "lucide-react";
 import FeedbackCard from "features/interview/components/FeedbackCard";
+import { ProfileClaimsReview } from "features/interview/components/ProfileClaimsReview";
 import type { FeedbackPayload } from "features/interview/types";
 import { getSessionReportSubtitle } from "features/interview/utils/sessionReportUtils";
 
 type SessionReportScreenProps = {
   feedback: FeedbackPayload | string | null;
+  sessionId?: string;
   onBack: () => void;
 };
 
-export default function SessionReportScreen({ feedback, onBack }: SessionReportScreenProps) {
+export default function SessionReportScreen({ feedback, sessionId, onBack }: SessionReportScreenProps) {
   const completionReason =
     typeof feedback === "object" && feedback?.completion_reason
       ? String(feedback.completion_reason)
@@ -37,14 +39,17 @@ export default function SessionReportScreen({ feedback, onBack }: SessionReportS
           <h1 className="text-xl font-semibold text-white mb-1">Interview report</h1>
           <p className="text-xs text-[var(--text-secondary)] mb-6">{subtitle}</p>
           {hasFeedback ? (
-            <FeedbackCard
-              feedback={typeof feedback === "string" ? feedback : feedback?.feedback ?? ""}
-              scores={
-                typeof feedback === "object" && feedback?.full && typeof feedback.full === "object"
-                  ? (feedback.full as { scores?: unknown }).scores
-                  : undefined
-              }
-            />
+            <>
+              <FeedbackCard
+                feedback={typeof feedback === "string" ? feedback : feedback?.feedback ?? ""}
+                scores={
+                  typeof feedback === "object" && feedback?.full && typeof feedback.full === "object"
+                    ? (feedback.full as { scores?: unknown }).scores
+                    : undefined
+                }
+              />
+              <ProfileClaimsReview sessionId={sessionId} />
+            </>
           ) : (
             <div className="flex flex-col items-center gap-3 py-16">
               <div className="w-8 h-8 border border-indigo/30 border-t-indigo rounded-sm animate-spin" />

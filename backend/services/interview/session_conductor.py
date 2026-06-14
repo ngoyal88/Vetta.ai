@@ -1,4 +1,5 @@
 """Interview session state machine: tracks transcript, code, and turn signals."""
+from datetime import datetime
 import random
 import time
 from dataclasses import dataclass, field
@@ -44,6 +45,20 @@ def _now() -> float:
     return time.time()
 
 
+def _to_epoch_seconds(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return _now()
+    return _now()
+
+
 @dataclass
 class SessionConductor:
     transcript_history: List[Dict[str, Any]] = field(default_factory=list)
@@ -84,6 +99,44 @@ class SessionConductor:
                 "timestamp": timestamp or _now(),
             }
         )
+
+    def append_or_merge_turn(
+        self,
+        role: str,
+        text: str,
+        timestamp: Optional[float] = None,
+        gap_ms: int = 1500,
+        max_chars: int = 1200,
+    ) -> None:
+        clean = (text or "").strip()
+        if not clean:
+            return
+
+        ts = float(timestamp or _now())
+        if not self.transcript_history:
+            self.append_turn(role, clean, ts)
+            return
+
+        last = self.transcript_history[-1]
+        last_role = str(last.get("role") or "")
+        if last_role != role:
+            self.append_turn(role, clean, ts)
+            return
+
+        last_text = str(last.get("text") or "").strip()
+        merged_text = f"{last_text} {clean}".strip() if last_text else clean
+        if len(merged_text) > max(1, int(max_chars)):
+            self.append_turn(role, clean, ts)
+            return
+
+        last_ts = _to_epoch_seconds(last.get("timestamp"))
+        allowed_gap = max(0, int(gap_ms)) / 1000.0
+        if ts - last_ts > allowed_gap:
+            self.append_turn(role, clean, ts)
+            return
+
+        last["text"] = merged_text
+        last["timestamp"] = ts
 
     def update_code(self, code: str, language: Optional[str] = None, changed_at: Optional[float] = None) -> None:
         self.previous_code = self.current_code
