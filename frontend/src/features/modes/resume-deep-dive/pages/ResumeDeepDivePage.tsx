@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowLeft, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -21,13 +21,13 @@ import {
   type ObjectiveId,
 } from '../constants/resumeDeepDiveOptions';
 import { useActiveVaultResume } from '../hooks/useActiveVaultResume';
+import { resumeDisplayName } from 'features/modes/shared/utils/resumeDisplayName';
 import {
   estimateDataIntegrity,
   formatVaultDate,
   getScanDepthStop,
-  resumeDisplayName,
 } from '../utils/resumeDeepDiveUtils';
-import { getCardMotion, getHeaderMotion } from '../utils/motion';
+import { getCardMotion, getHeaderMotion } from 'features/modes/shared/utils/motion';
 
 const ResumeDeepDivePage: React.FC = () => {
   const { currentUser } = useAuth();
@@ -74,7 +74,7 @@ const ResumeDeepDivePage: React.FC = () => {
     setTargetRole((prev) => (prev.trim() ? prev : seniority.trim()));
   }, [profile?.seniority_level]);
 
-  const toggleObjective = useCallback((id: ObjectiveId) => {
+  const toggleObjective = (id: ObjectiveId) => {
     setObjectives((prev) => {
       if (prev.includes(id)) {
         if (prev.length === 1) return prev;
@@ -82,20 +82,20 @@ const ResumeDeepDivePage: React.FC = () => {
       }
       return [...prev, id];
     });
-  }, []);
+  };
 
-  const handleBenchmarkFaangChange = useCallback((checked: boolean) => {
+  const handleBenchmarkFaangChange = (checked: boolean) => {
     setBenchmarkFaang(checked);
     if (checked) setScanDepthValue(3);
-  }, []);
+  };
 
-  const handleOpenPreview = useCallback(() => {
+  const handleOpenPreview = () => {
     if (!version?.has_source_file) {
       toast.error('No PDF file stored for this version. Re-upload in Vault.');
       return;
     }
     setPreviewOpen(true);
-  }, [version?.has_source_file]);
+  };
 
   const handleStart = async () => {
     if (!currentUser) {
@@ -129,25 +129,11 @@ const ResumeDeepDivePage: React.FC = () => {
 
       const sessionId = response.session_id;
       sessionStorage.setItem(`interview_type_${sessionId}`, 'resume');
-      localStorage.setItem(
-        'interviewConfig',
-        JSON.stringify({
-          sessionId,
-          userId: currentUser.uid,
-          interviewType: 'resume',
-          difficulty,
-          customRole: roleValue,
-          resumeData: profile,
-          candidateName: resumeDisplayName(profile) || currentUser.displayName,
-          yearsExperience: yearsValue,
-          targetRole: roleValue,
-          targetIndustry: industryValue,
-          objectives,
-          includeMarketTrends,
-          benchmarkFaang,
-          scanDepth: scanDepthValue,
-        }),
-      );
+      try {
+        window.localStorage.removeItem('interviewConfig');
+      } catch {
+        /* ignore */
+      }
 
       if (getSkipPrecheck()) {
         navigate(`/interview/${sessionId}`);

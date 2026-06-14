@@ -13,11 +13,7 @@ import {
   type CtaVariant,
   type ModeCatalogEntry,
 } from "features/modes/catalog/modeCatalog";
-
-const fadeUpTransition = {
-  duration: 0.45,
-  ease: "easeOut" as const,
-};
+import { FADE_UP_TRANSITION, fadeUpWithDelay } from "features/modes/shared/utils/motion";
 
 const ACCENT_STYLES = {
   primary: {
@@ -75,7 +71,7 @@ function ActiveModeCard({
         initial: { opacity: 0, y: 16 },
         whileInView: { opacity: 1, y: 0 },
         viewport: { once: true, margin: "-80px" },
-        transition: { ...fadeUpTransition, delay: index * 0.08 },
+        transition: fadeUpWithDelay(index * 0.08),
       };
 
   return (
@@ -133,7 +129,7 @@ function ComingSoonModeCard({
         initial: { opacity: 0, y: 16 },
         whileInView: { opacity: 1, y: 0 },
         viewport: { once: true, margin: "-80px" },
-        transition: { ...fadeUpTransition, delay: 0.08 + index * 0.05 },
+        transition: fadeUpWithDelay(0.08 + index * 0.05),
       };
 
   return (
@@ -175,7 +171,7 @@ export default function AiInterviewPage() {
     : {
         initial: { opacity: 0, y: 12 },
         animate: { opacity: 1, y: 0 },
-        transition: fadeUpTransition,
+        transition: FADE_UP_TRANSITION,
       };
 
   return (

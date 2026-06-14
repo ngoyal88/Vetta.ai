@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { MicOff, SlidersHorizontal } from 'lucide-react';
 
 import { SettingsSection } from './SettingsSection';
@@ -15,7 +15,7 @@ type SettingsInterviewSectionProps = {
   onSave: () => void;
 };
 
-function SettingsInterviewSectionComponent({
+export function SettingsInterviewSection({
   defaultRole,
   defaultYoe,
   skipPrecheck,
@@ -75,5 +75,3 @@ function SettingsInterviewSectionComponent({
     </SettingsSection>
   );
 }
-
-export const SettingsInterviewSection = memo(SettingsInterviewSectionComponent);

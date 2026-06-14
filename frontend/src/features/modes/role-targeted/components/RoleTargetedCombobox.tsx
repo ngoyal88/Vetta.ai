@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, type LucideIcon, X } from 'lucide-react';
 
 const MAX_VISIBLE_OPTIONS = 8;
@@ -40,6 +40,16 @@ export function RoleTargetedCombobox({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
 
+  const closeMenu = () => {
+    setOpen(false);
+    setActiveIndex(-1);
+  };
+
+  const openMenu = () => {
+    setOpen(true);
+    setActiveIndex(-1);
+  };
+
   const filteredOptions = useMemo(() => filterOptions(options, value), [options, value]);
   const showCustomRow = value.trim().length > 0 && !filteredOptions.includes(value.trim());
   const listItems = useMemo(() => {
@@ -49,24 +59,11 @@ export function RoleTargetedCombobox({
     return filteredOptions.map((o) => ({ type: 'option' as const, label: o }));
   }, [filteredOptions, showCustomRow, value]);
 
-  const closeMenu = useCallback(() => {
-    setOpen(false);
-    setActiveIndex(-1);
-  }, []);
-
-  const openMenu = useCallback(() => {
-    setOpen(true);
-    setActiveIndex(-1);
-  }, []);
-
-  const selectValue = useCallback(
-    (next: string) => {
-      onChange(next);
-      closeMenu();
-      inputRef.current?.focus();
-    },
-    [closeMenu, onChange],
-  );
+  const selectValue = (next: string) => {
+    onChange(next);
+    closeMenu();
+    inputRef.current?.focus();
+  };
 
   useEffect(() => {
     if (!open) return undefined;
@@ -77,7 +74,7 @@ export function RoleTargetedCombobox({
     };
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [closeMenu, open]);
+  }, [open]);
 
   useEffect(() => {
     setActiveIndex(-1);

@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { motion, type MotionProps } from 'framer-motion';
 import { SlidersHorizontal } from 'lucide-react';
 
@@ -20,7 +20,7 @@ type CalibrationSectionProps = {
   onYoeChange: (value: number) => void;
 };
 
-function CalibrationSectionComponent({
+export function CalibrationSection({
   motionProps,
   focusSelections,
   difficultyValue,
@@ -147,5 +147,3 @@ function CalibrationSectionComponent({
     </motion.section>
   );
 }
-
-export const CalibrationSection = memo(CalibrationSectionComponent);

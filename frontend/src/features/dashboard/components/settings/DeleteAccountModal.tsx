@@ -1,9 +1,10 @@
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import type { User } from 'firebase/auth';
 
 import Modal from 'shared/components/Modal';
 import { AuthSocialButton } from 'features/auth/components/AuthSocialButton';
 import { GoogleLogo } from 'features/auth/components/icons/GoogleLogo';
+import { hasPasswordProvider } from '../../utils/settingsUtils';
 
 const CONFIRMATION_TEXT = 'DELETE';
 
@@ -15,11 +16,7 @@ type DeleteAccountModalProps = {
   onConfirm: (options: { password?: string; useGoogle: boolean }) => Promise<void>;
 };
 
-function hasPasswordProvider(user: User): boolean {
-  return user.providerData.some((provider) => provider.providerId === 'password');
-}
-
-function DeleteAccountModalComponent({
+export function DeleteAccountModal({
   open,
   user,
   deleting,
@@ -30,20 +27,20 @@ function DeleteAccountModalComponent({
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const passwordSignIn = useMemo(() => hasPasswordProvider(user), [user]);
+  const passwordSignIn = hasPasswordProvider(user);
   const canSubmit = confirmation === CONFIRMATION_TEXT && !deleting;
 
-  const reset = useCallback(() => {
+  const reset = () => {
     setConfirmation('');
     setPassword('');
     setError('');
-  }, []);
+  };
 
-  const handleClose = useCallback(() => {
+  const handleClose = () => {
     if (deleting) return;
     reset();
     onClose();
-  }, [deleting, onClose, reset]);
+  };
 
   const handlePasswordSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -142,5 +139,3 @@ function DeleteAccountModalComponent({
     </Modal>
   );
 }
-
-export const DeleteAccountModal = memo(DeleteAccountModalComponent);

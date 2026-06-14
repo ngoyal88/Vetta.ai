@@ -88,14 +88,14 @@ export function useHistoryPageState() {
     [selectSession],
   );
 
-  const closeTranscriptOverlay = useCallback(() => {
+  const closeTranscriptOverlay = () => {
     setShowTranscriptOverlay(false);
-  }, []);
+  };
 
-  const clearFilters = useCallback(() => {
+  const clearFilters = () => {
     setFilterTab('all');
     setDateRange('all');
-  }, []);
+  };
 
   const handlePracticeAgain = useCallback(
     async (sessionId: string) => {
@@ -146,29 +146,17 @@ export function useHistoryPageState() {
     [currentUser, items, navigate],
   );
 
-  const dismissPreCheck = useCallback(() => {
+  const dismissPreCheck = () => {
     setShowPreCheck(false);
     setPreCheckSessionId(null);
-  }, []);
+  };
 
-  const completePreCheck = useCallback(() => {
+  const completePreCheck = () => {
     const id = preCheckSessionId;
     setShowPreCheck(false);
     setPreCheckSessionId(null);
     if (id) navigate(`/interview/${id}`);
-  }, [navigate, preCheckSessionId]);
-
-  const handleOpenFullTranscript = useCallback(() => {
-    if (selectedId) openTranscriptOverlay(selectedId);
-  }, [openTranscriptOverlay, selectedId]);
-
-  const handleDetailPracticeAgain = useCallback(() => {
-    if (selectedId) void handlePracticeAgain(selectedId);
-  }, [handlePracticeAgain, selectedId]);
-
-  const handleDetailDelete = useCallback(() => {
-    if (selectedId) void deleteInterview(selectedId);
-  }, [deleteInterview, selectedId]);
+  };
 
   const canPracticeAgain =
     selectedInterview?.interview_type === 'role_targeted' ||
@@ -201,9 +189,7 @@ export function useHistoryPageState() {
     handlePracticeAgain,
     dismissPreCheck,
     completePreCheck,
-    handleOpenFullTranscript,
-    handleDetailPracticeAgain,
-    handleDetailDelete,
+    deleteInterview,
     canPracticeAgain,
     isPracticing,
     isDeleting,

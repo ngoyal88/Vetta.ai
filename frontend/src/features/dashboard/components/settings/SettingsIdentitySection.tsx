@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { useState } from 'react';
 import { BadgeCheck, Mail, UserRound } from 'lucide-react';
 import type { User } from 'firebase/auth';
 
@@ -19,7 +19,7 @@ type SettingsIdentitySectionProps = {
   onResetPassword: () => void;
 };
 
-function SettingsIdentitySectionComponent({
+export function SettingsIdentitySection({
   user,
   displayName,
   photoUrl,
@@ -142,5 +142,3 @@ function SettingsIdentitySectionComponent({
     </SettingsSection>
   );
 }
-
-export const SettingsIdentitySection = memo(SettingsIdentitySectionComponent);

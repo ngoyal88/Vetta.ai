@@ -40,13 +40,13 @@ export default function VaultVersionDetailPage() {
     setFileSizeLabel(formatFileSize(sizeBytes));
   }, []);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = () => {
     if (!downloadUrl || !presentation) return;
     const anchor = document.createElement('a');
     anchor.href = downloadUrl;
     anchor.download = presentation.filename;
     anchor.click();
-  }, [downloadUrl, presentation]);
+  };
 
   if (!resumeId) {
     return <p className="text-sm text-[var(--color-on-surface-variant)]">{copy.invalidRoute}</p>;

@@ -1,4 +1,4 @@
-import React, { memo, type ReactNode } from 'react';
+import React, { type ReactNode } from 'react';
 
 type SettingsToggleProps = {
   id: string;
@@ -9,7 +9,7 @@ type SettingsToggleProps = {
   onChange: (checked: boolean) => void;
 };
 
-function SettingsToggleComponent({ id, label, description, icon, checked, onChange }: SettingsToggleProps) {
+export function SettingsToggle({ id, label, description, icon, checked, onChange }: SettingsToggleProps) {
   return (
     <div className="settings-toggle-row">
       <span className="settings-toggle-row__icon" aria-hidden>
@@ -35,5 +35,3 @@ function SettingsToggleComponent({ id, label, description, icon, checked, onChan
     </div>
   );
 }
-
-export const SettingsToggle = memo(SettingsToggleComponent);

@@ -5,7 +5,7 @@ import { VAULT_VERSIONS_COPY } from 'features/vault/constants/versionsContent';
 import type { VaultVersion } from 'features/vault/types';
 import {
   getVaultScoreTier,
-  getVaultScoreTextClass,
+  getVaultScoreRingClass,
   normalizeVaultScore,
 } from 'features/vault/utils/scorePresentation';
 import { formatVersionDate, truncateFilename } from 'features/vault/utils/vaultUtils';
@@ -33,7 +33,7 @@ function VaultVersionCard({
   const versionLabel = `v${version.version_number}`;
   const score = normalizeVaultScore(version.score_at_version ?? version.latest_score ?? null);
   const scoreTier = getVaultScoreTier(score);
-  const scoreClass = getVaultScoreTextClass(scoreTier);
+  const scoreClass = getVaultScoreRingClass(scoreTier);
   const filename = version.source_filename || `resume-${versionLabel}`;
   const truncatedFilename = truncateFilename(filename);
   const isRestoring = pendingAction === `restore-${version.id}`;
@@ -142,7 +142,5 @@ function VaultVersionCard({
   );
 }
 
-const MemoizedVaultVersionCard = memo(VaultVersionCard);
-MemoizedVaultVersionCard.displayName = 'VaultVersionCard';
-
-export default MemoizedVaultVersionCard;
+const VaultVersionCardMemo = memo(VaultVersionCard);
+export default VaultVersionCardMemo;

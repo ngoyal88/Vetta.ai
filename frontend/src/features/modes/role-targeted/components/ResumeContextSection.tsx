@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { motion, type MotionProps } from 'framer-motion';
 import { CheckCircle2, ChevronRight, FileText, FolderOpen } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -13,7 +13,7 @@ type ResumeContextSectionProps = {
   activeResumeName: string | null;
 };
 
-function ResumeContextSectionComponent({
+export function ResumeContextSection({
   motionProps,
   loadingResume,
   parsedResume,
@@ -86,5 +86,3 @@ function ResumeContextSectionComponent({
     </motion.section>
   );
 }
-
-export const ResumeContextSection = memo(ResumeContextSectionComponent);

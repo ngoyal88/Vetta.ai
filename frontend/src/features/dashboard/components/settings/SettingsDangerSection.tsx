@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { User } from 'firebase/auth';
 
@@ -11,7 +11,7 @@ type SettingsDangerSectionProps = {
   onDeleteAccount: (options: { password?: string; useGoogle: boolean }) => Promise<void>;
 };
 
-function SettingsDangerSectionComponent({
+export function SettingsDangerSection({
   user,
   deleting,
   onDeleteAccount,
@@ -53,5 +53,3 @@ function SettingsDangerSectionComponent({
     </>
   );
 }
-
-export const SettingsDangerSection = memo(SettingsDangerSectionComponent);

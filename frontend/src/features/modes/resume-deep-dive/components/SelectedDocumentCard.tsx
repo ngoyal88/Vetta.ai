@@ -3,11 +3,11 @@ import { ArrowLeftRight, ExternalLink, Eye, FileSearch } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import type { ResumeProfile, VaultEntry, VaultVersion } from 'features/vault/types';
+import { resumeDisplayName } from 'features/modes/shared/utils/resumeDisplayName';
 import {
   documentFileLabel,
   documentMetaLine,
   formatVaultDate,
-  resumeDisplayName,
   roleProjectSummary,
 } from '../utils/resumeDeepDiveUtils';
 

@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowLeft, BarChart3, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
+import { fadeUpWithDelay, getHeaderMotion } from 'features/modes/shared/utils/motion';
 import SessionHistoryDetailPanel from '../components/history/SessionHistoryDetailPanel';
 import { HistorySessionList } from '../components/history/HistorySessionList';
 import { HistoryToolbar } from '../components/history/HistoryToolbar';
@@ -14,22 +15,10 @@ import {
   AI_INTERVIEW_HUB_PATH,
 } from 'core/constants/interviewModes';
 
-const fadeUpTransition = {
-  duration: 0.45,
-  ease: 'easeOut' as const,
-};
-
 const HistoryPage: React.FC = () => {
   const reduceMotion = useReducedMotion();
   const state = useHistoryPageState();
-
-  const headerMotion = reduceMotion
-    ? {}
-    : {
-        initial: { opacity: 0, y: 12 },
-        animate: { opacity: 1, y: 0 },
-        transition: fadeUpTransition,
-      };
+  const headerMotion = getHeaderMotion(reduceMotion);
 
   return (
     <div className="history-page relative min-h-[calc(100vh-4rem)] overflow-x-hidden pb-16 pt-10">
@@ -118,7 +107,7 @@ const HistoryPage: React.FC = () => {
           <motion.div
             initial={reduceMotion ? false : { opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ ...fadeUpTransition, delay: 0.06 }}
+            transition={fadeUpWithDelay(0.06)}
             className="history-grid"
           >
             <HistorySessionList
@@ -131,9 +120,13 @@ const HistoryPage: React.FC = () => {
             <div ref={state.detailRef} className="history-grid__detail history-detail-anchor">
               <SessionHistoryDetailPanel
                 interview={state.selectedInterview}
-                onOpenFullTranscript={state.handleOpenFullTranscript}
-                onPracticeAgain={state.handleDetailPracticeAgain}
-                onDelete={state.handleDetailDelete}
+                onOpenFullTranscript={() =>
+                  state.selectedId && state.openTranscriptOverlay(state.selectedId)
+                }
+                onPracticeAgain={() =>
+                  state.selectedId && void state.handlePracticeAgain(state.selectedId)
+                }
+                onDelete={() => state.selectedId && void state.deleteInterview(state.selectedId)}
                 isPracticing={state.isPracticing}
                 isDeleting={state.isDeleting}
                 canPracticeAgain={state.canPracticeAgain}

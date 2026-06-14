@@ -7,14 +7,10 @@ import {
   AI_INTERVIEW_HISTORY_PATH,
   AI_INTERVIEW_HUB_PATH,
 } from 'core/constants/interviewModes';
+import { fadeUpWithDelay, getHeaderMotion } from 'features/modes/shared/utils/motion';
 
 import { useInterviewHistory } from '../hooks/useInterviewHistory';
 import { computeSummary } from '../utils/interviewAnalytics';
-
-const fadeUpTransition = {
-  duration: 0.45,
-  ease: 'easeOut' as const,
-};
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
@@ -72,14 +68,6 @@ const AnalyticsPage: React.FC = () => {
   const { items, loading, refresh } = useInterviewHistory({ limit: 50 });
   const summary = useMemo(() => computeSummary(items), [items]);
 
-  const headerMotion = reduceMotion
-    ? {}
-    : {
-        initial: { opacity: 0, y: 12 },
-        animate: { opacity: 1, y: 0 },
-        transition: fadeUpTransition,
-      };
-
   return (
     <div className="relative min-h-[calc(100vh-4rem)] overflow-hidden pb-16 pt-10">
       <div
@@ -97,7 +85,7 @@ const AnalyticsPage: React.FC = () => {
         </Link>
 
         <motion.header
-          {...headerMotion}
+          {...getHeaderMotion(reduceMotion)}
           className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"
         >
           <div>
@@ -148,7 +136,7 @@ const AnalyticsPage: React.FC = () => {
           <motion.div
             initial={reduceMotion ? false : { opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ ...fadeUpTransition, delay: 0.06 }}
+            transition={fadeUpWithDelay(0.06)}
             className="space-y-6"
           >
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

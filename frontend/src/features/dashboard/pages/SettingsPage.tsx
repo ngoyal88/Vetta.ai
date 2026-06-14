@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 
+import { fadeUpWithDelay, getHeaderMotion } from 'features/modes/shared/utils/motion';
 import { SettingsDangerSection } from '../components/settings/SettingsDangerSection';
 import { SettingsDataSection } from '../components/settings/SettingsDataSection';
 import { SettingsIdentitySection } from '../components/settings/SettingsIdentitySection';
@@ -9,26 +10,10 @@ import { SettingsInterviewSection } from '../components/settings/SettingsIntervi
 import { SettingsPlanSection } from '../components/settings/SettingsPlanSection';
 import { useSettingsPage } from '../hooks/useSettingsPage';
 
-const fadeUpTransition = {
-  duration: 0.45,
-  ease: 'easeOut' as const,
-};
-
 const SettingsPage: React.FC = () => {
   const reduceMotion = useReducedMotion();
   const settings = useSettingsPage();
-
-  const headerMotion = useMemo(
-    () =>
-      reduceMotion
-        ? {}
-        : {
-            initial: { opacity: 0, y: 12 },
-            animate: { opacity: 1, y: 0 },
-            transition: fadeUpTransition,
-          },
-    [reduceMotion],
-  );
+  const headerMotion = getHeaderMotion(reduceMotion);
 
   if (settings.loading) {
     return (
@@ -67,7 +52,7 @@ const SettingsPage: React.FC = () => {
         <motion.div
           initial={reduceMotion ? false : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ ...fadeUpTransition, delay: 0.06 }}
+          transition={fadeUpWithDelay(0.06)}
           className="settings-page__bento"
         >
           <div className="settings-page__primary">
@@ -92,7 +77,7 @@ const SettingsPage: React.FC = () => {
               saving={settings.saving}
               onDefaultRoleChange={settings.setDefaultRole}
               onDefaultYoeChange={settings.setDefaultYoe}
-              onSkipPrecheckChange={settings.handleSkipPrecheckChange}
+              onSkipPrecheckChange={settings.setSkipPrecheckPreference}
               onSave={settings.saveSettings}
             />
           </div>

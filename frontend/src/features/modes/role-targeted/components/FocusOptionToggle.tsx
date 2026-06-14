@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
 type FocusOptionToggleProps = {
@@ -9,22 +9,18 @@ type FocusOptionToggleProps = {
   onToggle: (value: string) => void;
 };
 
-function FocusOptionToggleComponent({
+export const FocusOptionToggle = memo(function FocusOptionToggle({
   value,
   label,
   icon: Icon,
   selected,
   onToggle,
 }: FocusOptionToggleProps) {
-  const handleClick = useCallback(() => {
-    onToggle(value);
-  }, [onToggle, value]);
-
   return (
     <button
       type="button"
       aria-pressed={selected}
-      onClick={handleClick}
+      onClick={() => onToggle(value)}
       className={`inline-flex items-center gap-2 rounded-full border px-4 py-2.5 type-label-sm transition-all ${
         selected
           ? 'border-[var(--color-tertiary)] bg-[var(--color-tertiary-container)]/20 text-[var(--color-tertiary)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-tertiary)_35%,transparent)]'
@@ -35,6 +31,4 @@ function FocusOptionToggleComponent({
       {label}
     </button>
   );
-}
-
-export const FocusOptionToggle = memo(FocusOptionToggleComponent);
+});

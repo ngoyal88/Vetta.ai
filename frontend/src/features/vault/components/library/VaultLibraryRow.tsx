@@ -128,7 +128,5 @@ function VaultLibraryRow({
   );
 }
 
-const MemoizedVaultLibraryRow = memo(VaultLibraryRow);
-MemoizedVaultLibraryRow.displayName = 'VaultLibraryRow';
-
-export default MemoizedVaultLibraryRow;
+const VaultLibraryRowMemo = memo(VaultLibraryRow);
+export default VaultLibraryRowMemo;

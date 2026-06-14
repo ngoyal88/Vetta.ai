@@ -1,31 +1,21 @@
-import React, { useCallback, useMemo } from 'react';
+import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
 import { SetupProgressSteps } from 'features/modes/shared/components/SetupProgressSteps';
+import { getCardMotion, getHeaderMotion } from 'features/modes/shared/utils/motion';
 import { CalibrationSection } from '../components/CalibrationSection';
 import { JobDescriptionSection } from '../components/JobDescriptionSection';
 import { ResumeContextSection } from '../components/ResumeContextSection';
 import { RoleTargetedLaunchFooter } from '../components/RoleTargetedLaunchFooter';
 import { TargetRoleSection } from '../components/TargetRoleSection';
 import { useRoleTargetedSetup } from '../hooks/useRoleTargetedSetup';
-import { getCardMotion, getHeaderMotion } from '../utils/motion';
 
 const RoleTargetedPage: React.FC = () => {
   const reduceMotion = useReducedMotion();
   const setup = useRoleTargetedSetup();
-
-  const headerMotion = useMemo(() => getHeaderMotion(reduceMotion), [reduceMotion]);
-  const cardMotion0 = useMemo(() => getCardMotion(reduceMotion, 0), [reduceMotion]);
-  const cardMotion1 = useMemo(() => getCardMotion(reduceMotion, 0.06), [reduceMotion]);
-  const cardMotion2 = useMemo(() => getCardMotion(reduceMotion, 0.12), [reduceMotion]);
-  const cardMotion3 = useMemo(() => getCardMotion(reduceMotion, 0.18), [reduceMotion]);
-
-  const handleLaunch = useCallback(() => {
-    void setup.handleStartInterview();
-  }, [setup.handleStartInterview]);
 
   return (
     <div className="relative min-h-[calc(100vh-4rem)] overflow-hidden pb-14 pt-10">
@@ -48,7 +38,7 @@ const RoleTargetedPage: React.FC = () => {
       />
 
       <div className="app-container relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-8">
-        <motion.header {...headerMotion} className="flex flex-col gap-6">
+        <motion.header {...getHeaderMotion(reduceMotion)} className="flex flex-col gap-6">
           <Link
             to="/ai-interview"
             className="inline-flex w-fit items-center gap-2 type-label-sm text-[var(--color-on-surface-variant)] transition-colors hover:text-[var(--color-primary)]"
@@ -75,14 +65,14 @@ const RoleTargetedPage: React.FC = () => {
         </motion.header>
 
         <ResumeContextSection
-          motionProps={cardMotion0}
+          motionProps={getCardMotion(reduceMotion, 0)}
           loadingResume={setup.loadingResume}
           parsedResume={setup.parsedResume}
           activeResumeName={setup.activeResumeName}
         />
 
         <TargetRoleSection
-          motionProps={cardMotion1}
+          motionProps={getCardMotion(reduceMotion, 0.06)}
           company={setup.company}
           role={setup.role}
           onCompanyChange={setup.setCompany}
@@ -90,7 +80,7 @@ const RoleTargetedPage: React.FC = () => {
         />
 
         <JobDescriptionSection
-          motionProps={cardMotion2}
+          motionProps={getCardMotion(reduceMotion, 0.12)}
           jobDescription={setup.jobDescription}
           jdCharCount={setup.jdCharCount}
           onJobDescriptionChange={setup.setJobDescription}
@@ -99,7 +89,7 @@ const RoleTargetedPage: React.FC = () => {
         />
 
         <CalibrationSection
-          motionProps={cardMotion3}
+          motionProps={getCardMotion(reduceMotion, 0.18)}
           focusSelections={setup.focusSelections}
           difficultyValue={setup.difficultyValue}
           difficultyLabel={setup.difficultyLabel}
@@ -116,7 +106,7 @@ const RoleTargetedPage: React.FC = () => {
           canLaunch={setup.canLaunch}
           starting={setup.starting}
           roleValue={setup.roleValue}
-          onLaunch={handleLaunch}
+          onLaunch={() => void setup.handleStartInterview()}
         />
       </div>
 

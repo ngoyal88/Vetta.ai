@@ -76,13 +76,13 @@ export function useRoleTargetedSetup() {
     });
   }, []);
 
-  const handleUploadClick = useCallback(() => {
+  const handleUploadClick = () => {
     fileInputRef.current?.click();
-  }, []);
+  };
 
-  const clearJobDescription = useCallback(() => {
+  const clearJobDescription = () => {
     setJobDescription('');
-  }, []);
+  };
 
   const handleUploadFile = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -179,17 +179,17 @@ export function useRoleTargetedSetup() {
     yoeValue,
   ]);
 
-  const dismissPreCheck = useCallback(() => {
+  const dismissPreCheck = () => {
     setShowPreCheck(false);
     setPreCheckSessionId(null);
-  }, []);
+  };
 
-  const completePreCheck = useCallback(() => {
+  const completePreCheck = () => {
     const id = preCheckSessionId;
     setShowPreCheck(false);
     setPreCheckSessionId(null);
     if (id) navigate(`/interview/${id}`);
-  }, [navigate, preCheckSessionId]);
+  };
 
   return {
     currentUser,

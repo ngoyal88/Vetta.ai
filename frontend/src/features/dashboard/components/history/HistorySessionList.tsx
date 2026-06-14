@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 
 import type { InterviewHistoryItem } from 'shared/services/api';
 import { getInterviewId } from '../../utils/interviewHistoryUtils';
@@ -11,7 +11,7 @@ type HistorySessionListProps = {
   onOpenTranscript: (id: string) => void;
 };
 
-function HistorySessionListComponent({
+export function HistorySessionList({
   items,
   selectedId,
   onSelectSession,
@@ -35,5 +35,3 @@ function HistorySessionListComponent({
     </div>
   );
 }
-
-export const HistorySessionList = memo(HistorySessionListComponent);

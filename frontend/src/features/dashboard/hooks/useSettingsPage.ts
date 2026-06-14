@@ -67,10 +67,10 @@ export function useSettingsPage() {
     };
   }, [currentUser]);
 
-  const handleSkipPrecheckChange = useCallback((value: boolean) => {
+  const setSkipPrecheckPreference = (value: boolean) => {
     setSkipPrecheck(value);
     setSkipPrecheckState(value);
-  }, []);
+  };
 
   const saveSettings = useCallback(async () => {
     if (!currentUser) {
@@ -186,7 +186,7 @@ export function useSettingsPage() {
     defaultYoe,
     setDefaultYoe,
     skipPrecheck,
-    handleSkipPrecheckChange,
+    setSkipPrecheckPreference,
     saving,
     deleting,
     sendingVerification,

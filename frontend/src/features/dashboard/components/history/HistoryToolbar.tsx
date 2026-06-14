@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { Calendar, RefreshCw } from 'lucide-react';
 
 import type { HistoryDateRange, HistoryFilterTab } from '../../utils/historyPresentationUtils';
@@ -25,7 +25,7 @@ type HistoryToolbarProps = {
   onRefresh: () => void;
 };
 
-function HistoryToolbarComponent({
+export function HistoryToolbar({
   filterTab,
   dateRange,
   loading,
@@ -80,5 +80,3 @@ function HistoryToolbarComponent({
     </div>
   );
 }
-
-export const HistoryToolbar = memo(HistoryToolbarComponent);

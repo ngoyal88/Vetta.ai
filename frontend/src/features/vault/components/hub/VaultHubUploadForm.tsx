@@ -64,9 +64,9 @@ export default function VaultHubUploadForm({
     setSelectedFile(file);
   }, []);
 
-  const openFilePicker = useCallback(() => {
+  const openFilePicker = () => {
     fileInputRef.current?.click();
-  }, []);
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();

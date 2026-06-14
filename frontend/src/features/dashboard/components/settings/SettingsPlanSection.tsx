@@ -1,10 +1,10 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 
 import { SettingsSection } from './SettingsSection';
 
-function SettingsPlanSectionComponent() {
+export function SettingsPlanSection() {
   return (
     <SettingsSection
       icon={Sparkles}
@@ -23,5 +23,3 @@ function SettingsPlanSectionComponent() {
     </SettingsSection>
   );
 }
-
-export const SettingsPlanSection = memo(SettingsPlanSectionComponent);

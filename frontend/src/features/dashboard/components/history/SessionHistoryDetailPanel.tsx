@@ -37,7 +37,7 @@ function getTranscriptSnippet(lines: TranscriptLine[]): {
   return { aiLine, candidateLine };
 }
 
-function SessionHistoryDetailPanelComponent({
+function SessionHistoryDetailPanel({
   interview,
   onOpenFullTranscript,
   onPracticeAgain,
@@ -207,5 +207,4 @@ function SessionHistoryDetailPanelComponent({
   );
 }
 
-const SessionHistoryDetailPanel = React.memo(SessionHistoryDetailPanelComponent);
 export default SessionHistoryDetailPanel;

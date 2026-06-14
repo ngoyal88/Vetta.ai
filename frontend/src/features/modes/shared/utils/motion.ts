@@ -1,5 +1,11 @@
-
 const EASE_OUT = 'easeOut' as const;
+
+/** Shared framer-motion transition — import instead of copying fadeUpTransition in pages. */
+export const FADE_UP_TRANSITION = { duration: 0.45, ease: EASE_OUT };
+
+export function fadeUpWithDelay(delay = 0) {
+  return { ...FADE_UP_TRANSITION, delay };
+}
 
 export function getHeaderMotion(reduceMotion: boolean | null) {
   if (reduceMotion) return {};

@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { motion, type MotionProps } from 'framer-motion';
 import { FileText, Sparkles, Trash2, Upload } from 'lucide-react';
 
@@ -13,7 +13,7 @@ type JobDescriptionSectionProps = {
   onUploadClick: () => void;
 };
 
-function JobDescriptionSectionComponent({
+export function JobDescriptionSection({
   motionProps,
   jobDescription,
   jdCharCount,
@@ -89,5 +89,3 @@ function JobDescriptionSectionComponent({
     </motion.section>
   );
 }
-
-export const JobDescriptionSection = memo(JobDescriptionSectionComponent);

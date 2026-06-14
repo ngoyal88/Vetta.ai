@@ -3,7 +3,6 @@ import React from 'react';
 import {
   getVaultScoreLabel,
   getVaultScoreRingClass,
-  getVaultScoreTextClass,
   getVaultScoreTier,
   type VaultScoreTier,
 } from 'features/vault/utils/scorePresentation';
@@ -18,8 +17,7 @@ const RING_PATH =
 
 export default function VaultScoreRing({ score, tier: tierOverride }: VaultScoreRingProps) {
   const tier = tierOverride ?? getVaultScoreTier(score);
-  const ringClass = getVaultScoreRingClass(tier);
-  const labelClass = getVaultScoreTextClass(tier);
+  const tierClass = getVaultScoreRingClass(tier);
   const dashOffset = score == null ? 0 : score;
 
   return (
@@ -40,14 +38,14 @@ export default function VaultScoreRing({ score, tier: tierOverride }: VaultScore
               stroke="currentColor"
               strokeWidth="3"
               strokeDasharray={`${dashOffset}, 100`}
-              className={ringClass}
+              className={tierClass}
             />
           ) : null}
         </svg>
         <span className="text-[10px] font-bold text-[var(--color-on-surface)]">{score ?? '—'}</span>
       </div>
       {score != null ? (
-        <span className={`type-label-sm ${labelClass}`}>{getVaultScoreLabel(tier)}</span>
+        <span className={`type-label-sm ${tierClass}`}>{getVaultScoreLabel(tier)}</span>
       ) : null}
     </div>
   );

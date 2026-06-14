@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { X } from 'lucide-react';
 
 import type { InterviewHistoryItem } from 'shared/services/api';
@@ -9,7 +9,7 @@ type TranscriptOverlayProps = {
   onClose: () => void;
 };
 
-function TranscriptOverlayComponent({ interview, srcDoc, onClose }: TranscriptOverlayProps) {
+export function TranscriptOverlay({ interview, srcDoc, onClose }: TranscriptOverlayProps) {
   return (
     <div
       className="fixed inset-0 z-[120] flex items-center justify-end bg-[var(--color-surface)]/80 p-0 backdrop-blur-sm md:justify-center md:p-8"
@@ -41,5 +41,3 @@ function TranscriptOverlayComponent({ interview, srcDoc, onClose }: TranscriptOv
     </div>
   );
 }
-
-export const TranscriptOverlay = memo(TranscriptOverlayComponent);

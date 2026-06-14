@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo } from 'react';
 import { Crosshair, FileText } from 'lucide-react';
 
 import type { InterviewHistoryItem } from 'shared/services/api';
@@ -21,7 +21,7 @@ type SessionHistoryCardProps = {
   onOpenTranscript: (id: string) => void;
 };
 
-function SessionHistoryCardComponent({
+function SessionHistoryCard({
   sessionId,
   interview,
   isSelected,
@@ -36,43 +36,18 @@ function SessionHistoryCardComponent({
   const targeted = isRoleTargetedSession(interview);
   const Icon = targeted ? Crosshair : FileText;
 
-  const handleSelect = useCallback(() => {
-    onSelectSession(sessionId);
-  }, [onSelectSession, sessionId]);
-
-  const handleTranscript = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onOpenTranscript(sessionId);
-    },
-    [onOpenTranscript, sessionId],
-  );
-
-  const handleReport = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onSelectSession(sessionId);
-    },
-    [onSelectSession, sessionId],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onSelectSession(sessionId);
-      }
-    },
-    [onSelectSession, sessionId],
-  );
-
   return (
     <article
       role="button"
       tabIndex={0}
       aria-selected={isSelected}
-      onClick={handleSelect}
-      onKeyDown={handleKeyDown}
+      onClick={() => onSelectSession(sessionId)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelectSession(sessionId);
+        }
+      }}
       className={[
         'history-session-card',
         isSelected ? 'history-session-card--selected' : '',
@@ -122,14 +97,20 @@ function SessionHistoryCardComponent({
         <div className="history-session-card__actions">
           <button
             type="button"
-            onClick={handleTranscript}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenTranscript(sessionId);
+            }}
             className="history-session-card__btn history-session-card__btn--ghost"
           >
             Transcript
           </button>
           <button
             type="button"
-            onClick={handleReport}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectSession(sessionId);
+            }}
             className={[
               'history-session-card__btn',
               isSelected
@@ -145,5 +126,4 @@ function SessionHistoryCardComponent({
   );
 }
 
-const SessionHistoryCard = memo(SessionHistoryCardComponent);
-export default SessionHistoryCard;
+export default memo(SessionHistoryCard);

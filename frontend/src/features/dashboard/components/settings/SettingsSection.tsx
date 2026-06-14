@@ -1,4 +1,4 @@
-import React, { memo, type ReactNode } from 'react';
+import React, { type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
 type SettingsSectionVariant = 'primary' | 'secondary' | 'danger';
@@ -12,7 +12,7 @@ type SettingsSectionProps = {
   hero?: boolean;
 };
 
-function SettingsSectionComponent({
+export function SettingsSection({
   icon: Icon,
   title,
   description,
@@ -52,5 +52,3 @@ function SettingsSectionComponent({
     </section>
   );
 }
-
-export const SettingsSection = memo(SettingsSectionComponent);

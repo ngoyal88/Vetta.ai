@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { ChevronRight, Folder, FolderOpen, History, LineChart } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -26,7 +26,7 @@ const DATA_LINKS = [
   },
 ] as const;
 
-function SettingsDataSectionComponent() {
+export function SettingsDataSection() {
   return (
     <SettingsSection
       icon={Folder}
@@ -50,5 +50,3 @@ function SettingsDataSectionComponent() {
     </SettingsSection>
   );
 }
-
-export const SettingsDataSection = memo(SettingsDataSectionComponent);

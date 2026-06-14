@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { Lock, Rocket } from 'lucide-react';
 
 type RoleTargetedLaunchFooterProps = {
@@ -8,7 +8,7 @@ type RoleTargetedLaunchFooterProps = {
   onLaunch: () => void;
 };
 
-function RoleTargetedLaunchFooterComponent({
+export function RoleTargetedLaunchFooter({
   canLaunch,
   starting,
   roleValue,
@@ -35,5 +35,3 @@ function RoleTargetedLaunchFooterComponent({
     </footer>
   );
 }
-
-export const RoleTargetedLaunchFooter = memo(RoleTargetedLaunchFooterComponent);

@@ -76,10 +76,6 @@ export function getVaultScoreRingClass(tier: VaultScoreTier): string {
   }
 }
 
-export function getVaultScoreTextClass(tier: VaultScoreTier): string {
-  return getVaultScoreRingClass(tier);
-}
-
 export function formatVersionLabel(versionCount: number): string {
   const safeCount = versionCount > 0 ? versionCount : 1;
   return `v${safeCount}`;

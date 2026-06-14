@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { motion, type MotionProps } from 'framer-motion';
 import { BriefcaseBusiness, Building2, Target } from 'lucide-react';
 
@@ -14,7 +14,7 @@ type TargetRoleSectionProps = {
   onRoleChange: (value: string) => void;
 };
 
-function TargetRoleSectionComponent({
+export function TargetRoleSection({
   motionProps,
   company,
   role,
@@ -73,5 +73,3 @@ function TargetRoleSectionComponent({
     </motion.section>
   );
 }
-
-export const TargetRoleSection = memo(TargetRoleSectionComponent);

@@ -2,8 +2,6 @@ import type { ResumeProfile, VaultEntry, VaultScorecard, VaultVersion } from 'fe
 
 import { SCAN_DEPTH_STOPS } from '../constants/resumeDeepDiveOptions';
 
-export { resumeDisplayName } from '../../shared/utils/resumeDisplayName';
-
 export function formatVaultDate(value: unknown): string | null {
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {

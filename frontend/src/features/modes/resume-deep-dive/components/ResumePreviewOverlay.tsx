@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, FileWarning, X } from 'lucide-react';
 
@@ -24,15 +24,11 @@ export function ResumePreviewOverlay({
     enabled: open,
   });
 
-  const handleClose = useCallback(() => {
-    onClose();
-  }, [onClose]);
-
   useEffect(() => {
     if (!open) return undefined;
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') handleClose();
+      if (event.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', onKeyDown);
     const previousOverflow = document.body.style.overflow;
@@ -42,12 +38,12 @@ export function ResumePreviewOverlay({
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [open, handleClose]);
+  }, [open, onClose]);
 
   if (!open) return null;
 
   return createPortal(
-    <div className="resume-preview-overlay" role="presentation" onClick={handleClose}>
+    <div className="resume-preview-overlay" role="presentation" onClick={onClose}>
       <div
         className="resume-preview-overlay__panel"
         role="dialog"
@@ -73,7 +69,7 @@ export function ResumePreviewOverlay({
             ) : null}
             <button
               type="button"
-              onClick={handleClose}
+              onClick={onClose}
               className="resume-deep-dive-action resume-deep-dive-action--icon"
               aria-label="Close preview"
             >
