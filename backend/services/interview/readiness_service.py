@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from firebase_admin import firestore
 
 from firebase_config import db
-from services.interview.candidate_enrichment_service import get_enrichment_summary
+from services.profile_memory.profile_claims_repository import get_profile_memory_summary
 from services.vault.analysis_service import build_vault_scorecard
 from services.vault.vault_service import get_vault_entry, get_vault_meta, get_version_by_id
 from utils.logger import get_logger
@@ -20,6 +20,7 @@ def _now_iso() -> str:
 
 
 def _jd_hash(job_description: str) -> str:
+    # ponytail: JD hash is presence-only fingerprint, not semantic scoring
     text = (job_description or "").strip().lower()
     if not text:
         return "none"
@@ -100,26 +101,46 @@ def _extract_interview_rows(uid: str, limit: int = 20) -> List[Dict[str, Any]]:
     return rows[:limit]
 
 
+def _claim_texts(bucket: Any) -> List[str]:
+    if not isinstance(bucket, list):
+        return []
+    out: List[str] = []
+    for entry in bucket:
+        if isinstance(entry, dict):
+            text = str(entry.get("claim_text") or "").strip()
+            if text:
+                out.append(text)
+    return out
+
+
 def _dimension_scores(
     *,
     vault_score: int,
     role_fit_score: Optional[int],
     coverage_counts: Dict[str, Any],
-    enrichments: Dict[str, Any],
+    profile_memory: Dict[str, Any],
     interviews: List[Dict[str, Any]],
     jd_present: bool,
 ) -> Dict[str, int]:
-    skills_count = len(enrichments.get("skills") or [])
-    project_count = len(enrichments.get("projects") or [])
-    soft_signal_count = len(enrichments.get("soft_signals") or [])
+    technical_claims = _claim_texts(profile_memory.get("technical"))
+    experience_claims = _claim_texts(profile_memory.get("experience"))
+    behavioral_claims = _claim_texts(profile_memory.get("behavioral"))
+    gap_claims = _claim_texts(profile_memory.get("gaps"))
     coverage_skill_count = int(coverage_counts.get("skills") or 0)
     coverage_projects = int(coverage_counts.get("projects") or 0)
     coverage_work = int(coverage_counts.get("work_experiences") or 0)
 
     role_anchor = role_fit_score if isinstance(role_fit_score, int) else vault_score
-    skills = _clamp_score(0.65 * role_anchor + 2.5 * min(6, skills_count) + 1.2 * min(12, coverage_skill_count))
+    skills = _clamp_score(
+        0.65 * role_anchor
+        + 2.5 * min(6, len(technical_claims))
+        + 1.2 * min(12, coverage_skill_count)
+    )
     experience = _clamp_score(
-        35 + min(35, coverage_work * 12) + min(20, coverage_projects * 6) + min(10, project_count * 2)
+        35
+        + min(35, coverage_work * 12)
+        + min(20, coverage_projects * 6)
+        + min(10, len(experience_claims) * 2)
     )
 
     scored_sessions = []
@@ -134,12 +155,14 @@ def _dimension_scores(
 
     avg_overall_10 = (sum(scored_sessions) / len(scored_sessions)) if scored_sessions else 5.2
     communication = _clamp_score(avg_overall_10 * 10)
+    verified_claim_count = len(technical_claims) + len(experience_claims) + len(behavioral_claims)
     evidence = _clamp_score(
         30
         + min(25, evidence_sessions * 5)
-        + min(20, soft_signal_count * 4)
-        + min(20, project_count * 4)
+        + min(20, len(behavioral_claims) * 4)
+        + min(20, verified_claim_count * 2)
         + (5 if jd_present else 0)
+        - min(8, len(gap_claims))
     )
 
     return {
@@ -150,24 +173,35 @@ def _dimension_scores(
     }
 
 
-def _derive_gaps_and_actions(breakdown: Dict[str, int], jd_present: bool) -> Tuple[List[str], List[str], str]:
+def _derive_gaps_and_actions(
+    breakdown: Dict[str, int],
+    jd_present: bool,
+    profile_memory: Dict[str, Any],
+) -> Tuple[List[str], List[str], str]:
     ordered = sorted(breakdown.items(), key=lambda item: item[1])
     top_gaps: List[str] = []
     next_actions: List[str] = []
 
+    accepted_gaps = _claim_texts(profile_memory.get("gaps"))
+    if accepted_gaps:
+        top_gaps.extend(accepted_gaps[:3])
+        next_actions.append("Practice the open gap topics in a role-targeted mock interview.")
+
     for key, score in ordered[:3]:
+        if len(top_gaps) >= 3:
+            break
         if key == "skills":
-            top_gaps.append("Skill match depth is lower than target role expectations.")
-            next_actions.append("Add 2-3 role-specific skills with project evidence in your active resume.")
+            top_gaps.append("Technical claim depth is lower than target role expectations.")
+            next_actions.append("Verify more technical claims with specific metrics in your next mock.")
         elif key == "experience":
             top_gaps.append("Experience evidence lacks quantified scope or ownership.")
             next_actions.append("Rewrite recent work bullets with measurable outcomes and tradeoff details.")
         elif key == "communication":
             top_gaps.append("Interview communication consistency is below target benchmark.")
-            next_actions.append("Run one focused behavioral/role-targeted mock and improve answer structure.")
+            next_actions.append("Run one focused behavioral mock and improve answer structure.")
         elif key == "evidence":
             top_gaps.append("Supporting evidence for claims is sparse across sessions.")
-            next_actions.append("Accept strong enrichment signals and add concrete examples to profile memory.")
+            next_actions.append("Review pending verified claims after your next interview.")
 
     if jd_present:
         next_actions.append("Use the same JD again after updates to track readiness delta precisely.")
@@ -176,9 +210,14 @@ def _derive_gaps_and_actions(breakdown: Dict[str, int], jd_present: bool) -> Tup
 
     strongest_dim, strongest_score = max(breakdown.items(), key=lambda item: item[1])
     weakest_dim, weakest_score = min(breakdown.items(), key=lambda item: item[1])
+    cite_pool = (
+        _claim_texts(profile_memory.get("technical"))
+        + _claim_texts(profile_memory.get("experience"))
+    )
+    cite = f' Verified strengths include "{cite_pool[0]}".' if cite_pool else ""
     why = (
         f"Your strongest area is {strongest_dim} ({strongest_score}/100), while {weakest_dim} "
-        f"({weakest_score}/100) is pulling your readiness down."
+        f"({weakest_score}/100) is pulling your readiness down.{cite}"
     )
     return top_gaps[:3], next_actions[:3], why
 
@@ -204,7 +243,7 @@ async def compute_readiness(
     role_fit_score = int(scorecard.role_fit_score) if scorecard and scorecard.role_fit_score is not None else None
     coverage_counts = (scorecard.coverage_counts or {}) if scorecard else {}
 
-    enrichment_summary = await get_enrichment_summary(uid)
+    profile_memory = await get_profile_memory_summary(uid)
     interviews = _extract_interview_rows(uid, limit=20)
     jd_present = bool((job_description or "").strip())
 
@@ -212,7 +251,7 @@ async def compute_readiness(
         vault_score=vault_score,
         role_fit_score=role_fit_score,
         coverage_counts=coverage_counts,
-        enrichments=enrichment_summary,
+        profile_memory=profile_memory,
         interviews=interviews,
         jd_present=jd_present,
     )
@@ -222,7 +261,9 @@ async def compute_readiness(
         + 0.22 * breakdown["communication"]
         + 0.18 * breakdown["evidence"]
     )
-    top_gaps, next_actions, why = _derive_gaps_and_actions(breakdown, jd_present=jd_present)
+    top_gaps, next_actions, why = _derive_gaps_and_actions(
+        breakdown, jd_present=jd_present, profile_memory=profile_memory
+    )
     jd_digest = _jd_hash(job_description)
     inputs_hash = hashlib.sha1(
         (
@@ -246,10 +287,12 @@ async def compute_readiness(
         "version_id": selected_version_id,
         "source": {
             "interview_count": len(interviews),
-            "enrichment_counts": {
-                "projects": len(enrichment_summary.get("projects") or []),
-                "skills": len(enrichment_summary.get("skills") or []),
-                "soft_signals": len(enrichment_summary.get("soft_signals") or []),
+            "claim_counts": {
+                "technical": len(profile_memory.get("technical") or []),
+                "experience": len(profile_memory.get("experience") or []),
+                "behavioral": len(profile_memory.get("behavioral") or []),
+                "gaps": len(profile_memory.get("gaps") or []),
+                "accepted_total": int(profile_memory.get("accepted_count") or 0),
             },
         },
         "created_at": firestore.SERVER_TIMESTAMP,

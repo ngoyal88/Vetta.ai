@@ -8,11 +8,10 @@ from pydantic import BaseModel, Field
 
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewSession, InterviewType
-from services.interview.candidate_enrichment_service import get_enrichment_summary
-from services.interview.contracts.session_events import SessionEvent, SessionEventType
+from services.profile_memory.profile_claims_repository import get_profile_memory_summary
+from services.interview.contracts.session_events import SessionEvent, SessionEventType, SessionStateMachine
 from services.interview.jd_context_service import INTERVIEW_FOCUS_VALUES, clean_optional_text
-from services.interview.modes.capabilities import get_mode_capabilities
-from services.interview.session_state_machine import SessionStateMachine
+from services.interview.modes.registry import get_mode_capabilities
 from services.interview.interview_service import InterviewService
 from services.vault.vault_service import get_vault_entry, get_vault_meta, get_version_by_id
 from utils.logger import get_logger
@@ -122,9 +121,9 @@ async def start_interview_session(
     jd_fit_context = start_payload["jd_fit_context"]
     resume_probe_context = start_payload["resume_probe_context"]
     target_context = start_payload["target_context"] or {}
-    enrichment_summary = await get_enrichment_summary(uid)
-    if enrichment_summary:
-        target_context["enrichment_summary"] = enrichment_summary
+    profile_memory_summary = await get_profile_memory_summary(uid)
+    if profile_memory_summary.get("accepted_count"):
+        target_context["profile_memory_summary"] = profile_memory_summary
     seeded_questions: list[Dict[str, Any]] = start_payload["seeded_questions"]
 
     if not seeded_questions:

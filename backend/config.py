@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     transcript_merge_gap_ms: int = 1500
     transcript_merge_max_chars: int = 1200
 
+    vpm_enabled: bool = True
+    vpm_max_accepted_claims: int = 50
+    vpm_max_raw_extract: int = 8
+    vpm_pipeline_lease_seconds: int = 600
+    vpm_verify_max_retries: int = 1
+    vpm_verify_chunk_size: int = 5
+    vpm_verify_gate_fallback: bool = True
+    vpm_umbrella_terms: str = (
+        "system design,leadership,communication,problem solving,teamwork,"
+        "microservices,architecture,scalability,cloud,devops,agile,stakeholder management"
+    )
+
     # LiveKit: when True, TTS is streamed as tts_chunk (requires client handlers). False = single
     # question message with base64 audio (and optional chunking); works with useInterviewLiveKit AudioPlayer.
     streaming_tts_enabled: bool = False
@@ -98,6 +110,10 @@ class Settings(BaseSettings):
     contact_discord_webhook_url: str = ""
     contact_rate_limit: int = 5
     contact_rate_window_seconds: int = 3600
+
+    # Security
+    trust_proxy_headers: bool = False
+    trusted_proxy_ips: str = "127.0.0.1"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -122,6 +138,9 @@ class Settings(BaseSettings):
             return r"http://(localhost|127\.0\.0\.1)(:\d+)?"
         return None
 
+    def _is_local_dev_origins(self) -> bool:
+        return any("localhost" in o or "127.0.0.1" in o for o in self.allowed_origins_list())
+
     def expose_api_error_details(self) -> bool:
         """When True, 500 responses include exception type/message (local dev default)."""
         flag = os.getenv("EXPOSE_API_ERRORS", "").strip().lower()
@@ -129,7 +148,28 @@ class Settings(BaseSettings):
             return True
         if flag in ("0", "false", "no"):
             return False
-        return any("localhost" in o or "127.0.0.1" in o for o in self.allowed_origins_list())
+        return self._is_local_dev_origins()
+
+    def require_email_verified(self) -> bool:
+        """When True, API rejects tokens without email_verified claim."""
+        flag = os.getenv("REQUIRE_EMAIL_VERIFIED", "").strip().lower()
+        if flag in ("1", "true", "yes"):
+            return True
+        if flag in ("0", "false", "no"):
+            return False
+        return not self._is_local_dev_origins()
+
+    def rate_limit_should_fail_open(self) -> bool:
+        """When True, rate limits are skipped if Redis is unavailable (dev default)."""
+        flag = os.getenv("RATE_LIMIT_FAIL_OPEN", "").strip().lower()
+        if flag in ("1", "true", "yes"):
+            return True
+        if flag in ("0", "false", "no"):
+            return False
+        return self._is_local_dev_origins()
+
+    def trusted_proxy_ips_list(self) -> List[str]:
+        return [ip.strip() for ip in self.trusted_proxy_ips.split(",") if ip.strip()]
 
 
 @lru_cache

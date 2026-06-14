@@ -23,12 +23,16 @@ from config import get_settings
 from firebase_admin import firestore
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewType
-from services.interview.contracts.session_events import SessionEvent, SessionEventType
-from services.interview.contracts.fallback_contracts import InterviewEndedEvent, SessionStatusEvent
-from services.interview.candidate_enrichment_service import run_enrichment_pipeline
+from services.interview.contracts.session_events import (
+    InterviewEndedEvent,
+    SessionEvent,
+    SessionEventType,
+    SessionStateMachine,
+    SessionStatusEvent,
+)
+from services.profile_memory.profile_claims_service import run_profile_claims_pipeline
 from services.interview.interview_service import InterviewService
 from services.interview.session_conductor import SessionConductor
-from services.interview.session_state_machine import SessionStateMachine
 from services.interview.transcript_service import attach_transcript_to_session, extract_assistant_transcript_text
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
@@ -815,18 +819,26 @@ async def _handle_end_interview(
     })
     await _update_session(session_key, session_data)
 
-    async def _run_enrichment_task() -> None:
+    async def _run_vpm_task() -> None:
+        if not get_settings().vpm_enabled:
+            return
         try:
-            await run_enrichment_pipeline(
+            result = await run_profile_claims_pipeline(
                 uid=str(session_data.get("user_id") or ""),
                 session_id=session_id,
                 session_data=session_data,
                 engine=interview_service._engine,  # noqa: SLF001
             )
-        except Exception as enrichment_error:
-            log.warning("Agent enrichment pipeline failed: %s", enrichment_error)
+            if result.get("failed") or result.get("pipeline_status") == "failed":
+                log.warning(
+                    "Agent VPM pipeline failed session=%s reason=%s",
+                    session_id,
+                    result.get("reason"),
+                )
+        except Exception as vpm_error:
+            log.warning("Agent VPM pipeline failed: %s", vpm_error)
 
-    asyncio.create_task(_run_enrichment_task())
+    asyncio.create_task(_run_vpm_task())
 
     try:
         db.collection("interviews").document(session_id).set({
@@ -933,18 +945,26 @@ async def _handle_candidate_disconnect(
     session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
     await _update_session(session_key, session_data)
 
-    async def _run_enrichment_task() -> None:
+    async def _run_vpm_task() -> None:
+        if not get_settings().vpm_enabled:
+            return
         try:
-            await run_enrichment_pipeline(
+            result = await run_profile_claims_pipeline(
                 uid=str(session_data.get("user_id") or ""),
                 session_id=session_id,
                 session_data=session_data,
                 engine=interview_service._engine,  # noqa: SLF001
             )
-        except Exception as enrichment_error:
-            log.warning("Disconnect enrichment pipeline failed: %s", enrichment_error)
+            if result.get("failed") or result.get("pipeline_status") == "failed":
+                log.warning(
+                    "Disconnect VPM pipeline failed session=%s reason=%s",
+                    session_id,
+                    result.get("reason"),
+                )
+        except Exception as vpm_error:
+            log.warning("Disconnect VPM pipeline failed: %s", vpm_error)
 
-    asyncio.create_task(_run_enrichment_task())
+    asyncio.create_task(_run_vpm_task())
 
     try:
         scores = parse_scores_from_feedback(
@@ -1235,3 +1255,9 @@ async def entrypoint(ctx: JobContext) -> None:
                 await session.say(first_question_text)
 
     log.info("Greeting delivered for session %s — agent is live", session_id)
+
+
+if __name__ == "__main__":
+    from livekit.agents import cli
+
+    cli.run_app(server)
