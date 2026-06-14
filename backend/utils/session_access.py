@@ -1,11 +1,11 @@
 """Fail-closed session ownership checks for interview Redis sessions."""
 
-from typing import Any
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
 
 
-def require_session_owner(session_data: dict[str, Any] | None, uid: str) -> dict[str, Any]:
+def require_session_owner(session_data: Optional[Dict[str, Any]], uid: str) -> Dict[str, Any]:
     """
     Ensure the authenticated user owns the session.
 

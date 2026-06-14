@@ -6,7 +6,7 @@ from utils.logger import get_logger
 from utils.redis_client import get_session, update_session
 from services.interview.prompt_engine import PromptEngine
 from services.interview.contracts.session_events import SessionEvent, SessionEventType
-from services.interview.session_state_machine import SessionStateMachine
+from services.interview.contracts.session_events import SessionEvent, SessionStateMachine
 
 logger = get_logger("AnswerProcessor")
 

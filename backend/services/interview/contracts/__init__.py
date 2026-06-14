@@ -1,1 +1,0 @@
-"""Typed interview contracts."""

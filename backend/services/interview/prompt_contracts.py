@@ -51,6 +51,11 @@ def extract_json_payload(raw: str, *, fallback: Any) -> Any:
     return fallback
 
 
+def extract_json_dict(raw: str) -> Dict[str, Any]:
+    payload = extract_json_payload(raw, fallback={})
+    return payload if isinstance(payload, dict) else {}
+
+
 def _to_float(value: Any, default: float) -> float:
     try:
         return float(value)

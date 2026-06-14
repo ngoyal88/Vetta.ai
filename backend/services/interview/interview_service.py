@@ -81,8 +81,6 @@ class InterviewService:
 
         self._engine = LLMEngine(settings)
         self.llm = self._engine.primary
-        self.eval_llm = self._engine.eval_llm
-        self._fallback_llm = self._engine.fallback
 
         self._prompt = PromptEngine(self._engine)
         self._questions = QuestionService(self._engine)
@@ -225,14 +223,6 @@ class InterviewService:
 
     async def _generate_dsa_question(self, difficulty: DifficultyLevel, context: str) -> Dict[str, Any]:
         return await self._questions._generate_dsa_question(difficulty, context)
-
-    async def analyze_response(
-        self,
-        question: str,
-        candidate_response: str,
-        interview_type: InterviewType,
-    ) -> Dict[str, Any]:
-        return await self._evaluator.analyze_response(question, candidate_response, interview_type)
 
     async def generate_follow_up(
         self,

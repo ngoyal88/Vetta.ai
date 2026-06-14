@@ -53,24 +53,6 @@ class GroqService:
             logger.error(f"Groq generation error: {e}", exc_info=True)
             return f"Error generating response: {str(e)}"
 
-    async def chat(self, messages: List[Dict[str, str]]) -> str:
-        if not self.client:
-            return "LLM service not configured"
-        try:
-            chat_completion = self.client.chat.completions.create(
-                messages=messages,
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                stream=False,
-            )
-            choice = (chat_completion.choices or [None])[0]
-            content = getattr(choice, "message", None).content if choice and getattr(choice, "message", None) else None
-            return content or "No response generated"
-        except Exception as e:
-            logger.error(f"Groq chat error: {e}", exc_info=True)
-            return f"Error in chat: {str(e)}"
-
     async def generate_text_stream(
         self,
         prompt: str,

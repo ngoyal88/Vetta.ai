@@ -1,8 +1,8 @@
 import json
-import re
 from typing import Any, Dict, List, Optional
 
-from services.llm.platform_llm import get_platform_llm
+from services.interview.llm_engine import get_platform_llm
+from services.interview.prompt_contracts import extract_json_dict
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -17,23 +17,6 @@ from services.vault.compare_diff_extractor import (
     merge_llm_changed,
     section_diffs_to_legacy_comparisons,
 )
-
-
-def _extract_json_obj(raw: str) -> Dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            return {}
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return {}
-
 
 def _skill_set(profile: Dict[str, Any]) -> List[str]:
     normalized = normalize_resume_for_scorecard(profile)
@@ -226,7 +209,7 @@ async def compare_profiles(
     )
 
     raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
-    payload = _extract_json_obj(raw)
+    payload = extract_json_dict(raw)
     if not payload:
         logger.warning("Vault compare LLM returned unparseable JSON; using score-based fallbacks")
 

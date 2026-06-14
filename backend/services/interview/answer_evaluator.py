@@ -1,8 +1,6 @@
 from typing import Dict, Any
-from datetime import datetime, timezone
 from utils.logger import get_logger
 from services.interview.llm_engine import LLMEngine
-from models.interview import InterviewType
 from services.interview.prompt_contracts import (
     execute_json_contract,
     normalize_answer_evaluation,
@@ -50,34 +48,3 @@ Return JSON only, no other text:
         if not result.ok:
             logger.warning("answer_evaluation contract fallback used")
         return result.value
-
-    async def analyze_response(
-        self,
-        question: str,
-        candidate_response: str,
-        interview_type: InterviewType
-    ) -> Dict[str, Any]:
-        """Analyze candidate's response"""
-        prompt = f"""Analyze this interview response briefly:
-
-Type: {interview_type.value}
-Question: {question}
-Response: {candidate_response}
-
-Provide concise feedback in this format:
-STRENGTHS:
-- [key strength 1]
-- [key strength 2]
-
-AREAS TO IMPROVE:
-- [improvement area 1]
-- [improvement area 2]
-
-SCORE: X/10"""
-
-        analysis = await self._engine.generate(prompt, 0.3)
-
-        return {
-            'analysis': analysis,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
