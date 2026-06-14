@@ -236,28 +236,3 @@ async def delete_session(session_id: str) -> bool:
         log.error("Error deleting session %s: %s", session_id, e, exc_info=True)
         raise
     return False
-
-
-# ---------------------------------------------------------------------------
-# WebSocket ticket helpers (short-lived opaque tokens for WS auth)
-# ---------------------------------------------------------------------------
-
-WS_TICKET_TTL_SECONDS: int = 60  # tickets expire after 60 s — single use
-
-_WS_TICKET_PREFIX = "ws_ticket:"
-
-
-async def store_ws_ticket(ticket: str, uid: str, ttl_seconds: int = WS_TICKET_TTL_SECONDS) -> None:
-    """Persist a one-time WS ticket mapped to a Firebase UID."""
-    key = f"{_WS_TICKET_PREFIX}{ticket}"
-    client = await get_redis()
-    await client.set(key, uid, ex=ttl_seconds)
-    log.info("WS ticket stored (ttl=%ss)", ttl_seconds)
-
-
-async def get_ws_ticket(ticket: str) -> Optional[str]:
-    """Retrieve and consume (delete) a WS ticket; returns the UID or None if missing/expired."""
-    key = f"{_WS_TICKET_PREFIX}{ticket}"
-    client = await get_redis()
-    uid: Optional[str] = await client.getdel(key)
-    return uid or None

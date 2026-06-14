@@ -10,7 +10,7 @@ from docx.oxml.ns import qn
 
 from firebase_config import db
 from models.resume import ParsedResumeResponse, ResumeProfile
-from services.llm.platform_llm import get_platform_llm
+from services.interview.llm_engine import get_platform_llm
 
 def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     """

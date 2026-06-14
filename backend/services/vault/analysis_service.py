@@ -1,27 +1,10 @@
-import json
-import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from models.vault import VaultScorecard
-from services.llm.platform_llm import get_platform_llm
+from services.interview.llm_engine import get_platform_llm
+from services.interview.prompt_contracts import extract_json_dict
 from services.resume.scorecard_service import build_resume_scorecard
-
-
-def _extract_json_obj(raw: str) -> Dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            return {}
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return {}
 
 
 def _safe_list(value: Any) -> List[str]:
@@ -96,7 +79,7 @@ async def extract_ats_flags(profile: Dict[str, Any]) -> List[str]:
     )
     user_prompt = "Resume data:\n" + _compact_resume_text(profile)
     raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
-    payload = _extract_json_obj(raw)
+    payload = extract_json_dict(raw)
     return _safe_list(payload.get("flags"))
 
 
@@ -109,7 +92,7 @@ async def extract_role_fit(role: Optional[str], profile: Dict[str, Any]) -> Tupl
     )
     user_prompt = f"role={role}\nresume=\n{_compact_resume_text(profile)}"
     raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
-    payload = _extract_json_obj(raw)
+    payload = extract_json_dict(raw)
     score = payload.get("role_fit_score")
     if isinstance(score, (int, float)):
         score_value = max(0, min(100, int(round(score))))
@@ -127,7 +110,7 @@ async def generate_diff_summary(prev_profile: Dict[str, Any], next_profile: Dict
         "CURRENT:\n" + _compact_resume_text(next_profile)
     )
     raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
-    payload = _extract_json_obj(raw)
+    payload = extract_json_dict(raw)
     summary = payload.get("diff_summary")
     if isinstance(summary, str) and summary.strip():
         return summary.strip()

@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from services.interview.llm_engine import get_platform_llm

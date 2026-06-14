@@ -1,11 +1,11 @@
 import json
-import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from models.resume import ResumeCoverageCounts, ResumeScorecardMeta, ResumeScorecardResponse
-from services.llm.platform_llm import get_platform_llm
+from services.interview.llm_engine import get_platform_llm
+from services.interview.prompt_contracts import extract_json_dict
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -164,23 +164,6 @@ def build_summary_line(counts: ResumeCoverageCounts) -> str:
         f"{counts.work_experiences} work experiences - {coverage} coverage for interviews."
     )
 
-
-def _extract_json_obj(raw: str) -> Dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            return {}
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return {}
-
-
 async def _llm_score(
     normalized: Dict[str, Any], counts: ResumeCoverageCounts, role_hint: Optional[str]
 ) -> Dict[str, Any]:
@@ -196,7 +179,7 @@ async def _llm_score(
         f"role_hint={role_hint or ''}\n"
     )
     raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
-    data = _extract_json_obj(raw)
+    data = extract_json_dict(raw)
     score = data.get("score")
     role_hint_text = data.get("role_hint_text")
     parsed: Dict[str, Any] = {}
@@ -225,7 +208,7 @@ async def _llm_polish_suggestions(
         f"suggestions={json.dumps(base_suggestions)}"
     )
     raw = await get_platform_llm().json_completion(system_prompt, user_prompt)
-    payload = _extract_json_obj(raw)
+    payload = extract_json_dict(raw)
     items = payload.get("suggestions")
     if not isinstance(items, list):
         return base_suggestions
