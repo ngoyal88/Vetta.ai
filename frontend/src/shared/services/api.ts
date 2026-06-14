@@ -1,4 +1,5 @@
 import { auth } from "firebaseConfig";
+import { runProfileClaimsPoll } from "./profileClaimsPoll";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -82,6 +83,85 @@ export type InterviewHistoryResponse = {
   history?: InterviewHistoryItem[];
   interviews?: InterviewHistoryItem[];
   [key: string]: unknown;
+};
+
+export type ClaimCategory = "technical" | "experience" | "behavioral" | "gap";
+export type ClaimStatus = "pending" | "accepted" | "rejected" | "archived";
+export type DemonstrationStrength = "strong" | "adequate" | "weak" | "none";
+
+export type ProfileClaim = {
+  id: string;
+  claim_text: string;
+  claim_category: ClaimCategory;
+  demonstration_strength?: DemonstrationStrength;
+  evidence_quote?: string;
+  status: ClaimStatus;
+  confidence?: number;
+  evidence_session_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  accepted_at?: string;
+  rejected_at?: string;
+};
+
+export type ProfileMemorySummaryV1 = {
+  schema_version: string;
+  technical: Array<{ claim_id?: string; claim_text: string; evidence_quote?: string; updated_at?: string }>;
+  experience: Array<{ claim_id?: string; claim_text: string; evidence_quote?: string; updated_at?: string }>;
+  behavioral: Array<{ claim_id?: string; claim_text: string; evidence_quote?: string; updated_at?: string }>;
+  gaps: Array<{ claim_id?: string; claim_text: string; evidence_quote?: string; updated_at?: string }>;
+  accepted_count: number;
+  last_refresh?: string;
+};
+
+export type ProfileMemoryResponse = {
+  summary: ProfileMemorySummaryV1;
+  timeline: ProfileClaim[];
+};
+
+export type PipelineStatus = "queued" | "running" | "completed" | "failed" | "skipped";
+
+export type SessionProfileClaimsResponse = {
+  items: ProfileClaim[];
+  strength: ProfileClaim[];
+  gaps: ProfileClaim[];
+  session_id?: string;
+  pipeline_status?: PipelineStatus | null;
+  pipeline_stats?: Record<string, unknown> | null;
+  pipeline_error?: { code?: string; message?: string } | null;
+};
+
+export type ReadinessRequest = {
+  target_role: string;
+  job_description?: string;
+  resume_id?: string;
+  version_id?: string;
+};
+
+export type ReadinessResponse = {
+  target_role: string;
+  jd_hash: string;
+  overall_score: number;
+  breakdown: {
+    skills: number;
+    experience: number;
+    communication: number;
+    evidence: number;
+  };
+  why_this_score: string;
+  top_gaps: string[];
+  next_actions: string[];
+  computed_at: string;
+  inputs_hash: string;
+  resume_id?: string | null;
+  version_id?: string | null;
+};
+
+export type ReadinessSnapshot = {
+  id: string;
+  overall_score: number;
+  computed_at: string;
+  delta_vs_prev: number;
 };
 
 export type BackendHealthResponse = {
@@ -286,6 +366,118 @@ const deleteInterview = async (sessionId: string): Promise<Record<string, unknow
   return response.json() as Promise<Record<string, unknown>>;
 };
 
+const getProfileClaims = async (
+  status?: ClaimStatus,
+  limit = 40,
+  section?: "strength" | "gap",
+  category?: ClaimCategory,
+): Promise<{ items: ProfileClaim[] }> => {
+  const query = new URLSearchParams();
+  if (status) query.set("status", status);
+  if (section) query.set("section", section);
+  if (category) query.set("category", category);
+  query.set("limit", String(limit));
+  const response = await fetch(`${API_URL}/interview/profile-claims?${query.toString()}`, {
+    method: "GET",
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error("Failed to fetch profile claims");
+  return response.json() as Promise<{ items: ProfileClaim[] }>;
+};
+
+const getSessionProfileClaims = async (sessionId: string): Promise<SessionProfileClaimsResponse> => {
+  const response = await fetch(
+    `${API_URL}/interview/profile-claims/session/${encodeURIComponent(sessionId)}`,
+    { method: "GET", headers: await getAuthHeaders() },
+  );
+  if (!response.ok) throw new Error("Failed to fetch session profile claims");
+  return response.json() as Promise<SessionProfileClaimsResponse>;
+};
+
+const acceptProfileClaim = async (claimId: string): Promise<{ item: ProfileClaim }> => {
+  const response = await fetch(
+    `${API_URL}/interview/profile-claims/${encodeURIComponent(claimId)}/accept`,
+    { method: "POST", headers: await getAuthHeaders() },
+  );
+  if (!response.ok) {
+    const detail = response.status === 409 ? "Accepted claims cap reached (50)." : "Failed to accept claim";
+    throw new Error(detail);
+  }
+  return response.json() as Promise<{ item: ProfileClaim }>;
+};
+
+const rejectProfileClaim = async (claimId: string): Promise<{ item: ProfileClaim }> => {
+  const response = await fetch(
+    `${API_URL}/interview/profile-claims/${encodeURIComponent(claimId)}/reject`,
+    { method: "POST", headers: await getAuthHeaders() },
+  );
+  if (!response.ok) throw new Error("Failed to reject claim");
+  return response.json() as Promise<{ item: ProfileClaim }>;
+};
+
+const bulkUpdateProfileClaims = async (
+  items: Array<{ claim_id: string; status: "accepted" | "rejected" }>,
+): Promise<{ items: ProfileClaim[]; count: number; errors?: Array<{ claim_id: string; error: string }> }> => {
+  const response = await fetch(`${API_URL}/interview/profile-claims/bulk`, {
+    method: "POST",
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ items }),
+  });
+  if (!response.ok) throw new Error("Failed to update profile claims");
+  return response.json() as Promise<{
+    items: ProfileClaim[];
+    count: number;
+    errors?: Array<{ claim_id: string; error: string }>;
+  }>;
+};
+
+const getProfileMemory = async (limit = 60): Promise<ProfileMemoryResponse> => {
+  const response = await fetch(`${API_URL}/interview/profile-claims/profile-memory?limit=${limit}`, {
+    method: "GET",
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error("Failed to fetch profile memory");
+  return response.json() as Promise<ProfileMemoryResponse>;
+};
+
+export type PollSessionProfileClaimsResult = SessionProfileClaimsResponse & {
+  pollExhausted: boolean;
+};
+
+const pollSessionProfileClaims = async (
+  sessionId: string,
+  options?: { intervalMs?: number; maxWaitMs?: number; maxDelayMs?: number },
+): Promise<PollSessionProfileClaimsResult> =>
+  runProfileClaimsPoll(() => getSessionProfileClaims(sessionId), options);
+
+const computeReadiness = async (payload: ReadinessRequest): Promise<ReadinessResponse> => {
+  const response = await fetch(`${API_URL}/interview/readiness/compute`, {
+    method: "POST",
+    headers: await getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error("Failed to compute readiness");
+  return response.json() as Promise<ReadinessResponse>;
+};
+
+const getReadinessHistory = async (
+  targetRole: string,
+  jobDescription = "",
+  limit = 20,
+): Promise<{ target_role: string; jd_hash: string; history: ReadinessSnapshot[] }> => {
+  const query = new URLSearchParams({
+    target_role: targetRole,
+    job_description: jobDescription,
+    limit: String(limit),
+  });
+  const response = await fetch(`${API_URL}/interview/readiness/history?${query.toString()}`, {
+    method: "GET",
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error("Failed to fetch readiness history");
+  return response.json() as Promise<{ target_role: string; jd_hash: string; history: ReadinessSnapshot[] }>;
+};
+
 const deleteAccountData = async (): Promise<Record<string, unknown>> => {
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
@@ -313,5 +505,14 @@ export const api = {
   getSessionDetails,
   getInterviewHistory,
   deleteInterview,
+  getProfileClaims,
+  getSessionProfileClaims,
+  pollSessionProfileClaims,
+  acceptProfileClaim,
+  rejectProfileClaim,
+  bulkUpdateProfileClaims,
+  getProfileMemory,
+  computeReadiness,
+  getReadinessHistory,
   deleteAccountData,
 };
