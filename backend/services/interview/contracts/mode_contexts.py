@@ -28,6 +28,7 @@ class ResumeProbeContext(BaseModel):
 class JdFitContext(BaseModel):
     required_skills: List[str] = Field(default_factory=list)
     nice_to_have_skills: List[str] = Field(default_factory=list)
+    typed_requirements: List[Dict[str, Any]] = Field(default_factory=list)
     candidate_strengths: List[str] = Field(default_factory=list)
     candidate_gaps: List[str] = Field(default_factory=list)
     probing_areas: List[str] = Field(default_factory=list)

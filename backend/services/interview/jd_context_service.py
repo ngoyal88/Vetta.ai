@@ -1,16 +1,17 @@
-import json
 from typing import Any, Dict, List, Optional
 
 from services.interview.llm_engine import LLMEngine
 from services.interview.prompt_contracts import extract_json_dict
+from services.jd_fit.jd_fit_weights import MIN_JD_CHARS
+from services.jd_fit.resume_skills import flatten_resume_skills
 from utils.logger import get_logger
 
 logger = get_logger("JDContextService")
 
 INTERVIEW_FOCUS_VALUES = {"mixed", "technical", "behavioral", "system_design", "dsa"}
 
-# Only run JD-specific LLM extraction when the user supplied meaningful posting text.
-MIN_JD_CHARS_FOR_LLM = 40
+# Backward-compatible alias for interview callers.
+MIN_JD_CHARS_FOR_LLM = MIN_JD_CHARS
 
 
 def clean_optional_text(value: Optional[str], max_len: int = 8000) -> Optional[str]:
@@ -31,6 +32,39 @@ def _safe_list(value: Any, limit: int = 8) -> List[str]:
     return out[:limit]
 
 
+def _safe_typed_requirements(value: Any, fallback: Dict[str, Any], limit: int = 16) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    if isinstance(value, list):
+        for idx, item in enumerate(value[:limit]):
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or item.get("requirement") or "").strip()[:220]
+            category = str(item.get("category") or "technical_skill").strip()
+            if not text:
+                continue
+            rows.append(
+                {
+                    "id": str(item.get("id") or f"req_{idx + 1}").strip()[:80],
+                    "category": category,
+                    "text": text,
+                    "importance": str(item.get("importance") or "required").strip(),
+                    "strictness": str(item.get("strictness") or "flexible").strip(),
+                    "funnel_stage": str(item.get("funnel_stage") or "hm_review").strip(),
+                    "weight": item.get("weight", 0.05),
+                    "is_hard_gate": bool(item.get("is_hard_gate", False)),
+                }
+            )
+    if rows:
+        return rows
+
+    from services.jd_fit.typed_requirement_alignment import fallback_typed_requirements
+
+    return [req.model_dump() for req in fallback_typed_requirements(
+        fallback.get("required_skills") or [],
+        fallback.get("nice_to_have_skills") or [],
+    )][:limit]
+
+
 def _merge_jd_context(parsed: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
     """Keep LLM output but backfill empty list fields from deterministic fallback."""
     list_limits = {
@@ -48,24 +82,12 @@ def _merge_jd_context(parsed: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[
         merged[key] = parsed_vals or fallback_vals
     summary = str(parsed.get("summary") or "").strip()[:600]
     merged["summary"] = summary or str(fallback.get("summary") or "").strip()[:600]
+    merged["typed_requirements"] = _safe_typed_requirements(parsed.get("typed_requirements"), merged)
     return merged
 
 
 def _resume_skills(resume_data: Optional[Dict[str, Any]]) -> List[str]:
-    if not isinstance(resume_data, dict):
-        return []
-    raw_skills = resume_data.get("skills")
-    skills: List[str] = []
-    if isinstance(raw_skills, dict):
-        for key in ("languages", "frameworks", "databases", "cloud", "tools", "ml_ai", "other"):
-            skills.extend([s.strip() for s in raw_skills.get(key) or [] if isinstance(s, str) and s.strip()])
-    elif isinstance(raw_skills, list):
-        for item in raw_skills:
-            if isinstance(item, str) and item.strip():
-                skills.append(item.strip())
-            elif isinstance(item, dict) and isinstance(item.get("name"), str):
-                skills.append(item["name"].strip())
-    return list(dict.fromkeys(skills))[:20]
+    return flatten_resume_skills(resume_data)[:20]
 
 
 def _role_probing_hints(target_role: str, interview_focus: str) -> List[str]:
@@ -142,9 +164,22 @@ def _fallback_context(
 
     company_bit = f" at {target_company}" if target_company else ""
     jd_bit = " Job posting provided." if jd_text else " No job posting; using role and resume context."
+    from services.jd_fit.typed_requirement_alignment import (
+        ensure_experience_requirements,
+        normalize_typed_requirements,
+    )
+
+    typed_requirements = ensure_experience_requirements(
+        normalize_typed_requirements(
+            _safe_typed_requirements([], {"required_skills": required, "nice_to_have_skills": []}),
+        ),
+        jd_text,
+        target_role,
+    )
     return {
         "required_skills": required,
         "nice_to_have_skills": [],
+        "typed_requirements": [req.model_dump() for req in typed_requirements],
         "candidate_strengths": strengths,
         "candidate_gaps": gaps,
         "probing_areas": probing,
@@ -180,11 +215,11 @@ class JDContextService:
             years_experience=years_experience,
         )
         jd_text = (job_description or "").strip()
-        if len(jd_text) < MIN_JD_CHARS_FOR_LLM:
+        if len(jd_text) < MIN_JD_CHARS:
             return fallback
 
         skills = _resume_skills(resume_data)
-        prompt = f"""Return ONLY JSON for a role-targeted interview context.
+        prompt = f"""Return ONLY JSON for a role-targeted interview context and application-fit analysis.
 
 Company: {target_company or ""}
 Role: {target_role}
@@ -198,12 +233,30 @@ JSON schema:
 {{
   "required_skills": [string],
   "nice_to_have_skills": [string],
+  "typed_requirements": [
+    {{
+      "id": string,
+      "category": "technical_skill" | "experience" | "education" | "certification" | "domain" | "seniority" | "location" | "work_authorization" | "language" | "management" | "travel" | "employment_type" | "soft_skill",
+      "text": string,
+      "importance": "required" | "preferred" | "bonus",
+      "strictness": "hard" | "flexible",
+      "funnel_stage": "ats_filter" | "recruiter_screen" | "hm_review",
+      "weight": number,
+      "is_hard_gate": boolean
+    }}
+  ],
   "candidate_strengths": [string],
   "candidate_gaps": [string],
   "probing_areas": [string],
   "interview_plan": [string],
   "summary": string
-}}"""
+}}
+
+Requirement extraction rules:
+- Extract all meaningful JD requirements, not only skills.
+- Mark work authorization, security clearance, mandatory location/onsite, required licenses, required language fluency, and strict required certifications as hard gates.
+- Use "unknown" only later during alignment; extraction should describe the JD requirement itself.
+- Keep weights modest, usually 0.03 to 0.12, with required requirements above preferred requirements."""
         try:
             raw = await self._engine.generate_raw(prompt, 0.25, empty_fallback="{}")
             parsed = extract_json_dict(raw)

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewSession, InterviewType
+from services.jd_fit.jd_fit_repository import get_snapshot_for_user
 from services.profile_memory.profile_claims_repository import get_profile_memory_summary
 from services.interview.contracts.session_events import SessionEvent, SessionEventType, SessionStateMachine
 from services.interview.jd_context_service import INTERVIEW_FOCUS_VALUES, clean_optional_text
@@ -32,6 +33,7 @@ class StartInterviewRequest(BaseModel):
     target_role: Optional[str] = None
     job_description: Optional[str] = None
     interview_focus: Optional[str] = "mixed"
+    jd_fit_snapshot_id: Optional[str] = None
 
 
 def extract_candidate_name(resume_data: Optional[dict]) -> Optional[str]:
@@ -101,6 +103,22 @@ async def start_interview_session(
                 "interview_focus must be one of: mixed, technical, behavioral, system_design, dsa",
             )
 
+    snapshot_data: Optional[Dict[str, Any]] = None
+    snapshot_id = (request.jd_fit_snapshot_id or "").strip() or None
+    if snapshot_id:
+        snapshot_data = await get_snapshot_for_user(uid, snapshot_id)
+        if not snapshot_data:
+            logger.warning("jd_fit_snapshot_id not found for uid=%s id=%s", uid, snapshot_id)
+        elif request.interview_type == InterviewType.ROLE_TARGETED:
+            if not target_role and snapshot_data.get("target_role"):
+                target_role = clean_optional_text(str(snapshot_data.get("target_role")), max_len=160)
+            stored_jd = snapshot_data.get("job_description")
+            if not job_description and isinstance(stored_jd, str) and stored_jd.strip():
+                job_description = clean_optional_text(stored_jd, max_len=8000)
+            stored_company = snapshot_data.get("target_company")
+            if not target_company and isinstance(stored_company, str) and stored_company.strip():
+                target_company = clean_optional_text(stored_company, max_len=120)
+
     caps = get_mode_capabilities(request.interview_type)
     if not caps.enabled:
         raise HTTPException(400, f"{request.interview_type.value} mode is currently disabled")
@@ -119,6 +137,8 @@ async def start_interview_session(
         interview_focus=interview_focus,
     )
     jd_fit_context = start_payload["jd_fit_context"]
+    if snapshot_data and isinstance(snapshot_data.get("jd_fit_context"), dict):
+        jd_fit_context = snapshot_data["jd_fit_context"]
     resume_probe_context = start_payload["resume_probe_context"]
     target_context = start_payload["target_context"] or {}
     profile_memory_summary = await get_profile_memory_summary(uid)

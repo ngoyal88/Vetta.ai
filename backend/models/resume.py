@@ -78,6 +78,7 @@ class SkillsByCategory(BaseModel):
 class EducationRecord(BaseModel):
     degree: Optional[str] = None
     field: Optional[str] = None
+    minor: Optional[str] = None
     institution: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
