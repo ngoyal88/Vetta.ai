@@ -9,55 +9,21 @@ import docx
 from docx.oxml.ns import qn
 
 from firebase_config import db
-from models.resume import ParsedResumeResponse, ResumeProfile
+from models.resume import (
+    AchievementItem,
+    EducationRecord,
+    ParsedResumeResponse,
+    ProjectItem,
+    ResumeProfile,
+)
 from services.interview.llm_engine import get_platform_llm
-
-def parse_resume(file_bytes: bytes, filename: str) -> Dict[str, Any]:
-    """
-    Robust resume parser for PDF/DOCX/TXT files, tailored for tech resumes.
-    Returns Affinda-style structure for easy plug-in to your workflow.
-    """
-    text = extract_text(file_bytes, filename)
-    text = (text or "").replace("\x00", "").strip()
-    if len(text) < 20:
-        raise ValueError(
-            "No readable text could be extracted from the file. "
-            "If this is a scanned/image PDF, please upload a text-based PDF or a DOCX."
-        )
-    sections = split_sections(text)
-    email, phone = extract_contact(text)
-    name = extract_name(text, email)
-    skills = extract_skills(sections)
-    education = extract_education(sections)
-    projects = extract_projects(sections)
-    work_experience = extract_experience(sections)
-    achievements = extract_achievements(sections)
-    summary = extract_summary(sections, text)
-
-    return {
-        "data": {
-            "name": {
-                "raw": name,
-                "first": name.split()[0] if name else "",
-                "last": " ".join(name.split()[1:]) if name and len(name.split()) > 1 else "",
-            },
-            "phoneNumbers": [phone] if phone else [],
-            "emails": [email] if email else [],
-            "skills": [{"name": s} for s in skills],
-            "workExperience": work_experience,
-            "education": education,
-            "projects": projects,
-            "achievements": achievements,
-            "summary": summary,
-            "rawText": text
-        },
-        "meta": {
-            "identifier": "custom_parser_v2",
-            "ready": True,
-            "failed": False
-        }
-    }
-
+from services.resume.resume_postprocess import (
+    dedupe_achievements,
+    merge_education_entries,
+    normalize_education_record,
+    parse_degree_field_minor,
+    sanitize_profile_links_and_skills,
+)
 
 async def parse_resume_llm(
     file_bytes: bytes,
@@ -114,6 +80,7 @@ async def parse_resume_llm(
         "      {\n"
         '        "degree": string or null,\n'
         '        "field": string or null,\n'
+        '        "minor": string or null,\n'
         '        "institution": string or null,\n'
         '        "start_date": string or null,\n'
         '        "end_date": string or null,\n'
@@ -128,7 +95,7 @@ async def parse_resume_llm(
         '        "location": string or null,\n'
         '        "start_date": string or null,\n'
         '        "end_date": string or null,\n'
-        '        "employment_type": string or null,\n'
+        '        "employment_type": "intern" | "full_time" | "part_time" | "contract" | "freelance" | "co_op" | "temporary" | "volunteer" | "other" | null,\n'
         '        "responsibilities": string array,\n'
         '        "tech_stack": string array,\n'
         '        "impact": string array\n'
@@ -157,6 +124,9 @@ async def parse_resume_llm(
         "- Only include skills, tools, frameworks, projects, experience entries, achievements, and publications that are EXPLICITLY mentioned in the resume text.\n"
         "- Do NOT guess or infer technologies or companies that are not clearly present.\n"
         "- Keep strings concise; do not paraphrase entire paragraphs.\n"
+        "- For each work_experience row, set employment_type to one of the allowed enum values "
+        "when the resume explicitly states it (e.g. in title, company line, or dates). "
+        "Use null when not stated — do not guess.\n"
     )
 
     # Keep under Groq on-demand TPM limits when combined with the large system prompt.
@@ -203,6 +173,8 @@ async def parse_resume_llm(
     profile.skills.ml_ai = _filter_list(profile.skills.ml_ai)
     profile.skills.other = _filter_list(profile.skills.other)
 
+    sections = split_sections(raw_text)
+
     # Filter projects: require name or a key phrase from description to appear
     filtered_projects = []
     for p in profile.projects:
@@ -216,6 +188,9 @@ async def parse_resume_llm(
             filtered_projects.append(p)
     profile.projects = filtered_projects
 
+    _enrich_profile_education(profile, sections)
+    _enrich_profile_projects(profile, sections)
+
     # Filter work experience: require company or title to appear
     filtered_experience = []
     for w in profile.work_experience:
@@ -223,13 +198,21 @@ async def parse_resume_llm(
             filtered_experience.append(w)
     profile.work_experience = filtered_experience
 
+    fallback_achievements = [AchievementItem(**item) for item in extract_achievements(sections)]
+    profile.achievements = dedupe_achievements([*profile.achievements, *fallback_achievements])
+
     # Filter achievements and publications by title
     profile.achievements = [
-        a for a in profile.achievements if _in_text(a.title, text_norm)
+        a
+        for a in profile.achievements
+        if _in_text(a.title, text_norm)
+        or (a.description and _in_text(a.description[:64], text_norm))
     ]
     profile.publications = [
         p for p in profile.publications if _in_text(p.title, text_norm)
     ]
+
+    sanitize_profile_links_and_skills(profile)
 
     # Normalize years_experience / seniority if clearly invalid
     if profile.years_experience is not None and profile.years_experience < 0:
@@ -367,7 +350,7 @@ def split_sections(text: str) -> Dict[str, List[str]]:
         'education': ['education', 'coursework'],
         'projects': ['projects', 'research', 'research projects'],
         'skills': ['technical skills', 'skills', 'technologies', 'languages', 'libraries & frameworks', 'developer tools'],
-        'achievements': ['achievements', 'awards', 'certifications'],
+        'achievements': ['achievement', 'achievements', 'awards', 'certifications'],
         'work': ['experience', 'work experience', 'internship', 'positions', 'employment', 'professional experience'],
         'summary': ['summary', 'about', 'profile'],
     }
@@ -402,128 +385,222 @@ def split_sections(text: str) -> Dict[str, List[str]]:
     if not sections: sections['full'] = lines
     return sections
 
-def extract_contact(text: str) -> tuple[str, str]:
-    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
-    phone_match = re.search(
-        r"(\+91|0)?[\s\-]?\d{10,12}|\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}",
-        text.replace('\n', ' ')
-    )
-    email = email_match.group(0) if email_match else ""
-    phone = phone_match.group(0).strip() if phone_match else ""
-    return (email, phone)
-
-def extract_name(text: str, email: str) -> str:
-    # Heuristic: pick first non-empty line that's not contact info
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    email_user = email.split('@')[0] if email else ""
-    for l in lines:
-        if email and email in l: continue
-        if re.search(r'\d', l): continue
-        if len(l.split()) > 1 and len(l) < 40 and all(w[0].isupper() for w in l.split() if w[0].isalpha()):
-            return l
-    # fallback: username part of email
-    if email_user:
-        return " ".join(email_user.split(".")).title()
-    return ""
-
-def extract_skills(sections: Dict[str, List[str]]) -> List[str]:
-    # Hard-coded tech keyword database for demo; can be expanded
-    skills_db = [
-        'python', 'c', 'c++', 'golang', 'javascript', 'sql', 'matlab', 'r', 'java', 'streamlit', 'pytorch',
-        'lstm', 'librosa', 'react', 'redux', 'html', 'css', 'mongodb', 'faiss', 'firebase', 'aws', 'docker',
-        'redis', 'fastapi', 'flask', 'node.js', 'passport.js', 'bootstrap', 'tailwindcss', 'xgboost', 'lightgbm',
-        'opencv', 'numpy', 'pandas', 'matplotlib', 'seaborn', 'postman', 'github', 'git', 'xcode', 'figma', 'chakra ui'
-    ]
-    found = set()
-    skilltext = ' '.join(sections.get('skills', [])) or ' '.join(sections.get('full', []))
-    skilltext = skilltext.lower()
-    for s in skills_db:
-        if s.lower() in skilltext:
-            found.add(s)
-    return sorted(found)
-
 def extract_education(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
-    items = []
-    edu_lines = sections.get('education', []) or []
-    for l in edu_lines:
-        if not l: continue
-        degree = ""
-        institution = ""
-        year = ""
-        cgpa = ""
-        # find degree
-        match_deg = re.search(r"(bachelor.*|master.*|ph\.?d|diploma.*|degree.*|in.*engineering)", l, re.I)
-        if match_deg:
-            degree = match_deg.group(0)
-        # find institution
-        inst = re.search(r"(university|institute|college|school|thapar.*?)", l, re.I)
-        if inst:
-            institution = inst.group(0)
-        # year or CGPA
-        year_match = re.search(r"(20\d{2}|19\d{2})", l)
-        if year_match:
-            year = year_match.group(0)
-        cgpa_match = re.search(r"(cgpa\s*[:\-]?\s*[\d\.]+)", l, re.I)
-        if cgpa_match:
-            cgpa = cgpa_match.group(0)
-        items.append({
-            "degree": degree or l,
-            "institution": institution,
-            "dates": year if year else "",
-            "cgpa": cgpa if cgpa else ""
-        })
-    return items
+    items: List[Dict[str, Any]] = []
+    current: Dict[str, Any] | None = None
+    edu_lines = sections.get("education", []) or []
+
+    def _flush() -> None:
+        nonlocal current
+        if current and any(current.get(key) for key in ("degree", "field", "minor", "institution", "dates", "cgpa")):
+            items.append(normalize_education_record(current))
+        current = None
+
+    for raw_line in edu_lines:
+        if not raw_line:
+            continue
+        line = raw_line.strip()
+        lower = line.lower()
+        has_degree = bool(re.search(r"(bachelor|master|ph\.?d|b\.?e\.?|b\.?tech|m\.?tech|degree)", lower))
+        has_institution = bool(re.search(r"\b(university|institute|college|school)\b", lower))
+        has_year = bool(re.search(r"(20\d{2}|19\d{2})", line))
+        has_cgpa = bool(re.search(r"(cgpa|gpa)\s*[:\-]?\s*[\d\.]+", line, re.I))
+
+        if current and has_cgpa and not current.get("cgpa"):
+            cgpa_match = re.search(r"((?:cgpa|gpa)\s*[:\-]?\s*[\d\.]+(?:/\d+(?:\.\d+)?)?)", line, re.I)
+            if cgpa_match:
+                current["cgpa"] = cgpa_match.group(1)
+            continue
+
+        if current and has_year and not (has_degree or has_institution):
+            date_match = re.findall(r"(20\d{2}|19\d{2}|present|current)", line, re.I)
+            if date_match:
+                current["dates"] = " - ".join(date_match[:2]) if len(date_match) > 1 else date_match[0]
+            continue
+
+        if has_institution and not has_degree and " in " not in lower:
+            _flush()
+            parts = [part.strip() for part in line.split(",")]
+            head = parts[0]
+            institution_match = re.search(
+                r"([A-Z][A-Za-z&\-\.\s]+(?:University|Institute|College|School)(?:\s+of\s+[A-Za-z&\-\.\s]+)?(?:\s+and\s+[A-Za-z&\-\.\s]+)?)",
+                head,
+            )
+            current = {
+                "degree": "",
+                "field": "",
+                "minor": "",
+                "institution": institution_match.group(1).strip(" ,.-") if institution_match else head,
+                "dates": "",
+                "cgpa": "",
+                "location": parts[1] if len(parts) > 1 else "",
+            }
+            continue
+
+        if has_degree or " in " in lower:
+            degree, field, minor = parse_degree_field_minor(line)
+            if current is None:
+                current = {
+                    "degree": "",
+                    "field": "",
+                    "minor": "",
+                    "institution": "",
+                    "dates": "",
+                    "cgpa": "",
+                    "location": "",
+                }
+            current["degree"] = degree
+            current["field"] = field
+            current["minor"] = minor
+            date_match = re.findall(r"(20\d{2}|19\d{2}|present|current)", line, re.I)
+            if date_match and not current.get("dates"):
+                current["dates"] = " - ".join(date_match[:2]) if len(date_match) > 1 else date_match[0]
+            cgpa_match = re.search(r"((?:cgpa|gpa)\s*[:\-]?\s*[\d\.]+(?:/\d+(?:\.\d+)?)?)", line, re.I)
+            if cgpa_match and not current.get("cgpa"):
+                current["cgpa"] = cgpa_match.group(1)
+            continue
+
+    _flush()
+    return merge_education_entries(items)
 
 def extract_projects(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
     projects = []
     lines = sections.get('projects', []) or []
-    curr = {}
+    curr: Dict[str, Any] | None = None
+
+    def _flush() -> None:
+        nonlocal curr
+        if curr and any(curr.get(key) for key in ("name", "description", "link", "tech_stack")):
+            curr["description"] = str(curr.get("description") or "").strip()
+            curr["tech_stack"] = list(dict.fromkeys(curr.get("tech_stack") or []))
+            projects.append(curr)
+        curr = None
+
+    def _looks_like_project_title(line: str) -> bool:
+        if line.startswith(("•", "-")):
+            return False
+        if re.search(r"\b(link|live link|source code)\b", line, re.I):
+            return True
+        if len(line) > 120:
+            return False
+        titleish = re.match(r"^[A-Za-z0-9][A-Za-z0-9\s&+:/().,'-]{3,}$", line)
+        return bool(titleish)
+
+    tech_pattern = re.compile(
+        r"\b(C\+\+|Python|JavaScript|TypeScript|SQL|FastAPI|Node\.js|Express\.js|ReactJS|React|Next\.js|MongoDB|Redis|Firebase|SQLite|GCP|AWS|Docker|LangChain|TensorFlow|PyTorch|scikit-learn|Gemini|Ollama|Vertex AI|Bedrock|WebSockets?)\b",
+        re.I,
+    )
+
     for l in lines:
-        if '|' in l or 'Source Code' in l:
-            if curr: projects.append(curr)
-            curr = {"name": "", "description": "", "technologies": []}
-            # e.g. "IntervueAI | React.js, FastAPI, ..." → extract name/tech
-            parts = l.split('|')
-            curr['name'] = parts[0].strip()
-            if len(parts) > 1:
-                curr['technologies'] = [s.strip() for s in parts[1].split(',') if len(s.strip()) > 0]
+        line = l.strip()
+        if not line:
             continue
-        if l.startswith("•") or l.startswith("-"):
-            desc = l.lstrip("•- ").strip()
-            curr["description"] = curr.get("description", "") + desc + " "
-        elif "Source Code" in l:
-            continue  # skip
-        elif l:
-            if not curr.get("description"):
-                curr["description"] = l
-    if curr: projects.append(curr)
-    # remove empty items
-    return [p for p in projects if p.get("name") or p.get("description")]
+        url_match = re.search(r"(https?://\S+|www\.\S+)", line, re.I)
+        if _looks_like_project_title(line) and (curr is None or curr.get("description") or curr.get("link")):
+            _flush()
+            curr = {
+                "name": "",
+                "description": "",
+                "tech_stack": [],
+                "role": "",
+                "scale": "",
+                "start_date": "",
+                "end_date": "",
+                "link": "",
+            }
 
-def extract_experience(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
-    # For students, "Projects" often overlaps with "Experience" so this returns empty for most resumes like yours.
-    # Otherwise, for professionals, parse as needed.
-    return []
+        if curr is None:
+            curr = {
+                "name": "",
+                "description": "",
+                "tech_stack": [],
+                "role": "",
+                "scale": "",
+                "start_date": "",
+                "end_date": "",
+                "link": "",
+            }
 
-def extract_achievements(sections: Dict[str, List[str]]) -> List[str]:
+        if not curr["name"]:
+            title_line = re.sub(r"\b(Link|Live Link|Source Code)\b.*$", "", line, flags=re.I).strip(" -|")
+            curr["name"] = title_line or line
+
+        if url_match and not curr.get("link"):
+            curr["link"] = url_match.group(1).rstrip(").,")
+
+        for tech in tech_pattern.findall(line):
+            cleaned = tech.strip()
+            if cleaned and cleaned not in curr["tech_stack"]:
+                curr["tech_stack"].append(cleaned)
+
+        if line.startswith(("•", "-")):
+            desc = line.lstrip("•- ").strip()
+            curr["description"] = f"{curr.get('description', '')} {desc}".strip()
+        elif curr.get("name") and line != curr.get("name"):
+            curr["description"] = f"{curr.get('description', '')} {line}".strip()
+
+    _flush()
+    return projects
+
+def extract_achievements(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
     achieves = []
     for l in sections.get("achievements", []):
-        if not l: continue
-        achieves.append(l)
+        if not l:
+            continue
+        line = l.lstrip("•- ").strip()
+        if not line:
+            continue
+        date_match = re.search(r"(20\d{2}|19\d{2})", line)
+        title, description = line, ""
+        if ":" in line:
+            title, description = [part.strip() for part in line.split(":", 1)]
+        elif " - " in line and len(line.split(" - ", 1)[0]) < 80:
+            title, description = [part.strip() for part in line.split(" - ", 1)]
+        achieves.append({
+            "title": title,
+            "description": description,
+            "date": date_match.group(1) if date_match else "",
+        })
     return achieves
 
-def extract_summary(sections: Dict[str, List[str]], text: str) -> str:
-    summ_sect = sections.get("summary", [])
-    if summ_sect:
-        return " ".join(summ_sect[:4])
-    # Fallback: intro lines before Education/Projects/Skills
-    intro_lines = []
-    for l in text.splitlines():
-        l = l.strip()
-        lower = l.lower()
-        if any(header in lower for header in ["education", "projects", "skills", "achievements", "technical skills", "experience"]):
-            break
-        if l and len(l) > 8 and not re.search(r'^\d+$', l):
-            intro_lines.append(l)
-    return " ".join(intro_lines[:3])
+def _enrich_profile_education(profile: ResumeProfile, sections: Dict[str, List[str]]) -> None:
+    """Merge LLM education rows with deterministic section extraction."""
+    fallback = extract_education(sections)
+    if not profile.education:
+        profile.education = [EducationRecord(**item) for item in fallback]
+        return
+
+    normalized: List[EducationRecord] = []
+    for index, record in enumerate(profile.education):
+        merged = {**record.model_dump(), **(fallback[index] if index < len(fallback) else {})}
+        normalized.append(EducationRecord(**normalize_education_record(merged)))
+
+    if len(fallback) > len(normalized):
+        normalized.extend(EducationRecord(**item) for item in fallback[len(normalized):])
+
+    merged_rows = merge_education_entries(item.model_dump() for item in normalized)
+    profile.education = [EducationRecord(**row) for row in merged_rows]
+
+
+def _enrich_profile_projects(profile: ResumeProfile, sections: Dict[str, List[str]]) -> None:
+    """Backfill project fields missing from the LLM output."""
+    fallback = extract_projects(sections)
+    if not profile.projects:
+        profile.projects = [ProjectItem(**item) for item in fallback]
+        return
+
+    enriched: List[ProjectItem] = []
+    for index, project in enumerate(profile.projects):
+        fb = fallback[index] if index < len(fallback) else {}
+        enriched.append(
+            ProjectItem(
+                **{
+                    **project.model_dump(),
+                    "description": project.description or fb.get("description"),
+                    "link": project.link or fb.get("link"),
+                    "tech_stack": project.tech_stack or fb.get("tech_stack", []),
+                }
+            )
+        )
+    profile.projects = enriched
 

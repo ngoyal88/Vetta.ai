@@ -7,6 +7,8 @@ import PairProgrammingPage from 'features/modes/pair-programming/pages/PairProgr
 import PressureModePage from 'features/modes/pressure-mode/pages/PressureModePage';
 import ResumeDeepDivePage from 'features/modes/resume-deep-dive/pages/ResumeDeepDivePage';
 import RoleTargetedPage from 'features/modes/role-targeted/pages/RoleTargetedPage';
+import ApplicationFitHistoryPage from 'features/application-fit/pages/ApplicationFitHistoryPage';
+import ApplicationFitPage from 'features/application-fit/pages/ApplicationFitPage';
 import AnalyticsPage from 'features/dashboard/pages/AnalyticsPage';
 import Dashboard from 'features/dashboard/pages/Dashboard';
 import HistoryPage from 'features/dashboard/pages/HistoryPage';
@@ -80,6 +82,8 @@ export const appRoutes = (
         <Route path="r/:resumeId/:versionId" element={<VaultVersionDetailPage />} />
       </Route>
       <Route path="/profile" element={<SettingsPage />} />
+      <Route path="/application-fit" element={<ApplicationFitPage />} />
+      <Route path="/application-fit/history" element={<ApplicationFitHistoryPage />} />
       <Route path="/signal-intelligence" element={<SignalIntelligencePage />} />
       <Route path="/ai-interview/analytics" element={<AnalyticsPage />} />
       <Route path="/ai-interview/history" element={<HistoryPage />} />

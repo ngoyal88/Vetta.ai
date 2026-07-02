@@ -17,6 +17,63 @@ export interface ResumeSkills {
   other?: string[];
 }
 
+export interface ResumeEducationRecord {
+  degree?: string | null;
+  field?: string | null;
+  minor?: string | null;
+  institution?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  dates?: string | null;
+  cgpa?: string | null;
+  location?: string | null;
+}
+
+export type ResumeEmploymentType =
+  | 'intern'
+  | 'full_time'
+  | 'part_time'
+  | 'contract'
+  | 'freelance'
+  | 'co_op'
+  | 'temporary'
+  | 'volunteer'
+  | 'other';
+
+export interface ResumeWorkExperienceItem {
+  title?: string | null;
+  company?: string | null;
+  organization?: string | null;
+  location?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  employment_type?: ResumeEmploymentType | string | null;
+  responsibilities?: string[];
+  impact?: string[];
+  tech_stack?: string[];
+}
+
+export interface ResumeProjectItem {
+  name?: string | null;
+  title?: string | null;
+  description?: string | null;
+  summary?: string | null;
+  tech_stack?: string[];
+  technologies?: string[];
+  role?: string | null;
+  scale?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  link?: string | null;
+}
+
+export interface ResumeAchievementItem {
+  title?: string | null;
+  name?: string | null;
+  description?: string | null;
+  date?: string | null;
+}
+
 export interface ResumeProfile {
   name?: ResumeName;
   contact?: {
@@ -34,10 +91,10 @@ export interface ResumeProfile {
   years_experience?: number | null;
   seniority_level?: string;
   skills?: ResumeSkills | Array<{ name: string }>;
-  education?: unknown[];
-  work_experience?: unknown[];
-  projects?: unknown[];
-  achievements?: unknown[];
+  education?: ResumeEducationRecord[];
+  work_experience?: ResumeWorkExperienceItem[];
+  projects?: ResumeProjectItem[];
+  achievements?: ResumeAchievementItem[];
   publications?: unknown[];
   weak_areas?: string[];
   raw_text?: string | null;

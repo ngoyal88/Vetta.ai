@@ -15,6 +15,7 @@ export type StartInterviewTargetContext = {
   targetRole?: string | null;
   jobDescription?: string | null;
   interviewFocus?: string | null;
+  jdFitSnapshotId?: string | null;
 };
 
 export type SubmitCodeResponse = {
@@ -280,6 +281,7 @@ const startInterview = async (
       target_role: targetContext.targetRole ?? customRole,
       job_description: targetContext.jobDescription,
       interview_focus: targetContext.interviewFocus,
+      jd_fit_snapshot_id: targetContext.jdFitSnapshotId,
     }),
   });
 

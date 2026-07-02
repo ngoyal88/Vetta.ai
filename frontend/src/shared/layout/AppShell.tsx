@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import {
+  BarChart3,
   Bell,
   BookOpen,
   Folder,
@@ -27,6 +28,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutGrid, end: true },
   { label: 'AI Interview', href: '/ai-interview', icon: Rocket },
   { label: 'Resume Vault', href: '/resume-vault', icon: Folder },
+  { label: 'Application Fit', href: '/application-fit', icon: BarChart3 },
   { label: 'Signal', href: '/signal-intelligence', icon: Sparkles },
 ];
 

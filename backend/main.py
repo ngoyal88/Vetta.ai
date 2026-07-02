@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import get_settings
-from routes import contact, livekit, vault
+from routes import contact, jd_fit, livekit, vault
 from routes.interview import router as interview_router
 from services.interview import InterviewService
 from utils.cors import apply_cors_headers
@@ -188,6 +188,7 @@ async def access_log(request: Request, call_next):
 
 
 app.include_router(vault.router)
+app.include_router(jd_fit.router)
 app.include_router(livekit.router)
 app.include_router(contact.router)
 app.include_router(interview_router)

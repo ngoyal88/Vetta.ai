@@ -18,6 +18,7 @@ _USER_SUBCOLLECTIONS = (
     "vault",
     "vault_meta",
     "readiness_snapshots",
+    "jd_fit_snapshots",
 )
 
 

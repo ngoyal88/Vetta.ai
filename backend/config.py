@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     transcript_merge_max_chars: int = 1200
 
     vpm_enabled: bool = True
+    jd_fit_enabled: bool = True
+    jd_fit_semantic_alignment_enabled: bool = True
     vpm_max_accepted_claims: int = 50
     vpm_max_raw_extract: int = 8
     vpm_pipeline_lease_seconds: int = 600

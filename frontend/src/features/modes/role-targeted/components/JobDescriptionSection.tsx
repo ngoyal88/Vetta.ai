@@ -11,6 +11,8 @@ type JobDescriptionSectionProps = {
   onJobDescriptionChange: (value: string) => void;
   onClear: () => void;
   onUploadClick: () => void;
+  onExtractInsights?: () => void;
+  canExtractInsights?: boolean;
 };
 
 export function JobDescriptionSection({
@@ -20,6 +22,8 @@ export function JobDescriptionSection({
   onJobDescriptionChange,
   onClear,
   onUploadClick,
+  onExtractInsights,
+  canExtractInsights = false,
 }: JobDescriptionSectionProps) {
   return (
     <motion.section
@@ -40,13 +44,13 @@ export function JobDescriptionSection({
         </div>
         <button
           type="button"
-          disabled
-          title="Insight extraction is coming soon"
-          className="inline-flex cursor-not-allowed items-center gap-2 rounded-full border border-[var(--border-subtle)] px-3 py-1.5 type-label-sm text-[var(--color-outline)] opacity-70"
+          disabled={!canExtractInsights}
+          onClick={onExtractInsights}
+          title={canExtractInsights ? 'Analyze fit in Application Fit' : 'Enter a role and job description first'}
+          className="inline-flex items-center gap-2 rounded-full border border-[var(--border-subtle)] px-3 py-1.5 type-label-sm text-[var(--color-primary)] transition-colors hover:border-[var(--color-primary)]/40 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Sparkles className="h-4 w-4" aria-hidden />
           Extract insights
-          <span className="dashboard-pill !py-0 !text-[10px]">Soon</span>
         </button>
       </div>
       <p className="type-body-md mt-4 text-[var(--color-on-surface-variant)]">

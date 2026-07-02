@@ -300,11 +300,11 @@ const Dashboard: React.FC = () => {
       },
       {
         id: 'gap-analysis',
-        title: 'Run Gap Analysis',
-        description: 'Execute the initial scan to identify skill gaps.',
+        title: 'Run Application Fit',
+        description: 'Analyze your resume against a target job before you apply.',
         complete: hasGapAnalysis,
-        actionLabel: 'Run Gap Analysis',
-        actionHref: '/ai-interview/analytics',
+        actionLabel: 'Analyze Fit',
+        actionHref: '/application-fit',
       },
     ];
 
