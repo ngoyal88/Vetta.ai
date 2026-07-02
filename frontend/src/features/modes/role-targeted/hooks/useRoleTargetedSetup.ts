@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 import { useAuth } from 'shared/context/AuthContext';
@@ -16,6 +16,8 @@ import { resumeDisplayName } from 'features/modes/shared/utils/resumeDisplayName
 export function useRoleTargetedSetup() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const jdFitSnapshotId = searchParams.get('jd_fit_snapshot_id')?.trim() || null;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { profile: parsedResume, loading: loadingResume } = useActiveVaultResume();
@@ -29,6 +31,13 @@ export function useRoleTargetedSetup() {
   const [showPreCheck, setShowPreCheck] = useState(false);
   const [preCheckSessionId, setPreCheckSessionId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    const presetRole = searchParams.get('target_role');
+    if (presetRole && !role) {
+      setRole(presetRole);
+    }
+  }, [searchParams, role]);
 
   const companyValue = useMemo(() => company.trim(), [company]);
   const roleValue = useMemo(() => role.trim(), [role]);
@@ -142,6 +151,7 @@ export function useRoleTargetedSetup() {
           targetRole: roleValue,
           jobDescription: jdText || null,
           interviewFocus: focusValue,
+          jdFitSnapshotId,
         },
       );
 
@@ -173,6 +183,7 @@ export function useRoleTargetedSetup() {
     focusSelections.length,
     focusValue,
     jobDescription,
+    jdFitSnapshotId,
     navigate,
     parsedResume,
     roleValue,
@@ -214,6 +225,7 @@ export function useRoleTargetedSetup() {
     yoeProgress,
     jdCharCount,
     roleValue,
+    companyValue,
     canLaunch,
     starting,
     showPreCheck,

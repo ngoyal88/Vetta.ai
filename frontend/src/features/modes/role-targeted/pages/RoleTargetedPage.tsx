@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
 import { SetupProgressSteps } from 'features/modes/shared/components/SetupProgressSteps';
@@ -15,7 +15,19 @@ import { useRoleTargetedSetup } from '../hooks/useRoleTargetedSetup';
 
 const RoleTargetedPage: React.FC = () => {
   const reduceMotion = useReducedMotion();
+  const navigate = useNavigate();
   const setup = useRoleTargetedSetup();
+  const canExtractInsights = setup.roleValue.length >= 2 && setup.jobDescription.trim().length >= 40;
+
+  const handleExtractInsights = () => {
+    navigate('/application-fit', {
+      state: {
+        role: setup.roleValue,
+        jobDescription: setup.jobDescription,
+        targetCompany: setup.companyValue,
+      },
+    });
+  };
 
   return (
     <div className="relative min-h-[calc(100vh-4rem)] overflow-hidden pb-14 pt-10">
@@ -86,6 +98,8 @@ const RoleTargetedPage: React.FC = () => {
           onJobDescriptionChange={setup.setJobDescription}
           onClear={setup.clearJobDescription}
           onUploadClick={setup.handleUploadClick}
+          onExtractInsights={handleExtractInsights}
+          canExtractInsights={canExtractInsights}
         />
 
         <CalibrationSection
