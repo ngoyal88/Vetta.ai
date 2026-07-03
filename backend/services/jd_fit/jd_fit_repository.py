@@ -145,6 +145,22 @@ async def list_history(
     return history
 
 
+async def invalidate_user_jd_fit_cache(uid: str) -> None:
+    """Best-effort purge of Redis JD Fit digest cache for a user."""
+    try:
+        client = await get_redis()
+        pattern = f"jd_fit:cache:{uid}:*"
+        cursor = 0
+        while True:
+            cursor, keys = await client.scan(cursor=cursor, match=pattern, count=100)
+            if keys:
+                await client.delete(*keys)
+            if cursor == 0:
+                break
+    except Exception as exc:
+        logger.warning("JD fit cache invalidate failed uid=%s: %s", uid, exc)
+
+
 def build_inputs_digest(
     uid: str,
     target_role: str,
@@ -153,6 +169,7 @@ def build_inputs_digest(
     version_id: Optional[str],
     target_company: Optional[str] = None,
     profile_revision: Optional[str] = None,
+    profile_content_hash: Optional[str] = None,
 ) -> str:
     return inputs_hash(
         uid,
@@ -163,4 +180,5 @@ def build_inputs_digest(
         SCHEMA_VERSION,
         target_company=target_company,
         profile_revision=profile_revision,
+        profile_content_hash=profile_content_hash,
     )

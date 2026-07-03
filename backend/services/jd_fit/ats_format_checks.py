@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import re
+from services.resume.profile_normalizer import profile_snapshot_dict
 from typing import Any, Dict, List
-
 
 def compute_ats_format_warnings(profile: Dict[str, Any]) -> List[str]:
     warnings: List[str] = []
+    canonical = profile_snapshot_dict(profile) if isinstance(profile, dict) else {}
 
-    summary = profile.get("summary") or profile.get("headline") or ""
+    summary = canonical.get("summary") or canonical.get("headline") or ""
     if not isinstance(summary, str) or len(summary.strip()) < 40:
         warnings.append("Summary or headline is missing or very short")
 
-    work = [exp for exp in (profile.get("work_experience") or []) if isinstance(exp, dict)]
+    work = [exp for exp in (canonical.get("work_experience") or []) if isinstance(exp, dict)]
     if not work:
         warnings.append("No work experience section detected")
         return warnings[:5]

@@ -13,12 +13,14 @@ from models.vault import (
     normalize_vault_tag_list,
     normalize_vault_tags,
 )
+from services.resume.profile_normalizer import profile_snapshot_dict
 from services.vault.analysis_service import build_vault_scorecard, generate_diff_summary
 from services.vault import file_storage
 
 
 MAX_RESUMES_PER_USER = 5
 MAX_VERSIONS_PER_RESUME = 5
+MAX_SCORE_HISTORY = 50
 
 
 def _vault_meta_ref(uid: str):
@@ -54,6 +56,24 @@ def _build_score_point(
         action=action,
         role=role,
     ).model_dump()
+
+
+def _cap_score_history(score_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if len(score_history) <= MAX_SCORE_HISTORY:
+        return score_history
+    return score_history[-MAX_SCORE_HISTORY:]
+
+
+def _normalize_version_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = payload.get("profile_snapshot")
+    if isinstance(snapshot, dict) and snapshot:
+        payload = dict(payload)
+        payload["profile_snapshot"] = profile_snapshot_dict(snapshot)
+    return payload
+
+
+def _normalize_entry_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return payload
 
 
 def normalize_tags(raw: Any) -> List[str]:
@@ -112,23 +132,36 @@ async def get_vault_entry(uid: str, resume_id: str) -> Optional[Dict[str, Any]]:
         return None
     payload = snap.to_dict() or {}
     payload.setdefault("id", resume_id)
-    return payload
+    return _normalize_entry_payload(payload)
 
 
-async def create_resume_entry(
+@firestore.transactional
+def _create_resume_entry_txn(
+    transaction: firestore.Transaction,
     uid: str,
     name: str,
     tags: List[str],
     is_active: bool,
 ) -> Dict[str, Any]:
+    meta_ref = _vault_meta_ref(uid)
+    meta_snap = meta_ref.get(transaction=transaction)
+    meta = meta_snap.to_dict() if meta_snap.exists else {}
+    resume_count = int(meta.get("resume_count", 0))
+    if resume_count >= MAX_RESUMES_PER_USER:
+        raise ValueError("resume_limit_reached")
+
     resume_id = str(uuid.uuid4())
     now = _now()
+    active_resume_id = meta.get("active_resume_id")
+    if is_active or not active_resume_id:
+        active_resume_id = resume_id
+
     data = {
         "id": resume_id,
         "user_id": uid,
         "name": normalize_entry_name(name),
         "tags": normalize_tags(tags),
-        "is_active": is_active,
+        "is_active": is_active or not meta.get("active_resume_id"),
         "created_at": now,
         "last_updated": now,
         "current_version_id": None,
@@ -138,8 +171,29 @@ async def create_resume_entry(
         "interview_session_ids": [],
         "avg_interview_score": None,
     }
-    _vault_collection(uid).document(resume_id).set(data)
+    transaction.set(_vault_collection(uid).document(resume_id), data)
+    transaction.set(
+        meta_ref,
+        {
+            "resume_count": resume_count + 1,
+            "active_resume_id": active_resume_id,
+        },
+        merge=True,
+    )
     return data
+
+
+async def create_resume_entry(
+    uid: str,
+    name: str,
+    tags: List[str],
+    is_active: bool,
+) -> Dict[str, Any]:
+    def _run() -> Dict[str, Any]:
+        transaction = db.transaction()
+        return _create_resume_entry_txn(transaction, uid, name, tags, is_active)
+
+    return await asyncio.to_thread(_run)
 
 
 async def add_version(
@@ -153,6 +207,7 @@ async def add_version(
     source_blob: Optional[bytes] = None,
     content_type: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], VaultScorecard]:
+    canonical_snapshot = profile_snapshot_dict(profile_snapshot)
     entry = await get_vault_entry(uid, resume_id)
     if not entry:
         raise ValueError("resume_not_found")
@@ -162,7 +217,6 @@ async def add_version(
         raise ValueError("version_limit_reached")
 
     now = _now()
-    version_number = version_count + 1
     version_id = str(uuid.uuid4())
 
     diff_summary = None
@@ -172,9 +226,9 @@ async def add_version(
             last_snap = _versions_collection(uid, resume_id).document(last_version_id).get()
             if last_snap.exists:
                 prev = (last_snap.to_dict() or {}).get("profile_snapshot") or {}
-                diff_summary = await generate_diff_summary(prev, profile_snapshot)
+                diff_summary = await generate_diff_summary(prev, canonical_snapshot)
 
-    scorecard = await build_vault_scorecard(profile_snapshot, role=role)
+    scorecard = await build_vault_scorecard(canonical_snapshot, role=role)
 
     file_meta: Dict[str, Any] = {
         "source_filename": None,
@@ -203,40 +257,49 @@ async def add_version(
     version_data = {
         "id": version_id,
         "resume_id": resume_id,
-        "version_number": version_number,
+        "version_number": version_count + 1,
         "created_at": now,
         "user_note": user_note or "",
         "score_at_version": scorecard.score,
         "latest_score": scorecard.score,
         "diff_summary": diff_summary,
-        "profile_snapshot": profile_snapshot,
+        "profile_snapshot": canonical_snapshot,
         **file_meta,
     }
 
+    score_point = _build_score_point(
+        version_count + 1,
+        scorecard.score,
+        version_id=version_id,
+        action="upload",
+        role=role,
+        created_at=now,
+    )
+
     try:
-        _versions_collection(uid, resume_id).document(version_id).set(version_data)
-
-        score_history = list(entry.get("score_history") or [])
-        score_history.append(
-            _build_score_point(
-                version_number,
-                scorecard.score,
-                version_id=version_id,
-                action="upload",
-                role=role,
-                created_at=now,
-            )
+        await asyncio.to_thread(
+            _persist_version_txn,
+            uid,
+            resume_id,
+            version_id,
+            version_data,
+            score_point,
+            scorecard,
+            now,
         )
-
-        entry_update = {
-            "current_version_id": version_id,
-            "version_count": version_number,
-            "last_updated": now,
-            "scorecard": scorecard.model_dump(),
-            "score_history": score_history,
-        }
-
-        _vault_collection(uid).document(resume_id).set(entry_update, merge=True)
+        await _invalidate_jd_fit_cache(uid)
+    except ValueError as exc:
+        if str(exc) == "version_limit_reached" and file_meta.get("has_source_file"):
+            await asyncio.to_thread(
+                file_storage.delete_version_file,
+                uid,
+                resume_id,
+                version_id,
+                source_filename,
+                storage_path=file_meta.get("storage_path"),
+                storage_backend=file_meta.get("storage_backend"),
+            )
+        raise
     except Exception:
         if file_meta.get("has_source_file"):
             await asyncio.to_thread(
@@ -250,7 +313,56 @@ async def add_version(
             )
         raise
 
+    version_data["version_number"] = version_count + 1
     return version_data, scorecard
+
+
+@firestore.transactional
+def _persist_version_txn(
+    transaction: firestore.Transaction,
+    uid: str,
+    resume_id: str,
+    version_id: str,
+    version_data: Dict[str, Any],
+    score_point: Dict[str, Any],
+    scorecard: VaultScorecard,
+    now: datetime,
+) -> None:
+    entry_ref = _vault_collection(uid).document(resume_id)
+    entry_snap = entry_ref.get(transaction=transaction)
+    if not entry_snap.exists:
+        raise ValueError("resume_not_found")
+    entry = entry_snap.to_dict() or {}
+    version_count = int(entry.get("version_count", 0))
+    if version_count >= MAX_VERSIONS_PER_RESUME:
+        raise ValueError("version_limit_reached")
+
+    version_number = version_count + 1
+    version_payload = dict(version_data)
+    version_payload["version_number"] = version_number
+
+    score_history = _cap_score_history(list(entry.get("score_history") or []) + [score_point])
+    transaction.set(_versions_collection(uid, resume_id).document(version_id), version_payload)
+    transaction.set(
+        entry_ref,
+        {
+            "current_version_id": version_id,
+            "version_count": version_number,
+            "last_updated": now,
+            "scorecard": scorecard.model_dump(),
+            "score_history": score_history,
+        },
+        merge=True,
+    )
+
+
+async def _invalidate_jd_fit_cache(uid: str) -> None:
+    try:
+        from services.jd_fit.jd_fit_repository import invalidate_user_jd_fit_cache
+
+        await invalidate_user_jd_fit_cache(uid)
+    except Exception:
+        pass
 
 
 async def list_versions(uid: str, resume_id: str) -> List[Dict[str, Any]]:
@@ -269,7 +381,7 @@ async def get_version_for_resume(uid: str, resume_id: str, version_id: str) -> O
     payload = snap.to_dict() or {}
     payload.setdefault("id", version_id)
     payload.setdefault("resume_id", resume_id)
-    return payload
+    return _normalize_version_payload(payload)
 
 
 async def get_version_by_id(uid: str, version_id: str) -> Optional[Dict[str, Any]]:
@@ -281,7 +393,7 @@ async def get_version_by_id(uid: str, version_id: str) -> Optional[Dict[str, Any
                 continue
             payload = doc.to_dict() or {}
             payload.setdefault("id", doc.id)
-            return payload
+            return _normalize_version_payload(payload)
         return None
 
     return await asyncio.to_thread(_read)
@@ -318,6 +430,7 @@ async def restore_version(uid: str, version_id: str, role: Optional[str] = None)
             created_at=now,
         )
     )
+    score_history = _cap_score_history(score_history)
 
     _versions_collection(uid, resume_id).document(version_id).set(
         {"latest_score": scorecard.score},
@@ -344,18 +457,34 @@ async def restore_version(uid: str, version_id: str, role: Optional[str] = None)
 
 
 async def set_active_resume(uid: str, resume_id: str) -> None:
-    entries = await list_vault_entries(uid)
-    if not any(entry["id"] == resume_id for entry in entries):
+    def _run() -> None:
+        transaction = db.transaction()
+        _set_active_resume_txn(transaction, uid, resume_id)
+
+    await asyncio.to_thread(_run)
+
+
+@firestore.transactional
+def _set_active_resume_txn(transaction: firestore.Transaction, uid: str, resume_id: str) -> None:
+    entry_ref = _vault_collection(uid).document(resume_id)
+    if not entry_ref.get(transaction=transaction).exists:
         raise ValueError("resume_not_found")
 
-    batch = db.batch()
-    for entry in entries:
-        ref = _vault_collection(uid).document(entry["id"])
-        batch.set(ref, {"is_active": entry["id"] == resume_id}, merge=True)
-    batch.commit()
+    for doc in _vault_collection(uid).stream(transaction=transaction):
+        ref = doc.reference
+        transaction.set(ref, {"is_active": ref.id == resume_id}, merge=True)
 
-    meta = await get_vault_meta(uid)
-    await set_vault_meta(uid, meta.get("resume_count", 0), resume_id)
+    meta_ref = _vault_meta_ref(uid)
+    meta_snap = meta_ref.get(transaction=transaction)
+    meta = meta_snap.to_dict() if meta_snap.exists else {}
+    transaction.set(
+        meta_ref,
+        {
+            "resume_count": int(meta.get("resume_count", 0)),
+            "active_resume_id": resume_id,
+        },
+        merge=True,
+    )
 
 
 async def update_entry(uid: str, resume_id: str, name: Optional[str], tags: Optional[List[str]]) -> Dict[str, Any]:
@@ -484,6 +613,7 @@ async def update_entry_scorecard(
                 created_at=scorecard.last_analyzed_at,
             )
         )
+    score_history = _cap_score_history(score_history)
     _vault_collection(uid).document(resume_id).set(
         {
             "scorecard": scorecard.model_dump(),

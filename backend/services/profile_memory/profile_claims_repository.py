@@ -153,12 +153,26 @@ def _status_counter_field(status: str) -> Optional[str]:
 
 def _load_keys_for_status(uid: str, status: str) -> Set[str]:
     keys: Set[str] = set()
-    q = _claims_collection(uid).where(filter=firestore.FieldFilter("status", "==", status)).limit(_DEDUP_KEY_LIMIT)
-    for snap in q.stream():
-        row = snap.to_dict() or {}
-        key = str(row.get("normalized_key") or "")
-        if key:
-            keys.add(key)
+    last_doc = None
+    while True:
+        q = _claims_collection(uid).where(filter=firestore.FieldFilter("status", "==", status))
+        if last_doc is not None:
+            q = q.start_after(last_doc)
+        q = q.limit(_DEDUP_KEY_LIMIT)
+        batch = list(q.stream())
+        if not batch:
+            break
+        for snap in batch:
+            row = snap.to_dict() or {}
+            key = str(row.get("normalized_key") or "")
+            if key:
+                keys.add(key)
+            last_doc = snap
+        if len(batch) < _DEDUP_KEY_LIMIT:
+            break
+        if len(keys) >= 10_000:
+            logger.warning("vpm_dedup_keys_hard_cap uid=%s status=%s", uid, status)
+            break
     return keys
 
 
@@ -166,7 +180,7 @@ async def load_dedup_keys(uid: str) -> Tuple[Set[str], Set[str]]:
     def _read():
         accepted = _load_keys_for_status(uid, "accepted")
         rejected = _load_keys_for_status(uid, "rejected")
-        if len(accepted) >= _DEDUP_KEY_LIMIT or len(rejected) >= _DEDUP_KEY_LIMIT:
+        if len(accepted) >= 10_000 or len(rejected) >= 10_000:
             logger.warning("vpm_dedup_keys_truncated uid=%s", uid)
         return accepted, rejected
 

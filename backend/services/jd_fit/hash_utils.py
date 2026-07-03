@@ -33,10 +33,11 @@ def inputs_hash(
     schema_version: int = SCHEMA_VERSION,
     target_company: Optional[str] = None,
     profile_revision: Optional[str] = None,
+    profile_content_hash: Optional[str] = None,
 ) -> str:
     payload = (
         f"{uid}|{normalize_role(role)}|{jd_hash(job_description)}|"
         f"{resume_id or ''}|{version_id or ''}|{normalize_ws((target_company or '').lower())}|"
-        f"{profile_revision or ''}|{schema_version}"
+        f"{profile_revision or ''}|{profile_content_hash or ''}|{schema_version}"
     )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]

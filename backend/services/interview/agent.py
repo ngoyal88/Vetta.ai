@@ -32,11 +32,13 @@ from services.interview.contracts.session_events import (
 )
 from services.profile_memory.profile_claims_service import run_profile_claims_pipeline
 from services.interview.interview_service import InterviewService
+from services.interview.completion_guard import try_begin_completion
 from services.interview.session_conductor import SessionConductor
 from services.interview.transcript_service import attach_transcript_to_session, extract_assistant_transcript_text
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
-from services.interview.session_store import SessionStore
+from services.interview.session_store import SessionStore, deep_merge_session_conductor
+from utils.session_errors import SessionConflictError
 from redis.asyncio import Redis
 
 from livekit.agents import Agent, AgentServer, AgentSession, AutoSubscribe, JobContext, JobProcess, llm
@@ -64,6 +66,7 @@ server.setup_fnc = _prewarm
 
 _worker_redis: Optional[Redis] = None
 _worker_redis_loop: Optional[asyncio.AbstractEventLoop] = None
+_session_locks: Dict[str, asyncio.Lock] = {}
 
 
 def _redis_url() -> str:
@@ -117,7 +120,44 @@ async def _get_session(session_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _session_id_from_key(session_key: str) -> str:
+    return session_key.removeprefix("interview:")
+
+
+def _session_lock(session_id: str) -> asyncio.Lock:
+    lock = _session_locks.get(session_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _session_locks[session_id] = lock
+    return lock
+
+
+async def _mutate_session(
+    session_key: str,
+    mutator,
+    ttl: int = SESSION_TTL,
+    *,
+    max_attempts: int = 4,
+) -> Optional[Dict[str, Any]]:
+    session_id = _session_id_from_key(session_key)
+    async with _session_lock(session_id):
+        store = await _session_store(session_key, ttl=ttl)
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_attempts):
+            try:
+                return await store.update(mutator)
+            except SessionConflictError as exc:
+                last_exc = exc
+                if attempt + 1 >= max_attempts:
+                    raise
+                await asyncio.sleep(0.05 * (attempt + 1))
+        if last_exc:
+            raise last_exc
+    return None
+
+
 async def _update_session(session_key: str, data: Dict[str, Any], ttl: int = SESSION_TTL) -> None:
+    """Full-blob replace — retained for legacy DSA control paths only."""
     try:
         await (await _session_store(session_key, ttl=ttl)).replace(data)
     except Exception as e:
@@ -321,8 +361,16 @@ async def _handle_user_turn(
     question_entry = questions[current_idx] if 0 <= current_idx < len(questions) else {}
     question_text = _extract_question_text(question_entry)
 
-    session_data["session_conductor"] = conductor.serialize()
-    await _update_session(session_key, session_data)
+    serialized = conductor.serialize()
+
+    def _apply_turn(current: Dict[str, Any]) -> Dict[str, Any]:
+        base = dict(current) if isinstance(current, dict) else {}
+        return deep_merge_session_conductor(
+            base,
+            {"session_conductor": serialized},
+        )
+
+    await _mutate_session(session_key, _apply_turn)
 
     asyncio.create_task(
         _run_evaluation_async(
@@ -330,8 +378,6 @@ async def _handle_user_turn(
             transcript=transcript,
             question_text=question_text,
             answer_duration=answer_duration,
-            conductor=conductor,
-            session_data=session_data,
             interview_service=interview_service,
         )
     )
@@ -342,17 +388,26 @@ async def _run_evaluation_async(
     transcript: str,
     question_text: str,
     answer_duration: float,
-    conductor: SessionConductor,
-    session_data: Dict[str, Any],
     interview_service: InterviewService,
 ) -> None:
+    session_key = f"interview:{session_id}"
     try:
+        snapshot = await _get_session(session_key) or {}
+        conductor = SessionConductor.load(snapshot.get("session_conductor"))
         evaluation = await interview_service.evaluate_answer(
             question_text, transcript, answer_duration, conductor.current_code
         )
         conductor.update_from_answer(transcript, evaluation)
-        session_data["session_conductor"] = conductor.serialize()
-        await _update_session(f"interview:{session_id}", session_data)
+        serialized = conductor.serialize()
+
+        def _apply_eval(current: Dict[str, Any]) -> Dict[str, Any]:
+            base = dict(current) if isinstance(current, dict) else {}
+            return deep_merge_session_conductor(
+                base,
+                {"session_conductor": serialized},
+            )
+
+        await _mutate_session(session_key, _apply_eval)
     except Exception as e:
         log.error("Background evaluation failed for %s: %s", session_id, e, exc_info=True)
 
@@ -375,8 +430,16 @@ async def _handle_agent_turn(session_id: str, text: str) -> None:
         gap_ms=merge_gap_ms,
         max_chars=merge_max_chars,
     )
-    session_data["session_conductor"] = conductor.serialize()
-    await _update_session(session_key, session_data)
+    serialized = conductor.serialize()
+
+    def _apply_agent_turn(current: Dict[str, Any]) -> Dict[str, Any]:
+        base = dict(current) if isinstance(current, dict) else {}
+        return deep_merge_session_conductor(
+            base,
+            {"session_conductor": serialized},
+        )
+
+    await _mutate_session(session_key, _apply_agent_turn)
 
 
 def _is_session_active(session: AgentSession) -> bool:
@@ -423,7 +486,18 @@ async def _maybe_restore_stt(session_id: str, ctx: JobContext) -> None:
     session_data["stt_unavailable"] = False
     if not session_data.get("candidate_away_since"):
         session_data["silence_paused"] = False
-    await _update_session(session_key, session_data)
+
+    patch = {
+        "stt_degraded": False,
+        "stt_unavailable": False,
+    }
+    if not session_data.get("candidate_away_since"):
+        patch["silence_paused"] = False
+
+    await _mutate_session(
+        session_key,
+        lambda current: deep_merge_session_conductor(current, patch),
+    )
     await _send_control(ctx.room, {"type": "stt_restored"})
 
 
@@ -723,7 +797,18 @@ async def _handle_skip_question(
     session_data["responses"] = responses
     session_data["current_question_index"] = current_q_index + 1
     session_data["last_updated"] = datetime.now(timezone.utc).isoformat()
-    await _update_session(session_key, session_data)
+
+    def _apply_skip(current: Dict[str, Any]) -> Dict[str, Any]:
+        base = dict(current) if isinstance(current, dict) else {}
+        base.update({
+            "questions": questions,
+            "responses": responses,
+            "current_question_index": current_q_index + 1,
+            "last_updated": session_data["last_updated"],
+        })
+        return base
+
+    await _mutate_session(session_key, _apply_skip)
     await session.say(follow_up_text)
 
 
@@ -738,23 +823,19 @@ async def _handle_end_interview(
     session_data = await _get_session(session_key)
     if not session_data:
         return
-    if session_data.get("status") in {"ended_early", "completed", "incomplete_exit"}:
+
+    worker_redis = await _ensure_redis()
+    begin = await try_begin_completion(session_id, session_data, redis_client=worker_redis)
+    if not begin.proceed:
         return
+
+    session_data = dict(begin.session_data or session_data)
 
     if hasattr(session, "update_options"):
         try:
             await session.update_options(allow_interruptions=False)  # type: ignore[call-arg]
         except Exception:
             pass
-
-    feedback_lock_key = f"feedback_generating:{session_id}"
-    try:
-        redis = await _ensure_redis()
-        acquired = await redis.set(feedback_lock_key, "1", nx=True, ex=120)
-    except Exception:
-        acquired = False
-    if not acquired:
-        return
 
     started_at_raw = session_data.get("started_at")
     started_at = None
@@ -806,7 +887,7 @@ async def _handle_end_interview(
         session_data.get("status", "active"),
         SessionEvent(type=end_event, reason=completion_reason),
     ).value
-    session_data.update({
+    terminal_patch = {
         "status": terminal_state,
         "completion_reason": completion_reason,
         "completed_at": completed_ts,
@@ -816,8 +897,15 @@ async def _handle_end_interview(
         "questions_answered": len(session_data.get("responses", [])),
         "code_problems_attempted": len(session_data.get("code_submissions", [])),
         "live_transcription": session_data.get("live_transcription", []),
-    })
-    await _update_session(session_key, session_data)
+    }
+
+    def _apply_terminal(current: Dict[str, Any]) -> Dict[str, Any]:
+        base = dict(current) if isinstance(current, dict) else {}
+        base.update(terminal_patch)
+        return base
+
+    updated = await _mutate_session(session_key, _apply_terminal) or terminal_patch
+    session_data.update(updated)
 
     async def _run_vpm_task() -> None:
         if not get_settings().vpm_enabled:
@@ -891,21 +979,18 @@ async def _handle_candidate_disconnect(
     if not session_data:
         return
 
-    if session_data.get("status") in {"ended_early", "completed", "incomplete_exit"}:
+    worker_redis = await _ensure_redis()
+    begin = await try_begin_completion(session_id, session_data, redis_client=worker_redis)
+    if not begin.proceed:
         return
 
-    session_data["status"] = SessionStateMachine.transition(
-        session_data.get("status", "active"),
-        SessionEvent(type=SessionEventType.DISCONNECT_TIMEOUT, reason="candidate_disconnected"),
-    ).value
-    session_data["completion_reason"] = "candidate_disconnected"
+    session_data = dict(begin.session_data or session_data)
     completed_ts = datetime.now(timezone.utc).isoformat()
-    session_data["completed_at"] = completed_ts
-    session_data["last_updated"] = completed_ts
     attach_transcript_to_session(session_data)
 
     responses = session_data.get("responses", []) or []
-    if len(responses) >= 2:
+    final_feedback = session_data.get("final_feedback")
+    if len(responses) >= 2 and not final_feedback:
         try:
             started_at_raw = session_data.get("started_at")
             started_at = None
@@ -937,13 +1022,32 @@ async def _handle_candidate_disconnect(
             final_feedback = await asyncio.wait_for(
                 interview_service.generate_final_feedback(feedback_payload), 45.0
             )
-            session_data["final_feedback"] = final_feedback
         except (asyncio.TimeoutError, Exception) as e:
             log.warning("Partial feedback generation failed: %s", e)
+            final_feedback = None
 
-    session_data["questions_answered"] = len(responses)
-    session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
-    await _update_session(session_key, session_data)
+    terminal_state = SessionStateMachine.transition(
+        session_data.get("status", "active"),
+        SessionEvent(type=SessionEventType.DISCONNECT_TIMEOUT, reason="candidate_disconnected"),
+    ).value
+    disconnect_patch = {
+        "status": terminal_state,
+        "completion_reason": "candidate_disconnected",
+        "completed_at": completed_ts,
+        "last_updated": completed_ts,
+        "questions_answered": len(responses),
+        "code_problems_attempted": len(session_data.get("code_submissions", [])),
+    }
+    if final_feedback is not None:
+        disconnect_patch["final_feedback"] = final_feedback
+
+    def _apply_disconnect(current: Dict[str, Any]) -> Dict[str, Any]:
+        base = dict(current) if isinstance(current, dict) else {}
+        base.update(disconnect_patch)
+        return base
+
+    updated = await _mutate_session(session_key, _apply_disconnect) or disconnect_patch
+    session_data.update(updated)
 
     async def _run_vpm_task() -> None:
         if not get_settings().vpm_enabled:
@@ -1135,20 +1239,32 @@ async def entrypoint(ctx: JobContext) -> None:
         if is_stt_error and not likely_llm_provider_failure:
 
             async def _handle_stt_error() -> None:
-                sd = await _get_session(f"interview:{session_id}")
-                if not sd:
-                    return
-                sd["stt_degraded"] = True
-                sd["silence_paused"] = True
                 attempt = int(error_state["count"])
-                await _update_session(f"interview:{session_id}", sd)
+                session_key = f"interview:{session_id}"
+
+                def _mark_degraded(current: Dict[str, Any]) -> Dict[str, Any]:
+                    base = dict(current) if isinstance(current, dict) else {}
+                    if not base:
+                        return base
+                    base["stt_degraded"] = True
+                    base["silence_paused"] = True
+                    return base
+
+                updated = await _mutate_session(session_key, _mark_degraded)
+                if not updated:
+                    return
                 await _send_control(
                     ctx.room, {"type": "reconnecting_stt", "attempt": attempt}
                 )
                 if attempt >= 2:
-                    sd = await _get_session(f"interview:{session_id}") or sd
-                    sd["stt_unavailable"] = True
-                    await _update_session(f"interview:{session_id}", sd)
+                    def _mark_unavailable(current: Dict[str, Any]) -> Dict[str, Any]:
+                        base = dict(current) if isinstance(current, dict) else {}
+                        if not base:
+                            return base
+                        base["stt_unavailable"] = True
+                        return base
+
+                    await _mutate_session(session_key, _mark_unavailable)
                     await _send_control(ctx.room, {"type": "stt_unavailable"})
 
             asyncio.create_task(_handle_stt_error())

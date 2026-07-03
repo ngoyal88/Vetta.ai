@@ -11,6 +11,15 @@ from utils.redis_client import get_redis
 _log = get_logger(__name__)
 _REDIS_RATE_LIMIT_TIMEOUT_SEC = 2.0
 
+# Atomic INCR + EXPIRE on first hit (single Redis round trip).
+_RATE_LIMIT_LUA = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+"""
+
 
 def _client_ip_is_trusted(remote_ip: str, trusted_ips: list[str]) -> bool:
     if not remote_ip or not trusted_ips:
@@ -51,12 +60,11 @@ async def _increment_rate_bucket(bucket: str, limit: int, window_seconds: int) -
     fail_open = get_settings().rate_limit_should_fail_open()
     try:
         client = await get_redis()
-        current = await asyncio.wait_for(client.incr(bucket), timeout=_REDIS_RATE_LIMIT_TIMEOUT_SEC)
-        if current == 1:
-            await asyncio.wait_for(
-                client.expire(bucket, window_seconds),
-                timeout=_REDIS_RATE_LIMIT_TIMEOUT_SEC,
-            )
+        current = await asyncio.wait_for(
+            client.eval(_RATE_LIMIT_LUA, 1, bucket, window_seconds),
+            timeout=_REDIS_RATE_LIMIT_TIMEOUT_SEC,
+        )
+        current = int(current)
         if current > limit:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded")
     except HTTPException:

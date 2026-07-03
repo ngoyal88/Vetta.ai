@@ -52,6 +52,16 @@ def version_file_path(uid: str, resume_id: str, version_id: str, filename: Optio
     return f"users/{uid}/resumes/{resume_id}/{version_id}{ext}"
 
 
+def assert_storage_path_owned(path: str, uid: str) -> str:
+    cleaned = (path or "").strip().replace("\\", "/")
+    if not cleaned or ".." in cleaned.split("/"):
+        raise ValueError("invalid_storage_path")
+    prefix = f"users/{uid}/"
+    if not cleaned.startswith(prefix):
+        raise ValueError("invalid_storage_path")
+    return cleaned
+
+
 def _resolve_storage_path(
     uid: str,
     resume_id: str,
@@ -59,8 +69,8 @@ def _resolve_storage_path(
     filename: Optional[str],
     storage_path: Optional[str],
 ) -> str:
-    if storage_path and storage_path.strip():
-        return storage_path.strip()
+    # Always derive canonical path on read; storage_path is write-only metadata.
+    _ = storage_path
     return version_file_path(uid, resume_id, version_id, filename)
 
 
@@ -74,7 +84,11 @@ def _local_root() -> Path:
 
 
 def _local_file_path(storage_path: str) -> Path:
-    return _local_root() / Path(storage_path)
+    resolved = (_local_root() / Path(storage_path)).resolve()
+    root = _local_root().resolve()
+    if root not in resolved.parents and resolved != root:
+        raise ValueError("invalid_storage_path")
+    return resolved
 
 
 def _resume_prefix(uid: str, resume_id: str) -> str:
@@ -207,6 +221,7 @@ def save_version_file(
         raise ValueError("empty_file")
 
     path = version_file_path(uid, resume_id, version_id, filename)
+    assert_storage_path_owned(path, uid)
     content_type = content_type_for_filename(filename)
     backend = active_storage_backend()
 

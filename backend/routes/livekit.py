@@ -10,6 +10,7 @@ from config import get_settings
 from utils.auth import verify_firebase_token
 from utils.http_errors import raise_internal_error
 from utils.logger import get_logger
+from utils.rate_limit import check_rate_limit
 from utils.redis_client import get_session
 from utils.session_access import require_session_owner
 
@@ -49,9 +50,19 @@ class LiveKitAttachRequest(BaseModel):
 
 
 async def _resolve_session(session_id: str, uid: str) -> Dict[str, Any]:
-    """Load and authorise a session; raises 404/403 on failure."""
+    """Load and authorise a session; raises 404/403/410 on failure."""
     session_data = await get_session(f"interview:{session_id}")
+    if session_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Interview session expired. Please start a new interview.",
+        )
     return require_session_owner(session_data, uid)
+
+
+def _livekit_token_ttl() -> timedelta:
+    session_seconds = int(getattr(settings, "interview_session_ttl_seconds", 7200))
+    return timedelta(seconds=session_seconds + 300)
 
 
 def _agent_name() -> str:
@@ -69,6 +80,7 @@ async def create_livekit_token(
 ) -> LiveKitTokenResponse:
     """Mint a LiveKit room token for the user; room name equals session_id."""
     _require_livekit()
+    await check_rate_limit(uid, "livekit_token", limit=20, window_seconds=60)
 
     room_name = (body.session_id or "").strip()
     if not room_name:
@@ -84,7 +96,7 @@ async def create_livekit_token(
             lk_api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
             .with_identity(uid)
             .with_grants(lk_api.VideoGrants(room_join=True, room=room_name))
-            .with_ttl(timedelta(hours=4))
+            .with_ttl(_livekit_token_ttl())
         )
         if body.dispatch_agent:
             token = token.with_room_config(
@@ -113,6 +125,7 @@ async def livekit_attach(
 ) -> Dict[str, Any]:
     """Acknowledge room join for agent-worker mode."""
     _require_livekit()
+    await check_rate_limit(uid, "livekit_attach", limit=20, window_seconds=60)
 
     session_id = (body.session_id or body.sessionId or "").strip()
     if not session_id:

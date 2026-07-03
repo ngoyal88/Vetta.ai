@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     max_questions_per_interview: int = 15
     dsa_time_limit_minutes: int = 45
     interview_session_ttl_seconds: int = 7200
+    completion_lock_ttl_seconds: int = 180
     transcript_merge_gap_ms: int = 1500
     transcript_merge_max_chars: int = 1200
 

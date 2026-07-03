@@ -9,5 +9,20 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/framer-motion")) {
+            return "framer-motion";
+          }
+          if (id.includes("node_modules/firebase")) {
+            return "firebase";
+          }
+          if (id.includes("node_modules/@sentry")) {
+            return "sentry";
+          }
+        },
+      },
+    },
   },
 });
