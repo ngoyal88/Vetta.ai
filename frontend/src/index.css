@@ -201,34 +201,45 @@ body {
   overflow-y: auto;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
 }
 
 /* ===== Scrollbar ===== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-outline) 52%, transparent) transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: color-mix(in srgb, var(--color-surface-container-low) 18%, transparent);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(79, 219, 200, 0.35);
-  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-outline) 52%, transparent);
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(79, 219, 200, 0.55);
+  background: color-mix(in srgb, var(--color-secondary) 36%, var(--color-outline) 64%);
+  background-clip: padding-box;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 8px;
+  height: 8px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+  background: color-mix(in srgb, var(--color-surface-container-low) 14%, transparent);
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(79, 219, 200, 0.28);
-  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-secondary) 28%, transparent);
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
 }
 
 /* ===== Typography scale (DESIGN.md) ===== */

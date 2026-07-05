@@ -4,6 +4,7 @@ import { Outlet, Route, useSearchParams } from 'react-router-dom';
 import VaultLayout from 'features/vault/layout/VaultLayout';
 import AppShell from 'shared/layout/AppShell';
 import ErrorBoundary from 'shared/components/ErrorBoundary';
+import LoadingSpinner from 'shared/components/LoadingSpinner';
 import PrivateRoute from 'shared/components/PrivateRoute';
 import { useBackendHealth } from 'shared/context/BackendHealthContext';
 
@@ -26,6 +27,7 @@ const VaultCompareResultPage = lazy(() => import('features/vault/pages/VaultComp
 const VaultLibraryPage = lazy(() => import('features/vault/pages/VaultLibraryPage'));
 const VaultVersionsPage = lazy(() => import('features/vault/pages/VaultVersionsPage'));
 const VaultVersionDetailPage = lazy(() => import('features/vault/pages/VaultVersionDetailPage'));
+const ResumeBuilderPage = lazy(() => import('features/resume-builder/pages/ResumeBuilderPage'));
 
 const InterviewRoom = lazy(() => import('features/interview/pages/InterviewRoom'));
 const InterviewRoomLiveKit = lazy(() => import('features/interview/pages/InterviewRoomLiveKit'));
@@ -46,22 +48,11 @@ function useInterviewTransport() {
 }
 
 function RouteFallback() {
-  return (
-    <div className="min-h-[40vh] flex items-center justify-center">
-      <div className="animate-spin h-8 w-8 rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
-    </div>
-  );
+  return <LoadingSpinner size="sm" minHeightClassName="min-h-[40vh]" />;
 }
 
 function InterviewRoomFallback() {
-  return (
-    <div className="min-h-screen bg-base flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <div className="animate-spin h-10 w-10 rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
-        <p className="text-sm text-[var(--cream-3)]">Loading interview...</p>
-      </div>
-    </div>
-  );
+  return <LoadingSpinner size="md" label="Loading interview..." fullScreen />;
 }
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -85,6 +76,8 @@ function PrivateAppShell() {
   );
 }
 
+const resumeBuilderEnabled = import.meta.env.VITE_RESUME_BUILDER_ENABLED === 'true';
+
 export const appRoutes = (
   <>
     <Route element={<PrivateAppShell />}>
@@ -94,6 +87,12 @@ export const appRoutes = (
         <Route path="compare" element={<LazyPage><VaultComparePage /></LazyPage>} />
         <Route path="compare/result" element={<LazyPage><VaultCompareResultPage /></LazyPage>} />
         <Route path="library" element={<LazyPage><VaultLibraryPage /></LazyPage>} />
+        {resumeBuilderEnabled ? (
+          <>
+            <Route path="builder" element={<LazyPage><ResumeBuilderPage /></LazyPage>} />
+            <Route path="builder/:draftId" element={<LazyPage><ResumeBuilderPage /></LazyPage>} />
+          </>
+        ) : null}
         <Route path="r/:resumeId" element={<LazyPage><VaultVersionsPage /></LazyPage>} />
         <Route path="r/:resumeId/:versionId" element={<LazyPage><VaultVersionDetailPage /></LazyPage>} />
       </Route>
