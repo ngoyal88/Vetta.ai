@@ -1,4 +1,4 @@
-import { FolderOpen, GitCompare, type LucideIcon } from 'lucide-react';
+import { FolderOpen, GitCompare, Pencil, type LucideIcon } from 'lucide-react';
 
 export type VaultHubQuickLinkColor = 'teal' | 'primary';
 
@@ -11,6 +11,13 @@ export type VaultHubQuickLink = {
 };
 
 export const VAULT_HUB_QUICK_LINKS: VaultHubQuickLink[] = [
+  {
+    to: '/resume-vault/builder',
+    icon: Pencil,
+    title: 'Build In Vetta',
+    description: 'Create a polished resume draft, refresh the PDF preview, and publish it straight into Vault.',
+    color: 'primary',
+  },
   {
     to: '/resume-vault/compare',
     icon: GitCompare,

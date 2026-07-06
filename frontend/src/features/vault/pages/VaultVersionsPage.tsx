@@ -2,7 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 
 import VaultEditMetaModal from 'features/vault/components/VaultEditMetaModal';
-import { VaultVersionCard, VaultVersionsHeader } from 'features/vault/components/versions';
+import { VaultAddVersionModal, VaultVersionCard, VaultVersionsHeader } from 'features/vault/components/versions';
+import PageLoadingState from 'shared/components/PageLoadingState';
 import { VAULT_VERSIONS_COPY } from 'features/vault/constants/versionsContent';
 import { useVersionsPage } from 'features/vault/hooks/useVersionsPage';
 
@@ -18,6 +19,8 @@ export default function VaultVersionsPage() {
     error,
     refresh,
     editOpen,
+    addVersionOpen,
+    uploadingVersion,
     editName,
     editTags,
     savingMeta,
@@ -26,8 +29,12 @@ export default function VaultVersionsPage() {
     setEditTags,
     openEdit,
     closeEdit,
+    openAddVersion,
+    closeAddVersion,
+    uploadVersion,
     saveMeta,
     previewVersion,
+    openInBuilder,
     downloadVersion,
     compareVersion,
     restoreVersionById,
@@ -61,14 +68,11 @@ export default function VaultVersionsPage() {
         headVersion={headVersion}
         compatScore={compatScore}
         onEdit={openEdit}
+        onAddVersion={openAddVersion}
       />
 
       {loading ? (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="vault-version-card h-80 animate-pulse opacity-60" aria-hidden />
-          ))}
-        </div>
+        <PageLoadingState variant="cards" minHeightClassName="py-6" />
       ) : error ? (
         <div className="glass-panel rounded-xl py-16 text-center">
           <p className="type-body-md text-[var(--color-error)]">{error}</p>
@@ -84,6 +88,15 @@ export default function VaultVersionsPage() {
         <div className="glass-panel rounded-xl border border-dashed border-[var(--border-strong)] py-16 text-center">
           <p className="type-headline-md text-[var(--color-on-surface)]">{copy.emptyTitle}</p>
           <p className="type-body-md mt-2 text-[var(--color-on-surface-variant)]">{copy.empty}</p>
+          {entry ? (
+            <button
+              type="button"
+              onClick={openAddVersion}
+              className="vault-versions-action-btn vault-versions-action-btn--primary mt-6"
+            >
+              {copy.newVersion}
+            </button>
+          ) : null}
         </div>
       ) : (
         <section className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3" aria-label="Resume versions">
@@ -94,6 +107,7 @@ export default function VaultVersionsPage() {
               isCurrent={isCurrentVersion(version)}
               pendingAction={pendingAction}
               onPreview={previewVersion}
+              onOpenInBuilder={openInBuilder}
               onDownload={downloadVersion}
               onCompare={compareVersion}
               onRestore={restoreVersionById}
@@ -103,7 +117,8 @@ export default function VaultVersionsPage() {
       )}
 
       <VaultEditMetaModal
-        entry={editOpen ? entry || null : null}
+        open={editOpen}
+        entry={entry || null}
         editName={editName}
         editTags={editTags}
         saving={savingMeta}
@@ -111,6 +126,14 @@ export default function VaultVersionsPage() {
         onTagsChange={setEditTags}
         onClose={closeEdit}
         onSave={() => void saveMeta()}
+      />
+
+      <VaultAddVersionModal
+        open={addVersionOpen}
+        entry={entry || null}
+        uploading={uploadingVersion}
+        onClose={closeAddVersion}
+        onUpload={uploadVersion}
       />
     </>
   );

@@ -9,6 +9,7 @@ import {
 } from 'features/vault/components/library';
 import { VAULT_LIBRARY_COPY } from 'features/vault/constants/libraryContent';
 import { useLibraryPage } from 'features/vault/hooks/useLibraryPage';
+import PageLoadingState from 'shared/components/PageLoadingState';
 
 export default function VaultLibraryPage() {
   const {
@@ -43,12 +44,7 @@ export default function VaultLibraryPage() {
         />
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-24">
-            <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
-            <p className="type-body-md text-[var(--color-on-surface-variant)]">
-              {VAULT_LIBRARY_COPY.loading}
-            </p>
-          </div>
+          <PageLoadingState variant="list" minHeightClassName="py-8" />
         ) : error ? (
           <div className="glass-panel rounded-xl py-16 text-center">
             <p className="type-body-md text-[var(--color-error)]">{error}</p>

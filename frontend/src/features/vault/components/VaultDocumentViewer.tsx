@@ -112,7 +112,10 @@ export default function VaultDocumentViewer({
       ) : null}
       <div className="vault-document-viewer__canvas">
         {loading ? (
-          <div className="vault-document-viewer__state">Loading document…</div>
+          <div className="vault-document-viewer__state" aria-busy="true" aria-live="polite">
+            <div className="app-shimmer h-[min(70vh,720px)] w-full max-w-3xl rounded-xl" aria-hidden />
+            <span className="sr-only">Loading document</span>
+          </div>
         ) : error ? (
           <div className="vault-document-viewer__state vault-document-viewer__state--error">{error}</div>
         ) : isPdf && blobUrl ? (

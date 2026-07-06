@@ -7,14 +7,13 @@ export type TimestampLike =
 
 export type ResumeName = string | { raw?: string | null } | null;
 
-export interface ResumeSkills {
-  languages?: string[];
-  frameworks?: string[];
-  databases?: string[];
-  cloud?: string[];
-  tools?: string[];
-  ml_ai?: string[];
-  other?: string[];
+import type { ResumeSkillGroup } from 'features/vault/utils/resumeSkills';
+
+export type { ResumeSkillGroup };
+
+export interface ResumeEducationHighlight {
+  label: string;
+  text: string;
 }
 
 export interface ResumeEducationRecord {
@@ -27,6 +26,7 @@ export interface ResumeEducationRecord {
   dates?: string | null;
   cgpa?: string | null;
   location?: string | null;
+  highlights?: ResumeEducationHighlight[];
 }
 
 export type ResumeEmploymentType =
@@ -74,6 +74,13 @@ export interface ResumeAchievementItem {
   date?: string | null;
 }
 
+export interface ResumePublicationItem {
+  title?: string | null;
+  venue?: string | null;
+  year?: string | null;
+  link?: string | null;
+}
+
 export interface ResumeProfile {
   name?: ResumeName;
   contact?: {
@@ -90,12 +97,12 @@ export interface ResumeProfile {
   summary?: string | null;
   years_experience?: number | null;
   seniority_level?: string;
-  skills?: ResumeSkills | Array<{ name: string }>;
+  skills?: ResumeSkillGroup[];
   education?: ResumeEducationRecord[];
   work_experience?: ResumeWorkExperienceItem[];
   projects?: ResumeProjectItem[];
   achievements?: ResumeAchievementItem[];
-  publications?: unknown[];
+  publications?: ResumePublicationItem[];
   weak_areas?: string[];
   raw_text?: string | null;
   [key: string]: unknown;
@@ -127,6 +134,7 @@ export interface VaultEntry {
   user_id?: string;
   name: string;
   tags: string[];
+  origin?: 'upload' | 'builder';
   is_active: boolean;
   created_at?: TimestampLike;
   last_updated?: TimestampLike;
@@ -153,6 +161,12 @@ export interface VaultVersion {
   has_source_file?: boolean;
   storage_path?: string | null;
   storage_backend?: string | null;
+  builder?: {
+    template_id: string;
+    template_version: string;
+    rendered_tex_hash: string;
+    section_layout?: Array<Record<string, unknown>>;
+  } | null;
 }
 
 export interface VaultMeta {

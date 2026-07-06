@@ -65,6 +65,11 @@ function VaultLibraryRow({
               <h3 className="type-body-md truncate font-semibold text-[var(--color-on-surface)]">
                 {entry.name}
               </h3>
+              {entry.origin === 'builder' ? (
+                <span className="rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-primary)]">
+                  Built in Vetta
+                </span>
+              ) : null}
               {isActive ? (
                 <span className="vault-library-row__active-badge">{VAULT_LIBRARY_COPY.activeBadge}</span>
               ) : null}

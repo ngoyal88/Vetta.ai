@@ -224,33 +224,3 @@ export function normalizeAchievements(value: unknown): AchievementPreviewRow[] {
       return urlCount < 2;
     });
 }
-
-export function normalizeSkillGroups(skills: ResumeProfile['skills']): Array<{ label: string; items: string[] }> {
-  if (Array.isArray(skills)) {
-    const items = skills
-      .map((item) => (item && typeof item === 'object' && typeof item.name === 'string' ? item.name : ''))
-      .filter(Boolean);
-    return items.length ? [{ label: 'Skills', items }] : [];
-  }
-
-  if (!skills || typeof skills !== 'object') return [];
-
-  const labelMap: Record<string, string> = {
-    languages: 'Languages',
-    frameworks: 'Development',
-    databases: 'Databases',
-    cloud: 'Cloud',
-    tools: 'Tools',
-    ml_ai: 'Generative AI / ML',
-    other: 'Other',
-  };
-
-  return Object.entries(skills)
-    .map(([key, value]) => ({
-      label: labelMap[key] ?? key.replaceAll('_', ' '),
-      items: Array.isArray(value)
-        ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0 && !isUrlLike(item))
-        : [],
-    }))
-    .filter((group) => group.items.length > 0);
-}

@@ -8,6 +8,23 @@ import {
 import { VAULT_VERSION_DETAIL_COPY } from 'features/vault/constants/versionDetailContent';
 import { useVersionDetailPage } from 'features/vault/hooks/useVersionDetailPage';
 import { formatFileSize } from 'features/vault/utils/versionDetailPresentation';
+import PageLoadingState from 'shared/components/PageLoadingState';
+
+function DocumentPanelSkeleton() {
+  return (
+    <section className="vault-version-detail__document glass-panel space-y-4 p-5">
+      <div className="space-y-2">
+        <div className="app-shimmer h-5 w-48 rounded-md" aria-hidden />
+        <div className="app-shimmer h-3 w-32 rounded-md" aria-hidden />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <div className="app-shimmer h-9 w-28 rounded-lg" aria-hidden />
+        <div className="app-shimmer h-9 w-28 rounded-lg" aria-hidden />
+      </div>
+      <div className="app-shimmer min-h-[50vh] w-full rounded-xl" aria-hidden />
+    </section>
+  );
+}
 
 export default function VaultVersionDetailPage() {
   const copy = VAULT_VERSION_DETAIL_COPY;
@@ -26,6 +43,7 @@ export default function VaultVersionDetailPage() {
     handleReanalyze,
     handleRestore,
     handleSetActive,
+    openInBuilder,
   } = useVersionDetailPage();
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
@@ -63,6 +81,8 @@ export default function VaultVersionDetailPage() {
     );
   }
 
+  const metadataReady = Boolean(version && presentation);
+
   return (
     <div className="vault-version-detail-page">
       <div className="vault-version-detail-page__mobile-tabs lg:hidden">
@@ -81,11 +101,11 @@ export default function VaultVersionDetailPage() {
         ))}
       </div>
 
-      {loading || !version || !presentation ? (
-        <p className="vault-version-detail-page__loading">{copy.loading}</p>
-      ) : (
-        <div className="vault-version-detail-page__layout">
-          <div className={mobileTab === 'insights' ? 'block' : 'hidden lg:block'}>
+      <div className="vault-version-detail-page__layout">
+        <div className={mobileTab === 'insights' ? 'block' : 'hidden lg:block'}>
+          {loading || !metadataReady ? (
+            <PageLoadingState variant="version-detail-insights" minHeightClassName="min-h-[24rem]" />
+          ) : (
             <VaultVersionDetailInsights
               score={presentation.score}
               summaryLine={presentation.summaryLine}
@@ -93,8 +113,13 @@ export default function VaultVersionDetailPage() {
               atsFlags={presentation.atsFlags}
               suggestions={presentation.suggestions}
             />
-          </div>
-          <div className={mobileTab === 'document' ? 'block' : 'hidden lg:block'}>
+          )}
+        </div>
+
+        <div className={mobileTab === 'document' ? 'block' : 'hidden lg:block'}>
+          {loading || !metadataReady || !version || !presentation ? (
+            <DocumentPanelSkeleton />
+          ) : (
             <VaultVersionDetailDocumentPanel
               version={version}
               filename={presentation.filename}
@@ -108,13 +133,14 @@ export default function VaultVersionDetailPage() {
               onReanalyze={() => void handleReanalyze()}
               onRestore={() => void handleRestore()}
               onSetActive={() => void handleSetActive()}
+              onOpenInBuilder={openInBuilder}
               onDownload={version.has_source_file ? handleDownload : undefined}
               onBlobReady={handleBlobReady}
               onFileSize={handleFileSize}
             />
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@ export const VAULT_VERSIONS_COPY = {
   loading: 'Loading versions…',
   retry: 'Retry',
   emptyTitle: 'No versions yet',
-  empty: 'Upload a new version from the resume hub to start building history.',
+  empty: 'Upload a new version to start building history for this resume.',
   notFound: 'Resume not found',
   backToLibrary: 'Back to Library',
   invalidResume: 'Invalid resume',

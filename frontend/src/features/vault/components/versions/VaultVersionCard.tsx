@@ -18,6 +18,7 @@ type VaultVersionCardProps = {
   onDownload: (version: VaultVersion) => void;
   onCompare: (version: VaultVersion) => void;
   onRestore: (versionId: string) => void;
+  onOpenInBuilder: (versionId: string) => void;
 };
 
 function VaultVersionCard({
@@ -28,6 +29,7 @@ function VaultVersionCard({
   onDownload,
   onCompare,
   onRestore,
+  onOpenInBuilder,
 }: VaultVersionCardProps) {
   const copy = VAULT_VERSIONS_COPY;
   const versionLabel = `v${version.version_number}`;
@@ -54,6 +56,11 @@ function VaultVersionCard({
           <span className="type-headline-md text-[var(--color-on-surface)]">{versionLabel}</span>
           {isCurrent ? (
             <span className="vault-version-card__head-badge">{copy.currentHead}</span>
+          ) : null}
+          {version.builder ? (
+            <span className="rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-primary)]">
+              Built in Vetta
+            </span>
           ) : null}
         </div>
       </div>
@@ -109,6 +116,13 @@ function VaultVersionCard({
           </button>
           <button
             type="button"
+            className="vault-version-card__btn vault-version-card__btn--secondary"
+            onClick={() => onOpenInBuilder(version.id)}
+          >
+            Open in Builder
+          </button>
+          <button
+            type="button"
             disabled={!version.has_source_file || isDownloading}
             className="vault-version-card__btn vault-version-card__btn--secondary"
             onClick={() => void onDownload(version)}
@@ -119,6 +133,13 @@ function VaultVersionCard({
         </div>
       ) : (
         <div className="vault-version-card__actions">
+          <button
+            type="button"
+            className="vault-version-card__btn vault-version-card__btn--ghost"
+            onClick={() => onOpenInBuilder(version.id)}
+          >
+            Open in Builder
+          </button>
           <button
             type="button"
             disabled={isComparing}

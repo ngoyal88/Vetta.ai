@@ -10,8 +10,8 @@ import {
   normalizeEducation,
   normalizeLinkItems,
   normalizeProjects,
-  normalizeSkillGroups,
 } from 'features/application-fit/utils/parsedResumePreviewUtils';
+import { normalizeSkillGroups } from 'features/vault/utils/resumeSkills';
 
 type ParsedResumePreviewProps = {
   profile: ResumeProfile | null | undefined;
