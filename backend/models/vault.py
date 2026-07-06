@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -83,6 +83,13 @@ class VaultScorecard(BaseModel):
     last_analyzed_at: datetime
 
 
+class BuilderVersionMetadata(BaseModel):
+    template_id: str
+    template_version: str
+    rendered_tex_hash: str
+    section_layout: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class ResumeVersion(BaseModel):
     id: str
     resume_id: str
@@ -98,6 +105,7 @@ class ResumeVersion(BaseModel):
     has_source_file: bool = False
     storage_path: Optional[str] = None
     storage_backend: Optional[str] = None
+    builder: Optional[BuilderVersionMetadata] = None
 
 
 class VaultEntry(BaseModel):
@@ -105,6 +113,7 @@ class VaultEntry(BaseModel):
     user_id: str
     name: str
     tags: List[str] = Field(default_factory=list)
+    origin: Literal["upload", "builder"] = "upload"
     is_active: bool = False
     created_at: datetime
     last_updated: datetime

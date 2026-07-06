@@ -1,0 +1,38 @@
+{
+  "id": "faangpath_v1",
+  "version": "1.0.0",
+  "display_name": "Classic FAANG",
+  "description": "Compact single-column layout with small-caps section headers, tabular skills, and tight margins — inspired by the FaangPath resume style.",
+  "status": "live",
+  "tags": ["Single column", "ATS-friendly", "Classic"],
+  "preview_asset": "template-faangpath.webp",
+  "supports_flexible_sections": true,
+  "sections": {
+    "projects": {
+      "fields": ["name", "description", "link"]
+    },
+    "education": {
+      "fields": [
+        "institution",
+        "degree",
+        "field",
+        "location",
+        "start_date",
+        "end_date",
+        "highlights",
+        "cgpa"
+      ]
+    },
+    "work_experience": {
+      "fields": [
+        "company",
+        "title",
+        "location",
+        "start_date",
+        "end_date",
+        "responsibilities",
+        "impact"
+      ]
+    }
+  }
+}

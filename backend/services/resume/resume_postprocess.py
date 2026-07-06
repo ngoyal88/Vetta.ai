@@ -227,14 +227,6 @@ def sanitize_profile_links_and_skills(profile: ResumeProfile) -> None:
         cleaned_other.append(text)
     links.other = cleaned_other
 
-    skill_categories = (
-        profile.skills.languages,
-        profile.skills.frameworks,
-        profile.skills.databases,
-        profile.skills.cloud,
-        profile.skills.tools,
-        profile.skills.ml_ai,
-        profile.skills.other,
-    )
-    for category in skill_categories:
-        category[:] = [item for item in category if item and not _looks_like_url(item)]
+    skill_categories = profile.skills
+    for group in skill_categories:
+        group.items[:] = [item for item in group.items if item and not _looks_like_url(item)]

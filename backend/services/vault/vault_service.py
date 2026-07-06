@@ -69,10 +69,13 @@ def _normalize_version_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(snapshot, dict) and snapshot:
         payload = dict(payload)
         payload["profile_snapshot"] = profile_snapshot_dict(snapshot)
+    payload.setdefault("builder", None)
     return payload
 
 
 def _normalize_entry_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(payload)
+    payload.setdefault("origin", "upload")
     return payload
 
 
@@ -122,7 +125,7 @@ async def list_vault_entries(uid: str) -> List[Dict[str, Any]]:
     for doc in _vault_collection(uid).order_by("last_updated", direction=firestore.Query.DESCENDING).stream():
         payload = doc.to_dict() or {}
         payload.setdefault("id", doc.id)
-        entries.append(payload)
+        entries.append(_normalize_entry_payload(payload))
     return entries
 
 
@@ -142,6 +145,7 @@ def _create_resume_entry_txn(
     name: str,
     tags: List[str],
     is_active: bool,
+    origin: str = "upload",
 ) -> Dict[str, Any]:
     meta_ref = _vault_meta_ref(uid)
     meta_snap = meta_ref.get(transaction=transaction)
@@ -161,6 +165,7 @@ def _create_resume_entry_txn(
         "user_id": uid,
         "name": normalize_entry_name(name),
         "tags": normalize_tags(tags),
+        "origin": origin if origin == "builder" else "upload",
         "is_active": is_active or not meta.get("active_resume_id"),
         "created_at": now,
         "last_updated": now,
@@ -188,10 +193,12 @@ async def create_resume_entry(
     name: str,
     tags: List[str],
     is_active: bool,
+    *,
+    origin: str = "upload",
 ) -> Dict[str, Any]:
     def _run() -> Dict[str, Any]:
         transaction = db.transaction()
-        return _create_resume_entry_txn(transaction, uid, name, tags, is_active)
+        return _create_resume_entry_txn(transaction, uid, name, tags, is_active, origin)
 
     return await asyncio.to_thread(_run)
 
@@ -206,6 +213,8 @@ async def add_version(
     source_filename: Optional[str] = None,
     source_blob: Optional[bytes] = None,
     content_type: Optional[str] = None,
+    action: str = "upload",
+    builder_metadata: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], VaultScorecard]:
     canonical_snapshot = profile_snapshot_dict(profile_snapshot)
     entry = await get_vault_entry(uid, resume_id)
@@ -266,12 +275,14 @@ async def add_version(
         "profile_snapshot": canonical_snapshot,
         **file_meta,
     }
+    if builder_metadata:
+        version_data["builder"] = builder_metadata
 
     score_point = _build_score_point(
         version_count + 1,
         scorecard.score,
         version_id=version_id,
-        action="upload",
+        action=action,
         role=role,
         created_at=now,
     )
@@ -370,7 +381,7 @@ async def list_versions(uid: str, resume_id: str) -> List[Dict[str, Any]]:
     for doc in _versions_collection(uid, resume_id).order_by("version_number", direction=firestore.Query.DESCENDING).stream():
         payload = doc.to_dict() or {}
         payload.setdefault("id", doc.id)
-        versions.append(payload)
+        versions.append(_normalize_version_payload(payload))
     return versions
 
 

@@ -1,0 +1,280 @@
+%-------------------------
+% Resume in Latex — Harshibar layout (Jinja)
+% Author : Harshibar
+% Based off of: https://github.com/jakeryang/resume
+% License : MIT
+%------------------------
+
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+
+\definecolor{light-grey}{gray}{0.83}
+\definecolor{dark-grey}{gray}{0.3}
+\definecolor{text-grey}{gray}{.08}
+
+\DeclareRobustCommand{\ebseries}{\fontseries{eb}\selectfont}
+\DeclareTextFontCommand{\texteb}{\ebseries}
+
+\usepackage{contour}
+\usepackage[normalem]{ulem}
+\renewcommand{\ULdepth}{1.8pt}
+\contourlength{0.8pt}
+\newcommand{\myuline}[1]{%
+  \uline{\phantom{#1}}%
+  \llap{\contour{white}{#1}}%
+}
+
+\usepackage{tgheros}
+\renewcommand*\familydefault{\sfdefault}
+\usepackage[T1]{fontenc}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{0in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\titleformat{\section}{
+    \bfseries \vspace{2pt} \raggedright \large
+}{}{0em}{}[\color{light-grey} {\titlerule[2pt]} \vspace{-4pt}]
+
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-1pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-1pt}\item
+    \begin{tabular*}{\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & {\color{dark-grey}\small #2}\vspace{1pt}\\
+      \textit{#3} & {\color{dark-grey} \small #4}\\
+    \end{tabular*}\vspace{-4pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}
+      #1 & {\color{dark-grey} \small #2} \\
+    \end{tabular*}\vspace{-4pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{0pt}}
+
+\color{text-grey}
+
+<% macro date_range(start, end) -%>
+<< (start or '')|latex >><% if start and end %> -- <% endif %>><< (end or '')|latex >>
+<% endmacro -%>
+
+<% macro degree_line(row) -%>
+<< (row.degree or '')|latex >><% if row.field %> in << row.field|latex >><% endif %><% if row.minor %> (minor: << row.minor|latex >>)<% endif %>
+<% endmacro -%>
+
+<% macro skill_category(label, values) -%>
+<% if values and values|length > 0 %>
+     \textbf{<< label|latex >>} {: <% for value in values %><% if not loop.first %>, <% endif %>><< value|latex >><% endfor %>}\vspace{2pt} \\
+<% endif %>
+<% endmacro -%>
+
+\begin{document}
+
+\begin{center}
+    \textbf{\Huge << profile.name|latex >>} \\ \vspace{5pt}
+    \small
+<% set c = profile.contact %>
+<% set links = c.links if c else none %>
+<% set ns = namespace(sep=false) %>
+<% if c and c.phone %>
+<% if ns.sep %> \hspace{1pt} $|$ \hspace{1pt} <% endif %>\Telefon \hspace{2pt} \texttt{<< c.phone|latex >>}<% set ns.sep = true %>
+<% endif %>
+<% if c and c.email %>
+<% if ns.sep %> \hspace{1pt} $|$ \hspace{1pt} <% endif %>\Letter \hspace{2pt} \texttt{<< c.email|latex >>}<% set ns.sep = true %>
+<% endif %>
+<% if links and links.github %>
+<% if ns.sep %> \hspace{1pt} $|$ \hspace{1pt} <% endif %> \hspace{2pt} \texttt{<< links.github|latex >>}<% set ns.sep = true %>
+<% endif %>
+<% if links and links.linkedin %>
+<% if ns.sep %> \hspace{1pt} $|$ \hspace{1pt} <% endif %> \hspace{2pt} \texttt{<< links.linkedin|latex >>}<% set ns.sep = true %>
+<% endif %>
+<% if links and links.portfolio %>
+<% if ns.sep %> \hspace{1pt} $|$ \hspace{1pt} <% endif %>\Mundus \hspace{2pt} \texttt{<< links.portfolio|latex >>}<% set ns.sep = true %>
+<% endif %>
+<% if links %>
+<% for link in links.other or [] %>
+<% if link %>
+<% if ns.sep %> \hspace{1pt} $|$ \hspace{1pt} <% endif %> \hspace{2pt} \texttt{<< link|latex >>}<% set ns.sep = true %>
+<% endif %>
+<% endfor %>
+<% endif %>
+<% if c and c.location %>
+<% if ns.sep %> \hspace{1pt} $|$ \hspace{1pt} <% endif %>\Mundus \hspace{2pt} \texttt{<< c.location|latex >>}
+<% endif %>
+    \\ \vspace{-3pt}
+\end{center}
+
+<% for section in layout %>
+<% if section.kind == 'summary' and profile.summary %>
+\section{<< section.label|latex >>}
+\begin{itemize}[leftmargin=0in, label={}]
+  \small{\item{<< profile.summary|latex >>}}
+\end{itemize}
+<% elif section.kind == 'work_experience' and profile.work_experience %>
+\section{<< section.label|latex >>}
+  \resumeSubHeadingListStart
+<% for row in profile.work_experience %>
+<% if row.company or row.title %>
+    \resumeSubheading
+      {<< (row.company or '')|latex >>}{<< date_range(row.start_date, row.end_date) >>}
+      {<< (row.title or '')|latex >>}{<< (row.location or '')|latex >>}
+<% set bullets = (row.responsibilities or []) + (row.impact or []) %>
+<% if bullets %>
+      \resumeItemListStart
+<% for bullet in bullets %>
+<% if bullet %>
+        \resumeItem{<< bullet|latex >>}
+<% endif %>
+<% endfor %>
+      \resumeItemListEnd
+<% endif %>
+<% endif %>
+<% endfor %>
+  \resumeSubHeadingListEnd
+<% elif section.kind == 'projects' and profile.projects %>
+\section{<< section.label|latex >>}
+    \resumeSubHeadingListStart
+<% for row in profile.projects %>
+<% if row.name or row.description %>
+      \resumeProjectHeading
+          {\textbf{<< (row.name or '')|latex >>}}{<< date_range(row.start_date, row.end_date) >>}
+<% if row.description and row.description.strip() %>
+          \resumeItemListStart
+<% for line in row.description.split('\n') %>
+<% if line.strip() %>
+            \resumeItem{<< line.strip()|latex >>}
+<% endif %>
+<% endfor %>
+          \resumeItemListEnd
+<% endif %>
+<% endif %>
+<% endfor %>
+    \resumeSubHeadingListEnd
+<% elif section.kind == 'education' and profile.education %>
+\section{<< section.label|latex >>}
+  \resumeSubHeadingListStart
+<% for row in profile.education %>
+<% if row.institution or row.degree %>
+    \resumeSubheading
+      {<< (row.institution or '')|latex >>}{<< date_range(row.start_date, row.end_date) >>}
+      {<< degree_line(row) >>}{<< (row.location or '')|latex >>}
+<% set has_edu_items = (row.highlights and row.highlights|length > 0) or row.cgpa %>
+<% if has_edu_items %>
+      \resumeItemListStart
+<% for highlight in row.highlights or [] %>
+<% if highlight.label and highlight.text %>
+        \resumeItem{\textbf{<< highlight.label|latex >>}: << highlight.text|latex >>}
+<% endif %>
+<% endfor %>
+<% if row.cgpa %>
+<% set cgpa_val = (row.cgpa or '')|trim %>
+<% if cgpa_val[:4]|lower == 'cgpa' or cgpa_val[:3]|lower == 'gpa' %>
+        \resumeItem{<< cgpa_val|latex >>}
+<% else %>
+        \resumeItem{\textbf{CGPA}: << cgpa_val|latex >>}
+<% endif %>
+<% endif %>
+      \resumeItemListEnd
+<% endif %>
+<% endif %>
+<% endfor %>
+  \resumeSubHeadingListEnd
+<% elif section.kind == 'skills' and profile.skills %>
+<% set ns = namespace(has=false) %>
+<% for group in profile.skills %>
+<% if group['items'] and group['items']|length > 0 %><% set ns.has = true %><% endif %>
+<% endfor %>
+<% if ns.has %>
+\section{<< section.label|latex >>}
+ \begin{itemize}[leftmargin=0in, label={}]
+    \small{\item{
+<% for group in profile.skills %>
+<% if group['items'] and group['items']|length > 0 %>
+<< skill_category(group['label'] or 'Skills', group['items']) >>
+<% endif %>
+<% endfor %>
+    }}
+ \end{itemize}
+<% endif %>
+<% elif section.kind == 'achievements' and profile.achievements %>
+\section{<< section.label|latex >>}
+  \resumeSubHeadingListStart
+<% for row in profile.achievements %>
+<% if row.title %>
+    \resumeProjectHeading
+        {\textbf{<< row.title|latex >>}}{<< (row.date or '')|latex >>}
+<% if row.description %>
+        \resumeItemListStart
+          \resumeItem{<< row.description|latex >>}
+        \resumeItemListEnd
+<% endif %>
+<% endif %>
+<% endfor %>
+  \resumeSubHeadingListEnd
+<% elif section.kind == 'publications' and profile.publications %>
+\section{<< section.label|latex >>}
+  \resumeSubHeadingListStart
+<% for row in profile.publications %>
+<% if row.title %>
+    \resumeProjectHeading
+        {\textbf{<< row.title|latex >>}}{<< (row.year or '')|latex >>}
+<% if row.venue %>
+        \resumeItemListStart
+          \resumeItem{<< row.venue|latex >>}
+        \resumeItemListEnd
+<% endif %>
+<% endif %>
+<% endfor %>
+  \resumeSubHeadingListEnd
+<% elif section.kind == 'custom' and section.custom_lines %>
+\section{<< section.label|latex >>}
+  \resumeSubHeadingListStart
+    \resumeItemListStart
+<% for line in section.custom_lines %>
+      \resumeItem{<< line|latex >>}
+<% endfor %>
+    \resumeItemListEnd
+  \resumeSubHeadingListEnd
+<% endif %>
+<% endfor %>
+
+\end{document}

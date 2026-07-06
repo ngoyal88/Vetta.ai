@@ -61,7 +61,7 @@ def _normalize_work_experience_entries(raw: Dict[str, Any]) -> List[Dict[str, An
 
 
 def _coerce_profile_dict(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Map legacy Affinda / mixed keys into ResumeProfile-compatible dict."""
+    """Map legacy field aliases into ResumeProfile-compatible dict."""
     data = dict(raw) if isinstance(raw, dict) else {}
     if not data:
         return {}

@@ -1,0 +1,38 @@
+{
+  "id": "professional_v1",
+  "version": "1.0.0",
+  "display_name": "",
+  "description": "Harshibar-inspired single-column layout with sans-serif sections and icon contact row.",
+  "status": "live",
+  "tags": ["Single column", "Compact", "Tech"],
+  "preview_asset": "template-hashibar.webp",
+  "supports_flexible_sections": true,
+  "sections": {
+    "projects": {
+      "fields": ["name", "description", "start_date", "end_date"]
+    },
+    "education": {
+      "fields": [
+        "institution",
+        "degree",
+        "field",
+        "location",
+        "start_date",
+        "end_date",
+        "highlights",
+        "cgpa"
+      ]
+    },
+    "work_experience": {
+      "fields": [
+        "company",
+        "title",
+        "location",
+        "start_date",
+        "end_date",
+        "responsibilities",
+        "impact"
+      ]
+    }
+  }
+}

@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     vpm_enabled: bool = True
     jd_fit_enabled: bool = True
     jd_fit_semantic_alignment_enabled: bool = True
+    resume_builder_enabled: bool = False
     vpm_max_accepted_claims: int = 50
     vpm_max_raw_extract: int = 8
     vpm_pipeline_lease_seconds: int = 600
@@ -117,6 +118,11 @@ class Settings(BaseSettings):
     # Security
     trust_proxy_headers: bool = False
     trusted_proxy_ips: str = "127.0.0.1"
+    compile_service_url: str = "http://127.0.0.1:8001"
+    compile_service_token: str = ""
+    tectonic_bin: str = "tectonic"
+    resume_builder_compile_timeout_s: int = 30
+    resume_builder_max_pdf_bytes: int = 2_097_152
 
     model_config = SettingsConfigDict(
         env_file=".env",

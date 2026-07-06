@@ -15,6 +15,7 @@ from models.resume import (
     ParsedResumeResponse,
     ProjectItem,
     ResumeProfile,
+    SkillGroup,
 )
 from services.interview.llm_engine import get_platform_llm
 from services.resume.resume_postprocess import (
@@ -67,15 +68,12 @@ async def parse_resume_llm(
         '    "summary": string or null,\n'
         '    "years_experience": number or null,\n'
         '    "seniority_level": "junior" | "mid" | "senior" | "lead" | "principal" | "unknown",\n'
-        '    "skills": {\n'
-        '      "languages": string array,\n'
-        '      "frameworks": string array,\n'
-        '      "databases": string array,\n'
-        '      "cloud": string array,\n'
-        '      "tools": string array,\n'
-        '      "ml_ai": string array,\n'
-        '      "other": string array\n'
-        "    },\n"
+        '    "skills": [\n'
+        "      {\n"
+        '        "label": string,\n'
+        '        "items": string array\n'
+        "      }\n"
+        "    ],\n"
         '    "education": [\n'
         "      {\n"
         '        "degree": string or null,\n'
@@ -161,17 +159,15 @@ async def parse_resume_llm(
 
     text_norm = raw_text.lower()
 
-    # Filter skills by category
+    # Filter skill groups against resume text grounding
     def _filter_list(values: List[str]) -> List[str]:
         return [v for v in values if _in_text(v, text_norm)]
 
-    profile.skills.languages = _filter_list(profile.skills.languages)
-    profile.skills.frameworks = _filter_list(profile.skills.frameworks)
-    profile.skills.databases = _filter_list(profile.skills.databases)
-    profile.skills.cloud = _filter_list(profile.skills.cloud)
-    profile.skills.tools = _filter_list(profile.skills.tools)
-    profile.skills.ml_ai = _filter_list(profile.skills.ml_ai)
-    profile.skills.other = _filter_list(profile.skills.other)
+    profile.skills = [
+        SkillGroup(label=group.label, items=_filter_list(group.items))
+        for group in profile.skills
+        if group.label or group.items
+    ]
 
     sections = split_sections(raw_text)
 
