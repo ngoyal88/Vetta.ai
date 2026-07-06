@@ -1,0 +1,273 @@
+/* Resume Builder workspace — imported by ResumeBuilderPage */
+
+.rb-workspace {
+  --rb-panel-radius: 1.25rem;
+}
+
+.rb-toolbar {
+  border-radius: var(--rb-panel-radius);
+  border: 1px solid var(--border-subtle);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--color-surface-container) 72%, transparent) 0%,
+    color-mix(in srgb, var(--bg-0) 88%, transparent) 100%
+  );
+  box-shadow: 0 18px 48px rgba(2, 6, 23, 0.14);
+}
+
+.rb-toolbar__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+  transition: color var(--transition);
+}
+
+.rb-toolbar__back:hover {
+  color: var(--color-primary);
+}
+
+.rb-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--color-surface-container) 55%, transparent);
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+}
+
+.rb-status-pill__dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--color-secondary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-secondary) 22%, transparent);
+}
+
+.rb-status-pill--dirty .rb-status-pill__dot {
+  background: var(--color-warning, #d7a83f);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning, #d7a83f) 24%, transparent);
+}
+
+.rb-template-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.rb-action-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-0) 70%, transparent);
+  padding: 0.35rem;
+}
+
+.rb-panel {
+  border-radius: var(--rb-panel-radius);
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--color-surface-container) 38%, transparent);
+  box-shadow: 0 12px 36px rgba(2, 6, 23, 0.1);
+}
+
+.rb-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 1rem 1.1rem 0.9rem;
+}
+
+.rb-panel__title {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+}
+
+.rb-panel__subtitle {
+  margin-top: 0.2rem;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--color-outline);
+}
+
+.rb-section-list {
+  padding: 0.35rem 0.55rem 0.65rem;
+}
+
+.rb-section-card {
+  border-radius: 0.9rem;
+  border: 1px solid transparent;
+  transition:
+    border-color var(--transition),
+    background-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.rb-section-card + .rb-section-card {
+  margin-top: 0.35rem;
+}
+
+.rb-section-card:hover:not(.rb-section-card--expanded) {
+  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-high) 35%, transparent);
+}
+
+.rb-section-card--expanded {
+  border-color: color-mix(in srgb, var(--color-primary) 32%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-high) 48%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.rb-section-icon {
+  display: inline-flex;
+  height: 2rem;
+  width: 2rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  color: var(--color-primary);
+}
+
+.rb-section-card--expanded .rb-section-icon {
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+.rb-section-body {
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  padding: 1rem 0.85rem 1.15rem 3.15rem;
+}
+
+.rb-preview-panel {
+  overflow: hidden;
+  border-radius: var(--rb-panel-radius);
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--color-surface-container) 42%, transparent);
+  box-shadow: 0 12px 36px rgba(2, 6, 23, 0.1);
+}
+
+.rb-segmented {
+  display: inline-flex;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+  padding: 0.2rem;
+}
+
+.rb-segmented__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 0.55rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-on-surface-variant);
+  transition:
+    background-color var(--transition),
+    color var(--transition),
+    box-shadow var(--transition);
+}
+
+.rb-segmented__btn--active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+
+.rb-preview-stage {
+  min-height: min(72vh, 720px);
+  background:
+    radial-gradient(circle at top, color-mix(in srgb, var(--color-primary) 7%, transparent), transparent 42%),
+    color-mix(in srgb, var(--color-surface-container-low) 88%, transparent);
+  padding: 1.25rem;
+}
+
+.rb-preview-paper {
+  height: min(68vh, 680px);
+  overflow: hidden;
+  border-radius: 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 55%, transparent);
+  background: color-mix(in srgb, white 94%, var(--color-surface-container-high));
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--color-on-surface) 8%, transparent),
+    0 18px 42px rgba(2, 6, 23, 0.22);
+}
+
+.rb-preview-paper iframe {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.rb-preview-empty,
+.rb-latex-empty {
+  display: flex;
+  min-height: min(72vh, 720px);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.rb-preview-empty__icon,
+.rb-latex-empty__icon {
+  display: inline-flex;
+  height: 3rem;
+  width: 3rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--color-surface-container-high) 55%, transparent);
+  color: var(--color-primary);
+}
+
+.rb-latex-block {
+  min-height: min(72vh, 720px);
+  overflow: auto;
+  margin: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-0) 92%, transparent);
+  padding: 1rem 1.1rem 1.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.65;
+  color: var(--color-on-surface);
+  tab-size: 2;
+}
+
+.rb-layout-notes {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--color-warning, #d7a83f) 35%, transparent);
+  background: color-mix(in srgb, var(--color-warning, #d7a83f) 8%, transparent);
+  padding: 0.9rem 1rem;
+}

@@ -1,0 +1,9 @@
+export { default as IdentitySectionForm } from './IdentitySectionForm';
+export { default as SummarySectionForm } from './SummarySectionForm';
+export { default as WorkExperienceSectionForm } from './WorkExperienceSectionForm';
+export { default as EducationSectionForm } from './EducationSectionForm';
+export { default as SkillsSectionForm } from './SkillsSectionForm';
+export { default as ProjectsSectionForm } from './ProjectsSectionForm';
+export { default as AchievementsSectionForm } from './AchievementsSectionForm';
+export { default as PublicationsSectionForm } from './PublicationsSectionForm';
+export { default as CustomSectionForm } from './CustomSectionForm';
