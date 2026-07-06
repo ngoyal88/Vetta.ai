@@ -5,6 +5,7 @@ from models.vault import VaultScorecard
 from services.interview.llm_engine import get_platform_llm
 from services.interview.prompt_contracts import extract_json_dict
 from services.resume.scorecard_service import build_resume_scorecard
+from services.resume.skills_normalizer import flatten_skills_from_profile
 
 
 def _safe_list(value: Any) -> List[str]:
@@ -26,17 +27,7 @@ def _compact_resume_text(profile: Dict[str, Any]) -> str:
     if isinstance(summary, str) and summary.strip():
         parts.append(f"Summary: {summary.strip()}")
 
-    skills = profile.get("skills")
-    skill_list: List[str] = []
-    if isinstance(skills, dict):
-        for key in ("languages", "frameworks", "databases", "cloud", "tools", "ml_ai", "other"):
-            skill_list.extend([s for s in skills.get(key) or [] if isinstance(s, str)])
-    elif isinstance(skills, list):
-        for item in skills:
-            if isinstance(item, dict) and isinstance(item.get("name"), str):
-                skill_list.append(item.get("name"))
-            elif isinstance(item, str):
-                skill_list.append(item)
+    skill_list = flatten_skills_from_profile(profile)
     if skill_list:
         parts.append("Skills: " + ", ".join(skill_list[:40]))
 

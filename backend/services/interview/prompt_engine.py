@@ -5,6 +5,7 @@ from utils.logger import get_logger
 from models.interview import InterviewType
 from services.interview.llm_engine import LLMEngine
 from services.interview.prompt_contracts import build_follow_up_prompt
+from services.resume.skills_normalizer import flatten_skills_from_profile
 
 logger = get_logger("PromptEngine")
 
@@ -53,29 +54,12 @@ Example: "Hello {candidate_name}! Welcome to this {role} interview. I'm excited 
         years_experience: Optional[int] = None,
         target_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Build context from resume data. Supports legacy (list of {name}) and LLM profile (skills dict, projects list of dicts)."""
+        """Build context from resume data."""
         context = ""
 
         if resume_data:
-            raw_skills = resume_data.get("skills")
             raw_projects = resume_data.get("projects") or []
-
-            # Skills: either list of {name: "..."} (legacy) or dict of lists (LLM profile)
-            if isinstance(raw_skills, dict):
-                skills = []
-                for key in ("languages", "frameworks", "databases", "cloud", "tools", "ml_ai", "other"):
-                    part = raw_skills.get(key) or []
-                    skills.extend(s for s in part if isinstance(s, str) and s.strip())
-            elif isinstance(raw_skills, list):
-                skills = []
-                for s in raw_skills:
-                    if isinstance(s, str) and s.strip():
-                        skills.append(s)
-                    elif isinstance(s, dict):
-                        skills.append((s.get("name") or "").strip())
-                skills = [s for s in skills if s]
-            else:
-                skills = []
+            skills = flatten_skills_from_profile(resume_data)
 
             # Projects: list of dicts with "name" or list of strings
             projects = []

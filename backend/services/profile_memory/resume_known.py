@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Set
 
 from services.profile_memory.umbrella_terms import normalize_text
+from services.resume.skills_normalizer import flatten_skills_from_profile
 
 
 def extract_resume_known_items(resume_data: Dict[str, Any]) -> Dict[str, Set[str]]:
@@ -24,21 +25,8 @@ def extract_resume_known_items(resume_data: Dict[str, Any]) -> Dict[str, Set[str
         elif isinstance(project, str) and project.strip():
             known_projects.add(normalize_text(project))
 
-    raw_skills = resume_data.get("skills")
-    if isinstance(raw_skills, dict):
-        for values in raw_skills.values():
-            if isinstance(values, list):
-                for skill in values:
-                    if isinstance(skill, str) and skill.strip():
-                        known_skills.add(normalize_text(skill))
-    elif isinstance(raw_skills, list):
-        for skill in raw_skills:
-            if isinstance(skill, str) and skill.strip():
-                known_skills.add(normalize_text(skill))
-            elif isinstance(skill, dict):
-                name = str(skill.get("name") or "").strip()
-                if name:
-                    known_skills.add(normalize_text(name))
+    for skill in flatten_skills_from_profile(resume_data):
+        known_skills.add(normalize_text(skill))
 
     experience = resume_data.get("work_experience") or resume_data.get("workExperience") or []
     if isinstance(experience, list):

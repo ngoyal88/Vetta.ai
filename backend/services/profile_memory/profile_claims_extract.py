@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 from services.interview.prompt_contracts import execute_json_contract
 from services.profile_memory.models import RawClaim
+from services.resume.skills_normalizer import flatten_skills_from_profile
 
 
 def _normalize_strength(value: Any) -> str:
@@ -54,14 +55,7 @@ def parse_extract_payload(parsed: Any) -> List[RawClaim]:
 def _compact_resume_summary(resume_data: Dict[str, Any]) -> str:
     if not isinstance(resume_data, dict):
         return "none"
-    skills: List[str] = []
-    raw_skills = resume_data.get("skills")
-    if isinstance(raw_skills, dict):
-        for values in raw_skills.values():
-            if isinstance(values, list):
-                skills.extend(str(s) for s in values[:5] if s)
-    elif isinstance(raw_skills, list):
-        skills.extend(str(s) for s in raw_skills[:15] if s)
+    skills: List[str] = flatten_skills_from_profile(resume_data)[:15]
     projects: List[str] = []
     for project in (resume_data.get("projects") or [])[:5]:
         if isinstance(project, dict):

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import re
-from services.resume.profile_normalizer import profile_snapshot_dict
 from typing import Any, Dict, List
+
+from services.resume.profile_normalizer import profile_snapshot_dict
+from services.resume.skills_normalizer import flatten_skills_from_profile
+
 
 def compute_ats_format_warnings(profile: Dict[str, Any]) -> List[str]:
     warnings: List[str] = []
@@ -28,12 +31,7 @@ def compute_ats_format_warnings(profile: Dict[str, Any]) -> List[str]:
     if not recent.get("start_date"):
         warnings.append("Most recent role missing start date")
 
-    skills = profile.get("skills")
-    has_skills = False
-    if isinstance(skills, dict):
-        has_skills = any(isinstance(v, list) and v for v in skills.values())
-    elif isinstance(skills, list):
-        has_skills = bool(skills)
+    has_skills = bool(flatten_skills_from_profile(canonical))
     if not has_skills:
         warnings.append("Skills section appears empty")
 
