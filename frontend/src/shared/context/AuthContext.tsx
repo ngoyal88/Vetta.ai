@@ -17,6 +17,7 @@ import {
   type UserCredential,
 } from "firebase/auth";
 import { auth } from "firebaseConfig";
+import AppIndeterminateBar from "shared/components/AppIndeterminateBar";
 
 type UpdateProfileInput = {
   displayName?: string | null;
@@ -138,18 +139,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {!authReady ? (
-        <div
-          className="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--bg-0)]/80 backdrop-blur-[2px]"
-          aria-busy="true"
-          aria-live="polite"
-        >
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-10 w-10 animate-spin rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
-            <p className="text-sm text-[var(--cream-3)]">Checking auth…</p>
-          </div>
-        </div>
-      ) : null}
+      <AppIndeterminateBar active={!authReady} />
       {children}
     </AuthContext.Provider>
   );

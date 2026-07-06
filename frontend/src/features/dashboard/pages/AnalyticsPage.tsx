@@ -11,6 +11,7 @@ import { fadeUpWithDelay, getHeaderMotion } from 'features/modes/shared/utils/mo
 
 import { useInterviewHistory } from '../hooks/useInterviewHistory';
 import { computeSummary } from '../utils/interviewAnalytics';
+import PageLoadingState from 'shared/components/PageLoadingState';
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
@@ -113,10 +114,7 @@ const AnalyticsPage: React.FC = () => {
         </motion.header>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-24">
-            <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
-            <p className="type-body-md text-[var(--color-on-surface-variant)]">Loading analytics...</p>
-          </div>
+          <PageLoadingState variant="metrics" minHeightClassName="py-6" />
         ) : summary.totalSessions === 0 ? (
           <div className="glass-panel rounded-xl py-20 text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/10 text-[var(--color-primary)]">

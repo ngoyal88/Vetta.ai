@@ -4,7 +4,7 @@ import { Outlet, Route, useSearchParams } from 'react-router-dom';
 import VaultLayout from 'features/vault/layout/VaultLayout';
 import AppShell from 'shared/layout/AppShell';
 import ErrorBoundary from 'shared/components/ErrorBoundary';
-import LoadingSpinner from 'shared/components/LoadingSpinner';
+import PageLoadingState from 'shared/components/PageLoadingState';
 import PrivateRoute from 'shared/components/PrivateRoute';
 import { useBackendHealth } from 'shared/context/BackendHealthContext';
 
@@ -48,11 +48,11 @@ function useInterviewTransport() {
 }
 
 function RouteFallback() {
-  return <LoadingSpinner size="sm" minHeightClassName="min-h-[40vh]" />;
+  return <PageLoadingState variant="shell" minHeightClassName="min-h-[40vh]" />;
 }
 
 function InterviewRoomFallback() {
-  return <LoadingSpinner size="md" label="Loading interview..." fullScreen />;
+  return <PageLoadingState variant="fullscreen" label="Loading interview…" fullScreen />;
 }
 
 function LazyPage({ children }: { children: React.ReactNode }) {
