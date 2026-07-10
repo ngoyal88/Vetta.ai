@@ -8,7 +8,7 @@ from services.resume_builder.models import (
     PublishDraftRequest,
     PublishDraftResponse,
     default_resume_name,
-    validate_identity_fields,
+    validate_publish_profile,
 )
 from services.resume_builder.template_renderer import render_template
 from services.vault.vault_service import (
@@ -47,7 +47,7 @@ async def publish_draft(uid: str, draft_id: str, request: PublishDraftRequest) -
     if not draft:
         raise ValueError("draft_not_found")
 
-    validate_identity_fields(draft.profile)
+    validate_publish_profile(draft.profile, custom_sections=draft.custom_sections)
     tex = render_template(draft.template_id, draft)
     pdf_bytes, _page_count = await compile_preview(tex)
 

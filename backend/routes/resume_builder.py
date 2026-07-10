@@ -12,6 +12,7 @@ from services.resume_builder.compile_client import (
 )
 from services.resume_builder.draft_store import create_draft, delete_draft, get_draft, list_drafts, patch_draft, save_draft
 from services.resume_builder.models import (
+    BuilderValidationError,
     CreateDraftRequest,
     DraftListResponse,
     DraftPatchRequest,
@@ -118,6 +119,8 @@ async def resume_builder_create_draft(
         return DraftResponse(draft=draft)
     except HTTPException:
         raise
+    except BuilderValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -157,6 +160,8 @@ async def resume_builder_save_draft(
             request.model_copy(update={"name": draft_name}),
         )
         return DraftResponse(draft=draft)
+    except BuilderValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
     except ValueError as exc:
         if str(exc) == "draft_not_found":
             raise HTTPException(status_code=404, detail="Draft not found") from exc
@@ -178,6 +183,8 @@ async def resume_builder_patch_draft(
             validate_identity_fields(request.profile)
         draft = await patch_draft(uid, draft_id, request)
         return DraftResponse(draft=draft)
+    except BuilderValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
     except ValueError as exc:
         if str(exc) == "draft_not_found":
             raise HTTPException(status_code=404, detail="Draft not found") from exc
@@ -205,6 +212,8 @@ async def resume_builder_get_latex(draft_id: str, uid: str = Depends(verify_fire
     try:
         tex = render_template(draft.template_id, draft)
         return LatexResponse(tex=tex)
+    except BuilderValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -227,6 +236,8 @@ async def resume_builder_preview(draft_id: str, uid: str = Depends(verify_fireba
             media_type="application/pdf",
             headers={"X-Page-Count": str(page_count)},
         )
+    except BuilderValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CompileRequestError as exc:
@@ -253,6 +264,8 @@ async def resume_builder_publish(
     await check_rate_limit(uid, "resume_builder_publish", limit=10, window_seconds=60)
     try:
         return await publish_draft(uid, draft_id, request)
+    except BuilderValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
     except ValueError as exc:
         message = str(exc)
         if message == "draft_not_found":

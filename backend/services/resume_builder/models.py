@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -163,6 +163,16 @@ class PublishDraftResponse(BaseModel):
     scorecard: dict[str, Any]
 
 
+class BuilderValidationError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+    def as_detail(self) -> dict[str, str]:
+        return {"code": self.code, "message": self.message}
+
+
 def default_resume_name(profile: ResumeProfile) -> str:
     if isinstance(profile.name, str) and profile.name.strip():
         return f"{profile.name.strip()} Resume"
@@ -173,9 +183,101 @@ def validate_identity_fields(profile: ResumeProfile) -> None:
     name = (profile.name or "").strip() if isinstance(profile.name, str) else ""
     email = (profile.contact.email or "").strip() if profile.contact else ""
     if not name:
-        raise ValueError("Name is required")
+        raise BuilderValidationError("identity_name_missing", "Name is required")
     if not email:
-        raise ValueError("Email is required")
+        raise BuilderValidationError("identity_email_missing", "Email is required")
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise BuilderValidationError("identity_email_invalid", "Email must be a valid email address")
+
+
+def has_meaningful_resume_content(
+    profile: ResumeProfile,
+    *,
+    custom_sections: Sequence[BuilderCustomSection] | None = None,
+) -> bool:
+    if isinstance(profile.summary, str) and profile.summary.strip():
+        return True
+    if any(group.label.strip() or any(item.strip() for item in group.items) for group in profile.skills):
+        return True
+    if any(
+        any(
+            isinstance(value, str) and value.strip()
+            for value in [
+                item.name,
+                item.description,
+                item.role,
+                item.scale,
+                item.start_date,
+                item.end_date,
+                item.link,
+            ]
+        )
+        or any(skill.strip() for skill in item.tech_stack)
+        for item in profile.projects
+    ):
+        return True
+    if any(
+        any(
+            isinstance(value, str) and value.strip()
+            for value in [
+                item.title,
+                item.company,
+                item.location,
+                item.start_date,
+                item.end_date,
+                item.employment_type,
+            ]
+        )
+        or any(text.strip() for text in [*item.responsibilities, *item.impact, *item.tech_stack])
+        for item in profile.work_experience
+    ):
+        return True
+    if any(
+        any(
+            isinstance(value, str) and value.strip()
+            for value in [
+                item.degree,
+                item.field,
+                item.minor,
+                item.institution,
+                item.start_date,
+                item.end_date,
+                item.cgpa,
+                item.location,
+            ]
+        )
+        or any((highlight.label.strip() or highlight.text.strip()) for highlight in item.highlights)
+        for item in profile.education
+    ):
+        return True
+    if any(
+        any(isinstance(value, str) and value.strip() for value in [item.title, item.description, item.date])
+        for item in profile.achievements
+    ):
+        return True
+    if any(
+        any(isinstance(value, str) and value.strip() for value in [item.title, item.venue, item.year, item.link])
+        for item in profile.publications
+    ):
+        return True
+    if custom_sections:
+        for section in custom_sections:
+            if (section.title or "").strip() or (section.content or "").strip():
+                return True
+    return False
+
+
+def validate_publish_profile(
+    profile: ResumeProfile,
+    *,
+    custom_sections: Sequence[BuilderCustomSection] | None = None,
+) -> None:
+    validate_identity_fields(profile)
+    if not has_meaningful_resume_content(profile, custom_sections=custom_sections):
+        raise BuilderValidationError(
+            "content_empty_resume",
+            "Add at least one meaningful section beyond identity before publishing.",
+        )
 
 
 def validate_draft_name(name: str) -> str:
