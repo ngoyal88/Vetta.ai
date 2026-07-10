@@ -1,4 +1,5 @@
 import Modal from 'shared/components/Modal';
+import type { BuilderReadinessResult } from '../utils/builderReadiness';
 
 type PublishModalProps = {
   open: boolean;
@@ -9,6 +10,8 @@ type PublishModalProps = {
   userNote: string;
   tags: string;
   setActive: boolean;
+  readiness: BuilderReadinessResult;
+  canPublish: boolean;
   onClose: () => void;
   onPublishModeChange: (mode: 'new' | 'existing') => void;
   onResumeNameChange: (value: string) => void;
@@ -22,12 +25,103 @@ const inputClass =
   'mt-2 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-0)] px-3 py-2.5 text-[var(--color-on-surface)] transition-[border-color,box-shadow] duration-150 hover:border-[var(--color-primary)]/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]';
 
 export default function PublishModal(props: PublishModalProps) {
+  const totalIssues = props.readiness.blocking.length + props.readiness.warnings.length + props.readiness.info.length;
+
   return (
     <Modal open={props.open} onClose={props.onClose} title="Publish Resume">
       <div className="space-y-5 text-[var(--color-on-surface)]">
         <p className="type-body-md text-[var(--color-on-surface-variant)]">
           Publishing creates or updates a Vault resume. Draft changes only become part of Vault after this step.
         </p>
+
+        <section
+          className={[
+            'rounded-[1rem] border p-4',
+            props.canPublish
+              ? 'border-[var(--border-subtle)] bg-[var(--bg-0)]/55'
+              : 'border-[var(--color-error)]/25 bg-[var(--color-error)]/8',
+          ].join(' ')}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="type-label-sm uppercase tracking-[0.14em] text-[var(--color-on-surface)]">Pre-publish review</h3>
+              <p className="mt-1 text-sm text-[var(--color-on-surface-variant)]">
+                {props.canPublish
+                  ? 'You can publish now. Review the warnings below if you want to tighten the resume first.'
+                  : 'Resolve the blocking issues below before publishing to Vault.'}
+              </p>
+            </div>
+            <span className="type-label-sm text-[var(--color-on-surface-variant)]">
+              {props.readiness.strengths.length} strengths · {props.readiness.blocking.length} blocking · {props.readiness.warnings.length} warnings · {props.readiness.info.length} info
+            </span>
+          </div>
+
+          {totalIssues > 0 || props.readiness.strengths.length > 0 ? (
+            <div className="mt-3 space-y-3 text-sm">
+              {props.readiness.strengths.length ? (
+                <div>
+                  <p className="font-semibold text-[var(--color-on-surface)]">What&apos;s already strong</p>
+                  <ul className="mt-1 space-y-1.5 text-[var(--color-on-surface-variant)]">
+                    {props.readiness.strengths.map((strength) => (
+                      <li key={strength.id}>
+                        <span className="font-medium text-[var(--color-on-surface)]">{strength.title}</span>
+                        {` — ${strength.message}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {props.readiness.blocking.length ? (
+                <div>
+                  <p className="font-semibold text-[var(--color-error)]">Blocking</p>
+                  <ul className="mt-1 space-y-1.5 text-[var(--color-on-surface-variant)]">
+                    {props.readiness.blocking.map((issue) => (
+                      <li key={issue.id}>
+                        <span className="font-medium text-[var(--color-on-surface)]">{issue.title}</span>
+                        {` — ${issue.message}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {props.readiness.warnings.length ? (
+                <div>
+                  <p className="font-semibold text-[var(--color-on-surface)]">Warnings</p>
+                  <ul className="mt-1 space-y-1.5 text-[var(--color-on-surface-variant)]">
+                    {props.readiness.warnings.map((issue) => (
+                      <li key={issue.id}>
+                        <span className="font-medium text-[var(--color-on-surface)]">{issue.title}</span>
+                        {` — ${issue.message}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {props.readiness.info.length ? (
+                <div>
+                  <p className="font-semibold text-[var(--color-on-surface)]">Info</p>
+                  <ul className="mt-1 space-y-1.5 text-[var(--color-on-surface-variant)]">
+                    {props.readiness.info.map((issue) => (
+                      <li key={issue.id}>
+                        <span className="font-medium text-[var(--color-on-surface)]">{issue.title}</span>
+                        {` — ${issue.message}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {props.canPublish && props.readiness.strengths.length ? (
+                <p className="text-xs text-[var(--color-on-surface-variant)]">
+                  You&apos;re publishing a resume that already has {props.readiness.strengths.length} documented strength{props.readiness.strengths.length === 1 ? '' : 's'} in the builder.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
 
         {props.hasExistingTarget ? (
           <fieldset className="space-y-3">
@@ -132,7 +226,7 @@ export default function PublishModal(props: PublishModalProps) {
           <button
             type="button"
             onClick={() => void props.onSubmit()}
-            disabled={props.publishing}
+            disabled={props.publishing || !props.canPublish}
             className="rounded-xl bg-[var(--color-primary)] px-4 py-2.5 text-sm font-medium text-[var(--color-on-primary)] transition-[background-color,box-shadow] duration-150 hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {props.publishing ? 'Publishing…' : 'Publish to Vault'}

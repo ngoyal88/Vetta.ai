@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, GripVertical, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ClipboardCheck, GripVertical, Layers, Plus, Trash2 } from 'lucide-react';
 
 import type { useResumeBuilder } from '../hooks/useResumeBuilder';
 import { getSectionIcon } from '../utils/sectionIcons';
 
+import BuilderReadinessCard from './BuilderReadinessCard';
 import { SectionFormContent } from './SectionFormContent';
+
+type EditorTab = 'sections' | 'readiness';
 
 type SectionAccordionProps = {
   builder: ReturnType<typeof useResumeBuilder>;
@@ -16,6 +19,7 @@ export default function SectionAccordion({ builder }: SectionAccordionProps) {
   const [draftLabel, setDraftLabel] = useState('');
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [editorTab, setEditorTab] = useState<EditorTab>('sections');
   const addMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,6 +42,19 @@ export default function SectionAccordion({ builder }: SectionAccordionProps) {
 
   const visibleSections = draft.section_layout.filter((section) => section.kind === 'identity' || section.enabled);
   const hiddenSections = draft.section_layout.filter((section) => section.kind !== 'identity' && !section.enabled);
+  const readiness = builder.readiness;
+  const reviewCount = readiness.warnings.length + readiness.info.length;
+
+  const editorSubtitle =
+    editorTab === 'sections'
+      ? `${visibleSections.length} active${hiddenSections.length ? ` · ${hiddenSections.length} hidden` : ''} · Click a name to rename`
+      : readiness.status === 'blocked'
+        ? `${readiness.blocking.length} blocking issue${readiness.blocking.length === 1 ? '' : 's'} before publish`
+        : reviewCount > 0
+          ? `${readiness.strengths.length} strengths · ${reviewCount} item${reviewCount === 1 ? '' : 's'} to review`
+          : readiness.strengths.length > 0
+            ? `${readiness.strengths.length} strengths · ready to publish`
+            : 'Review strengths and polish items before you publish';
 
   const beginEditing = (sectionId: string, label: string) => {
     setEditingSectionId(sectionId);
@@ -55,62 +72,93 @@ export default function SectionAccordion({ builder }: SectionAccordionProps) {
 
   return (
     <section className="rb-panel">
-      <div className="rb-panel__header">
-        <div>
-          <h2 className="rb-panel__title">Sections</h2>
-          <p className="rb-panel__subtitle">
-            {visibleSections.length} active
-            {hiddenSections.length ? ` · ${hiddenSections.length} hidden` : ''}
-            {' · '}
-            Click a name to rename
-          </p>
-        </div>
-        <div className="relative shrink-0" ref={addMenuRef}>
+      <div className="rb-panel__header rb-panel__header--stacked">
+        <div
+          className="rb-segmented rb-segmented--full"
+          role="tablist"
+          aria-label="Editor view"
+        >
           <button
             type="button"
-            onClick={() => setAddMenuOpen((open) => !open)}
-            aria-expanded={addMenuOpen}
-            aria-haspopup="menu"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-0)]/60 px-3 py-2 text-xs font-semibold text-[var(--color-on-surface)] transition-colors hover:border-[var(--color-primary)]/35 hover:bg-[var(--color-surface-container)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+            role="tab"
+            aria-selected={editorTab === 'sections'}
+            onClick={() => setEditorTab('sections')}
+            className={['rb-segmented__btn', editorTab === 'sections' ? 'rb-segmented__btn--active' : ''].join(' ')}
           >
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-            Add section
+            <Layers className="h-3.5 w-3.5" aria-hidden />
+            Sections
           </button>
-          {addMenuOpen ? (
-            <div
-              role="menu"
-              className="absolute right-0 z-20 mt-2 min-w-[12rem] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-0)] p-1 shadow-lg"
-            >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={editorTab === 'readiness'}
+            onClick={() => setEditorTab('readiness')}
+            className={['rb-segmented__btn', editorTab === 'readiness' ? 'rb-segmented__btn--active' : ''].join(' ')}
+          >
+            <ClipboardCheck className="h-3.5 w-3.5" aria-hidden />
+            Readiness
+            {readiness.blocking.length > 0 ? (
+              <span className="rb-segmented__badge">{readiness.blocking.length}</span>
+            ) : null}
+          </button>
+        </div>
+
+        <div className="mt-3 flex items-start justify-between gap-3">
+          <p className="rb-panel__subtitle" aria-live="polite">
+            {editorSubtitle}
+          </p>
+          {editorTab === 'sections' ? (
+            <div className="relative shrink-0" ref={addMenuRef}>
               <button
                 type="button"
-                role="menuitem"
-                onClick={() => {
-                  builder.addCustomSection();
-                  setAddMenuOpen(false);
-                }}
-                className="flex w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--color-on-surface)] hover:bg-[var(--color-surface-container)]"
+                onClick={() => setAddMenuOpen((open) => !open)}
+                aria-expanded={addMenuOpen}
+                aria-haspopup="menu"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-0)]/60 px-3 py-2 text-xs font-semibold text-[var(--color-on-surface)] transition-colors hover:border-[var(--color-primary)]/35 hover:bg-[var(--color-surface-container)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
               >
-                Custom section
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                Add section
               </button>
-              {hiddenSections.map((section) => (
-                <button
-                  key={section.id}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    builder.enableSection(section.id);
-                    setAddMenuOpen(false);
-                  }}
-                  className="flex w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--color-on-surface)] hover:bg-[var(--color-surface-container)]"
+              {addMenuOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-20 mt-2 min-w-[12rem] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-0)] p-1 shadow-lg"
                 >
-                  {section.label || section.kind}
-                </button>
-              ))}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      builder.addCustomSection();
+                      setAddMenuOpen(false);
+                    }}
+                    className="flex w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--color-on-surface)] hover:bg-[var(--color-surface-container)]"
+                  >
+                    Custom section
+                  </button>
+                  {hiddenSections.map((section) => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        builder.enableSection(section.id);
+                        setAddMenuOpen(false);
+                      }}
+                      className="flex w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--color-on-surface)] hover:bg-[var(--color-surface-container)]"
+                    >
+                      {section.label || section.kind}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
       </div>
 
+      {editorTab === 'readiness' ? (
+        <BuilderReadinessCard readiness={readiness} embedded />
+      ) : (
       <ul className="rb-section-list">
         {visibleSections.map((section) => {
           const isIdentity = section.kind === 'identity';
@@ -230,6 +278,7 @@ export default function SectionAccordion({ builder }: SectionAccordionProps) {
           );
         })}
       </ul>
+      )}
     </section>
   );
 }

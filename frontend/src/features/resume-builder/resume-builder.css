@@ -57,6 +57,16 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning, #d7a83f) 24%, transparent);
 }
 
+.rb-status-pill--saving .rb-status-pill__dot {
+  background: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 24%, transparent);
+}
+
+.rb-status-pill--failed .rb-status-pill__dot {
+  background: var(--color-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-error) 24%, transparent);
+}
+
 .rb-template-chip {
   display: inline-flex;
   align-items: center;
@@ -95,6 +105,11 @@
   gap: 0.75rem;
   border-bottom: 1px solid var(--border-subtle);
   padding: 1rem 1.1rem 0.9rem;
+}
+
+.rb-panel__header--stacked {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .rb-panel__title {
@@ -177,6 +192,35 @@
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-0) 82%, transparent);
   padding: 0.2rem;
+}
+
+.rb-segmented--full {
+  display: flex;
+  width: 100%;
+}
+
+.rb-segmented--full .rb-segmented__btn {
+  flex: 1;
+  justify-content: center;
+}
+
+.rb-segmented__badge {
+  display: inline-flex;
+  min-width: 1.1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-error) 88%, transparent);
+  padding: 0.05rem 0.35rem;
+  font-size: 0.625rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--color-on-primary);
+}
+
+.rb-segmented__btn--active .rb-segmented__badge {
+  background: color-mix(in srgb, var(--color-on-primary) 22%, transparent);
+  color: var(--color-on-primary);
 }
 
 .rb-segmented__btn {
@@ -270,4 +314,58 @@
   border: 1px solid color-mix(in srgb, var(--color-warning, #d7a83f) 35%, transparent);
   background: color-mix(in srgb, var(--color-warning, #d7a83f) 8%, transparent);
   padding: 0.9rem 1rem;
+}
+
+.rb-readiness-card {
+  border-radius: 1rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--color-surface-container) 45%, transparent);
+  padding: 1rem;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.08);
+}
+
+.rb-readiness-panel {
+  padding: 1rem 1.1rem 1.25rem;
+}
+
+.rb-readiness-badge,
+.rb-readiness-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-0) 76%, transparent);
+  padding: 0.25rem 0.65rem;
+}
+
+.rb-readiness-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.rb-readiness-group {
+  border-radius: 0.95rem;
+  border: 1px solid var(--border-subtle);
+  padding: 0.85rem 0.95rem;
+}
+
+.rb-readiness-group--blocking {
+  border-color: color-mix(in srgb, var(--color-error) 28%, transparent);
+  background: color-mix(in srgb, var(--color-error) 7%, transparent);
+}
+
+.rb-readiness-group--warning {
+  border-color: color-mix(in srgb, var(--color-warning, #d7a83f) 32%, transparent);
+  background: color-mix(in srgb, var(--color-warning, #d7a83f) 7%, transparent);
+}
+
+.rb-readiness-group--info {
+  border-color: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+
+.rb-readiness-group--strength {
+  border-color: color-mix(in srgb, var(--color-secondary) 24%, transparent);
+  background: color-mix(in srgb, var(--color-secondary) 7%, transparent);
 }

@@ -14,20 +14,53 @@ import type {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-const getErrorMessage = async (response: Response, fallback: string): Promise<string> => {
+type ErrorPayload = { detail?: unknown; message?: unknown } | null;
+
+export class ResumeBuilderApiError extends Error {
+  code?: string;
+  status: number;
+
+  constructor(message: string, options: { code?: string; status: number }) {
+    super(message);
+    this.name = 'ResumeBuilderApiError';
+    this.code = options.code;
+    this.status = options.status;
+  }
+}
+
+const getErrorPayload = async (response: Response): Promise<ErrorPayload> => {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
-    const payload = (await response.json().catch(() => null)) as { detail?: unknown; message?: unknown } | null;
-    if (typeof payload?.detail === 'string' && payload.detail.trim()) return payload.detail.trim();
-    if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message.trim();
+    return (await response.json().catch(() => null)) as ErrorPayload;
   }
+  return null;
+};
+
+const getErrorMessage = async (response: Response, fallback: string, payload?: ErrorPayload): Promise<string> => {
+  const resolvedPayload = payload ?? (await getErrorPayload(response));
+  if (typeof resolvedPayload?.detail === 'string' && resolvedPayload.detail.trim()) return resolvedPayload.detail.trim();
+  if (
+    resolvedPayload?.detail &&
+    typeof resolvedPayload.detail === 'object' &&
+    typeof (resolvedPayload.detail as { message?: unknown }).message === 'string' &&
+    (resolvedPayload.detail as { message: string }).message.trim()
+  ) {
+    return (resolvedPayload.detail as { message: string }).message.trim();
+  }
+  if (typeof resolvedPayload?.message === 'string' && resolvedPayload.message.trim()) return resolvedPayload.message.trim();
   const text = await response.text().catch(() => '');
   return text.trim() || fallback;
 };
 
 const parseJsonResponse = async <T>(response: Response, fallback: string): Promise<T> => {
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response, fallback));
+    const payload = await getErrorPayload(response);
+    const message = await getErrorMessage(response, fallback, payload);
+    const code =
+      payload?.detail && typeof payload.detail === 'object' && typeof (payload.detail as { code?: unknown }).code === 'string'
+        ? (payload.detail as { code: string }).code
+        : undefined;
+    throw new ResumeBuilderApiError(message, { code, status: response.status });
   }
   return response.json() as Promise<T>;
 };

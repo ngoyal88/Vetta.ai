@@ -177,8 +177,17 @@ export default function ResumeBuilderPage() {
         saving={builder.saving}
         previewing={builder.previewing}
         publishing={builder.publishing}
-        dirty={builder.dirty}
+        saveState={builder.saveState}
+        readinessStatus={builder.readiness.status}
+        readinessBlockingCount={builder.readiness.blocking.length}
+        readinessWarningCount={builder.readiness.warnings.length}
+        readinessInfoCount={builder.readiness.info.length}
+        readinessStrengthCount={builder.readiness.strengths.length}
         pageCount={builder.pageCount}
+        canUndo={builder.canUndo}
+        canRedo={builder.canRedo}
+        onUndo={builder.undoDraft}
+        onRedo={builder.redoDraft}
         onSaveDraft={builder.openSaveDraftModal}
         onRefreshPreview={builder.refreshPreview}
         onRefreshLatex={builder.refreshLatex}
@@ -198,7 +207,7 @@ export default function ResumeBuilderPage() {
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr),minmax(0,0.95fr)]">
           <SectionAccordion builder={builder} />
 
-          <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+          <div className="xl:sticky xl:top-6 xl:self-start">
             <PreviewPanel
               previewUrl={builder.previewUrl}
               previewing={builder.previewing}
@@ -206,18 +215,6 @@ export default function ResumeBuilderPage() {
               latex={builder.latex}
               latexLoading={builder.latexLoading}
             />
-            {builder.overflowWarnings.length ? (
-              <section className="rb-layout-notes">
-                <h2 className="type-label-sm uppercase tracking-[0.14em] text-[var(--color-on-surface)]">
-                  Layout notes
-                </h2>
-                <ul className="mt-2 space-y-1.5 text-sm text-[var(--color-on-surface-variant)]">
-                  {builder.overflowWarnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
           </div>
         </div>
       )}
@@ -239,6 +236,8 @@ export default function ResumeBuilderPage() {
         userNote={builder.publishUserNote}
         tags={builder.publishTags}
         setActive={builder.publishSetActive}
+        readiness={builder.readiness}
+        canPublish={builder.canPublish}
         onClose={builder.closePublishModal}
         onPublishModeChange={builder.setPublishMode}
         onResumeNameChange={builder.setPublishResumeName}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
@@ -18,8 +18,14 @@ import { createEmptySkillGroup, ensureBuilderSkillGroups, type BuilderSkillGroup
 
 import { sanitizeBuilderProfileForSave } from '../utils/sanitizeBuilderProfile';
 
+import { computeBuilderReadiness, type BuilderReadinessIssue } from '../utils/builderReadiness';
 import { getDraftDisplayName, nextResumeDraftName } from '../utils/draftNames';
-import { resumeBuilderApi } from '../services/resumeBuilderApi';
+import { applyDraftSnapshot, captureDraftSnapshot } from '../utils/draftSnapshot';
+import type { HistoryMode } from './draftHistoryStack';
+import type { SaveState } from './draftAutosave';
+import { useDraftAutosave } from './useDraftAutosave';
+import { useDraftHistory } from './useDraftHistory';
+import { ResumeBuilderApiError, resumeBuilderApi } from '../services/resumeBuilderApi';
 import type {
   BuilderCustomSection,
   BuilderSection,
@@ -143,6 +149,45 @@ function buildInitialProfile(identity: BuilderIdentity): ResumeProfile {
   };
 }
 
+function mapPublishApiErrorToIssue(error: ResumeBuilderApiError): BuilderReadinessIssue | null {
+  switch (error.code) {
+    case 'identity_name_missing':
+      return {
+        id: 'server-identity-name-missing',
+        severity: 'blocking',
+        category: 'identity',
+        dimension: 'identity',
+        title: 'Name is required to publish',
+        message: error.message,
+        sectionId: 'identity',
+        fieldPath: 'profile.name',
+      };
+    case 'identity_email_missing':
+    case 'identity_email_invalid':
+      return {
+        id: 'server-identity-email-invalid',
+        severity: 'blocking',
+        category: 'identity',
+        dimension: 'identity',
+        title: 'Email is required to publish',
+        message: error.message,
+        sectionId: 'identity',
+        fieldPath: 'profile.contact.email',
+      };
+    case 'content_empty_resume':
+      return {
+        id: 'server-content-empty-resume',
+        severity: 'blocking',
+        category: 'content',
+        dimension: 'content_presence',
+        title: 'Resume has no content yet',
+        message: error.message,
+      };
+    default:
+      return null;
+  }
+}
+
 function isValidIdentityEmail(value: string | null | undefined): boolean {
   if (typeof value !== 'string') return false;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -206,6 +251,7 @@ export function useResumeBuilder() {
   const [latexLoading, setLatexLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<'idle' | 'ready' | 'failed'>('idle');
   const [pageCount, setPageCount] = useState(0);
   const [latex, setLatex] = useState('');
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
@@ -226,8 +272,10 @@ export function useResumeBuilder() {
   const [saveDraftOpen, setSaveDraftOpen] = useState(false);
   const [saveDraftName, setSaveDraftName] = useState('Resume(1)');
   const [templatePreviewUrls, setTemplatePreviewUrls] = useState<Record<string, string>>({});
+  const [publishServerIssue, setPublishServerIssue] = useState<BuilderReadinessIssue | null>(null);
 
-  const dirty = useMemo(() => buildDraftFingerprint(draft) !== savedFingerprint, [draft, savedFingerprint]);
+  const draftFingerprint = useMemo(() => buildDraftFingerprint(draft), [draft]);
+  const dirty = draftFingerprint !== savedFingerprint;
   const hasExistingPublishTarget = Boolean(draft?.target_resume_id || draft?.source_resume_id);
   const profileReady = Boolean(profileIdentity?.name.trim() && profileIdentity?.email.trim());
 
@@ -308,22 +356,58 @@ export function useResumeBuilder() {
     setStatusMessage(message);
   }, []);
 
+  const draftHistory = useDraftHistory();
+  // draftHistory is a fresh object on every edit (canUndo/canRedo/revision change),
+  // so hold its actions in a ref — callbacks that only *use* history (load/clear/undo)
+  // must not depend on that churning identity or they re-run on every keystroke.
+  const historyRef = useRef(draftHistory);
+  historyRef.current = draftHistory;
+  const draftRef = useRef<ResumeBuilderDraft | null>(null);
+  draftRef.current = draft;
+
   const applyDraftState = useCallback(
-    (nextDraft: ResumeBuilderDraft, { replaceRoute = true }: { replaceRoute?: boolean } = {}) => {
+    (
+      nextDraft: ResumeBuilderDraft,
+      { replaceRoute = true, preserveUi = false }: { replaceRoute?: boolean; preserveUi?: boolean } = {},
+    ) => {
       setDraft(nextDraft);
       setSavedFingerprint(buildDraftFingerprint(nextDraft));
+      setPublishServerIssue(null);
       setSelectedTemplateId(nextDraft.template_id);
-      setSelectedSectionId(null);
-      setPublishMode(nextDraft.target_resume_id || nextDraft.source_resume_id ? 'existing' : 'new');
-      setPublishResumeName(buildDefaultResumeName(nextDraft.profile));
-      setPublishUserNote('');
-      setPublishTags('');
-      setPublishSetActive(true);
+      if (!preserveUi) {
+        setSelectedSectionId(null);
+        setPublishMode(nextDraft.target_resume_id || nextDraft.source_resume_id ? 'existing' : 'new');
+        setPublishResumeName(buildDefaultResumeName(nextDraft.profile));
+        setPublishUserNote('');
+        setPublishTags('');
+        setPublishSetActive(true);
+      }
       if (replaceRoute) {
         navigate(`/resume-vault/builder/${nextDraft.id}`, { replace: true });
       }
     },
     [navigate],
+  );
+
+  const updateDraft = useCallback(
+    (
+      updater: (current: ResumeBuilderDraft) => ResumeBuilderDraft,
+      options: { history?: HistoryMode } = {},
+    ) => {
+      const current = draftRef.current;
+      if (!current) return;
+      const historyMode = options.history ?? 'debounced';
+      if (historyMode !== 'skip') {
+        historyRef.current.recordBeforeChange(captureDraftSnapshot(current), historyMode);
+      }
+      setPublishServerIssue(null);
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const next = updater(prev);
+        return next === prev ? prev : next;
+      });
+    },
+    [],
   );
 
   const loadTemplatePreviews = useCallback(async (templateList: TemplateMetadata[]) => {
@@ -363,9 +447,11 @@ export function useResumeBuilder() {
           const repairedResponse = await resumeBuilderApi.saveDraft(targetDraftId, repairPayload);
           nextDraft = repairedResponse.draft;
         }
+        historyRef.current.clear();
         applyDraftState(nextDraft, { replaceRoute: false });
         const latexResponse = await resumeBuilderApi.getLatex(targetDraftId);
         setLatex(latexResponse.tex);
+        setPreviewStatus('idle');
       } finally {
         setWorkspaceLoading(false);
       }
@@ -428,6 +514,7 @@ export function useResumeBuilder() {
             version_id: initialVersionId,
           });
           applyDraftState(draftResponse.draft);
+          historyRef.current.clear();
           announce('Draft created from your existing resume.');
         } finally {
           setWorkspaceLoading(false);
@@ -476,8 +563,10 @@ export function useResumeBuilder() {
         profile: buildInitialProfile({ name: trimmedName, email: trimmedEmail }),
       });
       applyDraftState(response.draft);
+      historyRef.current.clear();
       setSavedDrafts((current) => [response.draft, ...current.filter((item) => item.id !== response.draft.id)]);
       setLatex('');
+      setPreviewStatus('idle');
       announce('Draft created.');
       toast.success('Draft created');
     } catch (err) {
@@ -491,12 +580,15 @@ export function useResumeBuilder() {
     navigate(`/resume-vault/builder/${nextDraftId}`);
   }, [navigate]);
 
-  const setDraftProfile = useCallback((updater: (profile: ResumeProfile) => ResumeProfile) => {
-    setDraft((current) => {
-      if (!current) return current;
-      return { ...current, profile: updater(cloneProfile(current.profile)) };
-    });
-  }, []);
+  const setDraftProfile = useCallback(
+    (updater: (profile: ResumeProfile) => ResumeProfile, history: HistoryMode = 'debounced') => {
+      updateDraft(
+        (current) => ({ ...current, profile: updater(cloneProfile(current.profile)) }),
+        { history },
+      );
+    },
+    [updateDraft],
+  );
 
   const setProfileLinks = useCallback(
     (field: 'github' | 'linkedin' | 'portfolio', value: string) => {
@@ -566,10 +658,13 @@ export function useResumeBuilder() {
   );
 
   const addWorkExperience = useCallback(() => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      work_experience: [...(profile.work_experience || []), createWorkExperienceItem()],
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        work_experience: [...(profile.work_experience || []), createWorkExperienceItem()],
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const setWorkExperienceItem = useCallback((index: number, item: ResumeWorkExperienceItem) => {
@@ -580,17 +675,23 @@ export function useResumeBuilder() {
   }, [replaceSectionItems, setDraftProfile]);
 
   const removeWorkExperience = useCallback((index: number) => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      work_experience: (profile.work_experience || []).filter((_, currentIndex) => currentIndex !== index),
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        work_experience: (profile.work_experience || []).filter((_, currentIndex) => currentIndex !== index),
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const addEducation = useCallback(() => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      education: [...(profile.education || []), createEducationItem()],
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        education: [...(profile.education || []), createEducationItem()],
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const setEducationItem = useCallback((index: number, item: ResumeEducationRecord) => {
@@ -601,10 +702,13 @@ export function useResumeBuilder() {
   }, [replaceSectionItems, setDraftProfile]);
 
   const removeEducation = useCallback((index: number) => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      education: (profile.education || []).filter((_, currentIndex) => currentIndex !== index),
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        education: (profile.education || []).filter((_, currentIndex) => currentIndex !== index),
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const addEducationHighlight = useCallback((educationIndex: number) => {
@@ -617,7 +721,7 @@ export function useResumeBuilder() {
         highlights: [...(item.highlights || []), { label: '', text: '' }],
       };
       return { ...profile, education };
-    });
+    }, 'immediate');
   }, [setDraftProfile]);
 
   const setEducationHighlight = useCallback(
@@ -647,7 +751,7 @@ export function useResumeBuilder() {
         highlights: (item.highlights || []).filter((_, currentIndex) => currentIndex !== highlightIndex),
       };
       return { ...profile, education };
-    });
+    }, 'immediate');
   }, [setDraftProfile]);
 
   const setSkillGroup = useCallback((index: number, group: BuilderSkillGroup) => {
@@ -659,24 +763,33 @@ export function useResumeBuilder() {
   }, [setDraftProfile]);
 
   const addSkillGroup = useCallback(() => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      skills: [...ensureBuilderSkillGroups(profile.skills), createEmptySkillGroup()],
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        skills: [...ensureBuilderSkillGroups(profile.skills), createEmptySkillGroup()],
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const removeSkillGroup = useCallback((index: number) => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      skills: ensureBuilderSkillGroups(profile.skills).filter((_, currentIndex) => currentIndex !== index),
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        skills: ensureBuilderSkillGroups(profile.skills).filter((_, currentIndex) => currentIndex !== index),
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const addProject = useCallback(() => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      projects: [...(profile.projects || []), createProjectItem()],
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        projects: [...(profile.projects || []), createProjectItem()],
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const setProjectItem = useCallback((index: number, item: ResumeProjectItem) => {
@@ -687,17 +800,23 @@ export function useResumeBuilder() {
   }, [replaceSectionItems, setDraftProfile]);
 
   const removeProject = useCallback((index: number) => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      projects: (profile.projects || []).filter((_, currentIndex) => currentIndex !== index),
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        projects: (profile.projects || []).filter((_, currentIndex) => currentIndex !== index),
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const addAchievement = useCallback(() => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      achievements: [...(profile.achievements || []), createAchievementItem()],
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        achievements: [...(profile.achievements || []), createAchievementItem()],
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const setAchievementItem = useCallback((index: number, item: ResumeAchievementItem) => {
@@ -708,17 +827,23 @@ export function useResumeBuilder() {
   }, [replaceSectionItems, setDraftProfile]);
 
   const removeAchievement = useCallback((index: number) => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      achievements: (profile.achievements || []).filter((_, currentIndex) => currentIndex !== index),
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        achievements: (profile.achievements || []).filter((_, currentIndex) => currentIndex !== index),
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const addPublication = useCallback(() => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      publications: [...(profile.publications || []), createPublicationItem()],
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        publications: [...(profile.publications || []), createPublicationItem()],
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
   const setPublicationItem = useCallback((index: number, item: ResumePublicationItem) => {
@@ -729,45 +854,51 @@ export function useResumeBuilder() {
   }, [replaceSectionItems, setDraftProfile]);
 
   const removePublication = useCallback((index: number) => {
-    setDraftProfile((profile) => ({
-      ...profile,
-      publications: (profile.publications || []).filter((_, currentIndex) => currentIndex !== index),
-    }));
+    setDraftProfile(
+      (profile) => ({
+        ...profile,
+        publications: (profile.publications || []).filter((_, currentIndex) => currentIndex !== index),
+      }),
+      'immediate',
+    );
   }, [setDraftProfile]);
 
-  const renameSection = useCallback((sectionId: string, label: string) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const customSections = current.custom_sections.map((section) =>
-        section.id === sectionId ? { ...section, title: label } : section,
-      );
-      return {
-        ...current,
-        section_layout: current.section_layout.map((section) =>
-          section.id === sectionId ? { ...section, label } : section,
-        ),
-        custom_sections: customSections,
-      };
-    });
-  }, []);
+  const renameSection = useCallback(
+    (sectionId: string, label: string) => {
+      updateDraft((current) => {
+        const customSections = current.custom_sections.map((section) =>
+          section.id === sectionId ? { ...section, title: label } : section,
+        );
+        return {
+          ...current,
+          section_layout: current.section_layout.map((section) =>
+            section.id === sectionId ? { ...section, label } : section,
+          ),
+          custom_sections: customSections,
+        };
+      }, { history: 'immediate' });
+    },
+    [updateDraft],
+  );
 
-  const reorderSection = useCallback((fromId: string, toId: string) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const fromIndex = current.section_layout.findIndex((section) => section.id === fromId);
-      const toIndex = current.section_layout.findIndex((section) => section.id === toId);
-      if (fromIndex <= 0 || toIndex <= 0 || fromIndex === -1 || toIndex === -1) return current;
-      const updated = [...current.section_layout];
-      const [item] = updated.splice(fromIndex, 1);
-      updated.splice(toIndex, 0, item);
-      return { ...current, section_layout: updated };
-    });
-  }, []);
+  const reorderSection = useCallback(
+    (fromId: string, toId: string) => {
+      updateDraft((current) => {
+        const fromIndex = current.section_layout.findIndex((section) => section.id === fromId);
+        const toIndex = current.section_layout.findIndex((section) => section.id === toId);
+        if (fromIndex <= 0 || toIndex <= 0 || fromIndex === -1 || toIndex === -1) return current;
+        const updated = [...current.section_layout];
+        const [item] = updated.splice(fromIndex, 1);
+        updated.splice(toIndex, 0, item);
+        return { ...current, section_layout: updated };
+      }, { history: 'immediate' });
+    },
+    [updateDraft],
+  );
 
   const addCustomSection = useCallback(() => {
     const customId = `custom_${Date.now()}`;
-    setDraft((current) => {
-      if (!current) return current;
+    updateDraft((current) => {
       const nextCustom: BuilderCustomSection = { id: customId, title: 'New Section', content: '' };
       return {
         ...current,
@@ -777,9 +908,9 @@ export function useResumeBuilder() {
         ],
         custom_sections: [...current.custom_sections, nextCustom],
       };
-    });
+    }, { history: 'immediate' });
     setSelectedSectionId(customId);
-  }, []);
+  }, [updateDraft]);
 
   const removeSection = useCallback(
     (sectionId: string) => {
@@ -797,8 +928,7 @@ export function useResumeBuilder() {
           : `Remove "${label}" from this resume? You can add it back with + Add section.`,
         destructive: true,
         onConfirm: () => {
-          setDraft((current) => {
-            if (!current) return current;
+          updateDraft((current) => {
             const target = current.section_layout.find((entry) => entry.id === sectionId);
             if (!target || target.kind === 'identity') return current;
             if (target.kind === 'custom') {
@@ -814,69 +944,111 @@ export function useResumeBuilder() {
                 entry.id === sectionId ? { ...entry, enabled: false } : entry,
               ),
             };
-          });
+          }, { history: 'immediate' });
           setSelectedSectionId((current) => (current === sectionId ? null : current));
         },
       });
     },
-    [confirmDialog, draft],
+    [confirmDialog, draft, updateDraft],
   );
 
-  const enableSection = useCallback((sectionId: string) => {
-    setDraft((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        section_layout: current.section_layout.map((entry) =>
-          entry.id === sectionId ? { ...entry, enabled: true } : entry,
-        ),
-      };
-    });
-    setSelectedSectionId(sectionId);
-  }, []);
+  const enableSection = useCallback(
+    (sectionId: string) => {
+      updateDraft(
+        (current) => ({
+          ...current,
+          section_layout: current.section_layout.map((entry) =>
+            entry.id === sectionId ? { ...entry, enabled: true } : entry,
+          ),
+        }),
+        { history: 'immediate' },
+      );
+      setSelectedSectionId(sectionId);
+    },
+    [updateDraft],
+  );
 
-  const updateCustomSectionContent = useCallback((sectionId: string, content: string) => {
-    setDraft((current) => {
-      if (!current) return current;
-      return {
+  const updateCustomSectionContent = useCallback(
+    (sectionId: string, content: string) => {
+      updateDraft((current) => ({
         ...current,
         custom_sections: current.custom_sections.map((section) =>
           section.id === sectionId ? { ...section, content } : section,
         ),
-      };
-    });
-  }, []);
+      }));
+    },
+    [updateDraft],
+  );
 
-  const saveCurrentDraft = useCallback(async (draftName?: string) => {
-    if (!draft) return null;
-    const trimmedName = (draftName ?? draft.name ?? suggestDraftName(draft)).trim();
-    if (!trimmedName) {
-      const message = 'Draft name is required.';
-      toast.error(message);
-      announce(message);
-      return null;
-    }
-    try {
-      setSaving(true);
-      const response = await resumeBuilderApi.saveDraft(draft.id, {
-        name: trimmedName,
-        profile: profileForPersistence(draft.profile),
-        section_layout: draft.section_layout,
-        custom_sections: draft.custom_sections,
-        target_resume_id: draft.target_resume_id ?? null,
-      });
-      applyDraftState(response.draft, { replaceRoute: false });
-      setSavedDrafts((current) => [response.draft, ...current.filter((item) => item.id !== response.draft.id)]);
-      announce('Draft saved.');
-      toast.success('Draft saved');
-      return response.draft;
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save draft');
-      return null;
-    } finally {
-      setSaving(false);
-    }
-  }, [announce, applyDraftState, draft, suggestDraftName]);
+  const persistDraft = useCallback(
+    async ({ silent = false, draftName }: { silent?: boolean; draftName?: string } = {}): Promise<boolean> => {
+      const current = draftRef.current;
+      if (!current) return false;
+      const trimmedName = (draftName ?? current.name ?? suggestDraftName(current)).trim();
+      if (!trimmedName) {
+        if (!silent) {
+          const message = 'Draft name is required.';
+          toast.error(message);
+          announce(message);
+        }
+        return false;
+      }
+      try {
+        if (!silent) setSaving(true);
+        const response = await resumeBuilderApi.saveDraft(current.id, {
+          name: trimmedName,
+          profile: profileForPersistence(current.profile),
+          section_layout: current.section_layout,
+          custom_sections: current.custom_sections,
+          target_resume_id: current.target_resume_id ?? null,
+        });
+        // Do NOT replace the live draft with the server's sanitized copy: it strips
+        // in-progress entries (empty skill groups, half-typed bullets/highlights) and,
+        // because the sanitized copy never equals the local draft, keeps `dirty` true —
+        // which makes autosave fire on a loop and wipes what the user is typing.
+        // Instead, sync only the name and mark the exact snapshot we saved as clean.
+        let savedSnapshot = current;
+        if (trimmedName !== current.name) {
+          savedSnapshot = { ...current, name: trimmedName };
+          setDraft((prev) => (prev ? { ...prev, name: trimmedName } : prev));
+        }
+        setSavedFingerprint(buildDraftFingerprint(savedSnapshot));
+        setSavedDrafts((list) => [response.draft, ...list.filter((item) => item.id !== response.draft.id)]);
+        if (!silent) {
+          announce('Draft saved.');
+          toast.success('Draft saved');
+        }
+        return true;
+      } catch (err) {
+        if (!silent) {
+          toast.error(err instanceof Error ? err.message : 'Failed to save draft');
+        }
+        return false;
+      } finally {
+        if (!silent) setSaving(false);
+      }
+    },
+    [announce, suggestDraftName],
+  );
+
+  const { saveState: autosaveState, flushAutosave, cancelAutosave } = useDraftAutosave({
+    signal: draftFingerprint,
+    dirty,
+    enabled: Boolean(draft?.id) && !workspaceLoading,
+    onSave: () => persistDraft({ silent: true }),
+  });
+
+  const saveState: SaveState = saving || autosaveState === 'saving' ? 'saving' : autosaveState;
+
+  const saveCurrentDraft = useCallback(
+    async (draftName?: string) => {
+      if (!draftRef.current) return null;
+      cancelAutosave();
+      const ok = await persistDraft({ silent: false, draftName });
+      return ok ? draftRef.current : null;
+    },
+    [cancelAutosave, persistDraft],
+  );
 
   const openSaveDraftModal = useCallback(() => {
     if (!draft) return;
@@ -900,10 +1072,8 @@ export function useResumeBuilder() {
     if (!draft) return;
     try {
       setLatexLoading(true);
-      if (dirty) {
-        const saved = await saveCurrentDraft();
-        if (!saved) return;
-      }
+      const saved = await flushAutosave();
+      if (!saved) return;
       const response = await resumeBuilderApi.getLatex(draft.id);
       setLatex(response.tex);
       announce('LaTeX refreshed.');
@@ -912,29 +1082,46 @@ export function useResumeBuilder() {
     } finally {
       setLatexLoading(false);
     }
-  }, [announce, dirty, draft, saveCurrentDraft]);
+  }, [announce, draft, flushAutosave]);
 
   const refreshPreview = useCallback(async () => {
     if (!draft) return;
     try {
       setPreviewing(true);
-      if (dirty) {
-        const saved = await saveCurrentDraft();
-        if (!saved) return;
-      }
+      const saved = await flushAutosave();
+      if (!saved) return;
       const response = await resumeBuilderApi.previewDraft(draft.id);
       cleanupPreviewUrl();
       setPreviewUrl(URL.createObjectURL(response.blob));
       setPageCount(response.pageCount);
+      setPreviewStatus('ready');
       const latexResponse = await resumeBuilderApi.getLatex(draft.id);
       setLatex(latexResponse.tex);
       announce(`Preview refreshed. ${response.pageCount || 0} page${response.pageCount === 1 ? '' : 's'}.`);
     } catch (err) {
+      setPreviewStatus('failed');
       toast.error(err instanceof Error ? err.message : 'Failed to preview draft');
     } finally {
       setPreviewing(false);
     }
-  }, [announce, cleanupPreviewUrl, dirty, draft, saveCurrentDraft]);
+  }, [announce, cleanupPreviewUrl, draft, flushAutosave]);
+
+  const readiness = useMemo(() => {
+    const base = computeBuilderReadiness({ draft, saveState, previewStatus, pageCount });
+    if (!publishServerIssue) return base;
+    if (base.blocking.some((issue) => issue.dimension === publishServerIssue.dimension)) return base;
+    return {
+      ...base,
+      status: 'blocked' as const,
+      blocking: [publishServerIssue, ...base.blocking],
+    };
+  }, [draft, pageCount, previewStatus, publishServerIssue, saveState]);
+
+  const canPublish = readiness.blocking.length === 0;
+  const overflowWarnings = useMemo(
+    () => readiness.warnings.filter((issue) => issue.category === 'layout').map((issue) => issue.message),
+    [readiness.warnings],
+  );
 
   const openPublishModal = useCallback(() => {
     if (!draft) return;
@@ -963,6 +1150,12 @@ export function useResumeBuilder() {
 
   const publishCurrentDraft = useCallback(async (): Promise<PublishDraftResponse | null> => {
     if (!draft) return null;
+    if (!canPublish) {
+      const message = readiness.blocking[0]?.message || 'Resolve the blocking issues before publishing.';
+      toast.error(message);
+      announce(message);
+      return null;
+    }
     const targetResumeId = publishMode === 'existing' ? draft.target_resume_id || draft.source_resume_id || null : null;
     const trimmedResumeName = publishResumeName.trim();
 
@@ -975,10 +1168,9 @@ export function useResumeBuilder() {
 
     try {
       setPublishing(true);
-      if (dirty) {
-        const saved = await saveCurrentDraft();
-        if (!saved) return null;
-      }
+      setPublishServerIssue(null);
+      const saved = await flushAutosave();
+      if (!saved) return null;
       const response = await resumeBuilderApi.publishDraft(draft.id, {
         user_note: publishUserNote.trim(),
         target_resume_id: targetResumeId,
@@ -987,8 +1179,10 @@ export function useResumeBuilder() {
         set_active: publishSetActive,
       });
       cleanupPreviewUrl();
+      historyRef.current.clear();
       setDraft(null);
       setSavedFingerprint(buildDraftFingerprint(null));
+      setPreviewStatus('idle');
       setLatex('');
       setPageCount(0);
       setPublishOpen(false);
@@ -998,6 +1192,10 @@ export function useResumeBuilder() {
       return response;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to publish draft';
+      if (err instanceof ResumeBuilderApiError) {
+        const mappedIssue = mapPublishApiErrorToIssue(err);
+        if (mappedIssue) setPublishServerIssue(mappedIssue);
+      }
       toast.error(message);
       announce(message);
       return null;
@@ -1007,16 +1205,64 @@ export function useResumeBuilder() {
   }, [
     announce,
     cleanupPreviewUrl,
-    dirty,
+    canPublish,
     draft,
+    flushAutosave,
     navigate,
     publishMode,
     publishResumeName,
     publishSetActive,
     publishTags,
     publishUserNote,
-    saveCurrentDraft,
+    readiness.blocking,
   ]);
+
+  const undoDraft = useCallback(() => {
+    const current = draftRef.current;
+    if (!current) return;
+    historyRef.current.pauseRecording();
+    const snapshot = historyRef.current.undo(captureDraftSnapshot(current));
+    if (snapshot) {
+      updateDraft((draftState) => applyDraftSnapshot(draftState, snapshot), { history: 'skip' });
+      announce('Undo.');
+    }
+    historyRef.current.resumeRecording();
+  }, [announce, updateDraft]);
+
+  const redoDraft = useCallback(() => {
+    const current = draftRef.current;
+    if (!current) return;
+    historyRef.current.pauseRecording();
+    const snapshot = historyRef.current.redo(captureDraftSnapshot(current));
+    if (snapshot) {
+      updateDraft((draftState) => applyDraftSnapshot(draftState, snapshot), { history: 'skip' });
+      announce('Redo.');
+    }
+    historyRef.current.resumeRecording();
+  }, [announce, updateDraft]);
+
+  useEffect(() => {
+    if (!draft || workspaceLoading) return undefined;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey;
+      if (!modifier) return;
+
+      if (event.key === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        undoDraft();
+        return;
+      }
+
+      if ((event.key === 'z' && event.shiftKey) || event.key === 'y') {
+        event.preventDefault();
+        redoDraft();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [draft, redoDraft, undoDraft, workspaceLoading]);
 
   const deleteCurrentDraft = useCallback(async () => {
     if (!draft) return;
@@ -1028,8 +1274,10 @@ export function useResumeBuilder() {
         try {
           await resumeBuilderApi.deleteDraft(draft.id);
           cleanupPreviewUrl();
+          historyRef.current.clear();
           setDraft(null);
           setSavedFingerprint(buildDraftFingerprint(null));
+          setPreviewStatus('idle');
           setLatex('');
           setPageCount(0);
           announce('Draft deleted.');
@@ -1041,25 +1289,6 @@ export function useResumeBuilder() {
       },
     });
   }, [announce, cleanupPreviewUrl, confirmDialog, draft, navigate]);
-
-  const overflowWarnings = useMemo(() => {
-    if (!draft) return [];
-    const warnings: string[] = [];
-    if ((draft.profile.summary || '').trim().length > 500) {
-      warnings.push('Summary is getting long. Consider tightening it before publishing.');
-    }
-    const longCustom = draft.custom_sections.find((section) => section.content.trim().length > 900);
-    if (longCustom) {
-      warnings.push(`"${longCustom.title}" may overflow the template. Shorten or split the content.`);
-    }
-    const bulkyExperience = (draft.profile.work_experience || []).find(
-      (item) => (item.responsibilities || []).length + (item.impact || []).length > 7,
-    );
-    if (bulkyExperience) {
-      warnings.push('One experience entry has many bullet points. The PDF may become hard to scan.');
-    }
-    return warnings;
-  }, [draft]);
 
   const activeTemplate = useMemo(
     () => templates.find((template) => template.id === (draft?.template_id || selectedTemplateId)) ?? null,
@@ -1086,9 +1315,13 @@ export function useResumeBuilder() {
     profileIdentity,
     profileReady,
     previewUrl,
+    previewStatus,
     pageCount,
     latex,
     dirty,
+    saveState,
+    readiness,
+    canPublish,
     statusMessage,
     overflowWarnings,
     selectedSectionId,
@@ -1147,6 +1380,10 @@ export function useResumeBuilder() {
     removeSection,
     enableSection,
     updateCustomSectionContent,
+    undoDraft,
+    redoDraft,
+    canUndo: draftHistory.canUndo,
+    canRedo: draftHistory.canRedo,
     openSaveDraftModal,
     closeSaveDraftModal,
     confirmSaveDraft,
