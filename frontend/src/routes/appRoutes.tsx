@@ -1,29 +1,33 @@
 import { Suspense, lazy } from 'react';
 import { Outlet, Route, useSearchParams } from 'react-router-dom';
 
-import AiInterviewPage from 'features/modes/pages/AiInterviewPage';
-import BlindModePage from 'features/modes/blind-mode/pages/BlindModePage';
-import PairProgrammingPage from 'features/modes/pair-programming/pages/PairProgrammingPage';
-import PressureModePage from 'features/modes/pressure-mode/pages/PressureModePage';
-import ResumeDeepDivePage from 'features/modes/resume-deep-dive/pages/ResumeDeepDivePage';
-import RoleTargetedPage from 'features/modes/role-targeted/pages/RoleTargetedPage';
-import ApplicationFitHistoryPage from 'features/application-fit/pages/ApplicationFitHistoryPage';
-import ApplicationFitPage from 'features/application-fit/pages/ApplicationFitPage';
-import AnalyticsPage from 'features/dashboard/pages/AnalyticsPage';
-import Dashboard from 'features/dashboard/pages/Dashboard';
-import HistoryPage from 'features/dashboard/pages/HistoryPage';
-import SettingsPage from 'features/dashboard/pages/SettingsPage';
-import SignalIntelligencePage from 'features/signal/pages/SignalIntelligencePage';
 import VaultLayout from 'features/vault/layout/VaultLayout';
-import VaultComparePage from 'features/vault/pages/VaultComparePage';
-import VaultCompareResultPage from 'features/vault/pages/VaultCompareResultPage';
-import VaultHubPage from 'features/vault/pages/VaultHubPage';
-import VaultLibraryPage from 'features/vault/pages/VaultLibraryPage';
-import VaultVersionDetailPage from 'features/vault/pages/VaultVersionDetailPage';
-import VaultVersionsPage from 'features/vault/pages/VaultVersionsPage';
 import AppShell from 'shared/layout/AppShell';
+import ErrorBoundary from 'shared/components/ErrorBoundary';
+import PageLoadingState from 'shared/components/PageLoadingState';
 import PrivateRoute from 'shared/components/PrivateRoute';
 import { useBackendHealth } from 'shared/context/BackendHealthContext';
+
+const Dashboard = lazy(() => import('features/dashboard/pages/Dashboard'));
+const SettingsPage = lazy(() => import('features/dashboard/pages/SettingsPage'));
+const AnalyticsPage = lazy(() => import('features/dashboard/pages/AnalyticsPage'));
+const HistoryPage = lazy(() => import('features/dashboard/pages/HistoryPage'));
+const ApplicationFitPage = lazy(() => import('features/application-fit/pages/ApplicationFitPage'));
+const ApplicationFitHistoryPage = lazy(() => import('features/application-fit/pages/ApplicationFitHistoryPage'));
+const SignalIntelligencePage = lazy(() => import('features/signal/pages/SignalIntelligencePage'));
+const AiInterviewPage = lazy(() => import('features/modes/pages/AiInterviewPage'));
+const RoleTargetedPage = lazy(() => import('features/modes/role-targeted/pages/RoleTargetedPage'));
+const PressureModePage = lazy(() => import('features/modes/pressure-mode/pages/PressureModePage'));
+const ResumeDeepDivePage = lazy(() => import('features/modes/resume-deep-dive/pages/ResumeDeepDivePage'));
+const BlindModePage = lazy(() => import('features/modes/blind-mode/pages/BlindModePage'));
+const PairProgrammingPage = lazy(() => import('features/modes/pair-programming/pages/PairProgrammingPage'));
+const VaultHubPage = lazy(() => import('features/vault/pages/VaultHubPage'));
+const VaultComparePage = lazy(() => import('features/vault/pages/VaultComparePage'));
+const VaultCompareResultPage = lazy(() => import('features/vault/pages/VaultCompareResultPage'));
+const VaultLibraryPage = lazy(() => import('features/vault/pages/VaultLibraryPage'));
+const VaultVersionsPage = lazy(() => import('features/vault/pages/VaultVersionsPage'));
+const VaultVersionDetailPage = lazy(() => import('features/vault/pages/VaultVersionDetailPage'));
+const ResumeBuilderPage = lazy(() => import('features/resume-builder/pages/ResumeBuilderPage'));
 
 const InterviewRoom = lazy(() => import('features/interview/pages/InterviewRoom'));
 const InterviewRoomLiveKit = lazy(() => import('features/interview/pages/InterviewRoomLiveKit'));
@@ -43,15 +47,16 @@ function useInterviewTransport() {
   return !healthLoading && livekitAvailable;
 }
 
+function RouteFallback() {
+  return <PageLoadingState variant="shell" minHeightClassName="min-h-[40vh]" />;
+}
+
 function InterviewRoomFallback() {
-  return (
-    <div className="min-h-screen bg-base flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <div className="animate-spin h-10 w-10 rounded-full border-2 border-[var(--teal-1)] border-t-transparent" />
-        <p className="text-sm text-[var(--cream-3)]">Loading interview...</p>
-      </div>
-    </div>
-  );
+  return <PageLoadingState variant="fullscreen" label="Loading interview…" fullScreen />;
+}
+
+function LazyPage({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<RouteFallback />}>{children}</Suspense>;
 }
 
 function InterviewRoute() {
@@ -63,44 +68,56 @@ function PrivateAppShell() {
   return (
     <PrivateRoute>
       <AppShell>
-        <Outlet />
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
       </AppShell>
     </PrivateRoute>
   );
 }
 
+const resumeBuilderEnabled = import.meta.env.VITE_RESUME_BUILDER_ENABLED === 'true';
+
 export const appRoutes = (
   <>
     <Route element={<PrivateAppShell />}>
-      <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/dashboard" element={<LazyPage><Dashboard /></LazyPage>} />
       <Route path="/resume-vault" element={<VaultLayout />}>
-        <Route index element={<VaultHubPage />} />
-        <Route path="compare" element={<VaultComparePage />} />
-        <Route path="compare/result" element={<VaultCompareResultPage />} />
-        <Route path="library" element={<VaultLibraryPage />} />
-        <Route path="r/:resumeId" element={<VaultVersionsPage />} />
-        <Route path="r/:resumeId/:versionId" element={<VaultVersionDetailPage />} />
+        <Route index element={<LazyPage><VaultHubPage /></LazyPage>} />
+        <Route path="compare" element={<LazyPage><VaultComparePage /></LazyPage>} />
+        <Route path="compare/result" element={<LazyPage><VaultCompareResultPage /></LazyPage>} />
+        <Route path="library" element={<LazyPage><VaultLibraryPage /></LazyPage>} />
+        {resumeBuilderEnabled ? (
+          <>
+            <Route path="builder" element={<LazyPage><ResumeBuilderPage /></LazyPage>} />
+            <Route path="builder/:draftId" element={<LazyPage><ResumeBuilderPage /></LazyPage>} />
+          </>
+        ) : null}
+        <Route path="r/:resumeId" element={<LazyPage><VaultVersionsPage /></LazyPage>} />
+        <Route path="r/:resumeId/:versionId" element={<LazyPage><VaultVersionDetailPage /></LazyPage>} />
       </Route>
-      <Route path="/profile" element={<SettingsPage />} />
-      <Route path="/application-fit" element={<ApplicationFitPage />} />
-      <Route path="/application-fit/history" element={<ApplicationFitHistoryPage />} />
-      <Route path="/signal-intelligence" element={<SignalIntelligencePage />} />
-      <Route path="/ai-interview/analytics" element={<AnalyticsPage />} />
-      <Route path="/ai-interview/history" element={<HistoryPage />} />
-      <Route path="/ai-interview" element={<AiInterviewPage />} />
-      <Route path="/ai-interview/role-targeted" element={<RoleTargetedPage />} />
-      <Route path="/ai-interview/pressure-mode" element={<PressureModePage />} />
-      <Route path="/ai-interview/resume-deep-dive" element={<ResumeDeepDivePage />} />
-      <Route path="/ai-interview/blind-mode" element={<BlindModePage />} />
-      <Route path="/ai-interview/pair-programming" element={<PairProgrammingPage />} />
+      <Route path="/profile" element={<LazyPage><SettingsPage /></LazyPage>} />
+      <Route path="/application-fit" element={<LazyPage><ApplicationFitPage /></LazyPage>} />
+      <Route path="/application-fit/history" element={<LazyPage><ApplicationFitHistoryPage /></LazyPage>} />
+      <Route path="/signal-intelligence" element={<LazyPage><SignalIntelligencePage /></LazyPage>} />
+      <Route path="/ai-interview/analytics" element={<LazyPage><AnalyticsPage /></LazyPage>} />
+      <Route path="/ai-interview/history" element={<LazyPage><HistoryPage /></LazyPage>} />
+      <Route path="/ai-interview" element={<LazyPage><AiInterviewPage /></LazyPage>} />
+      <Route path="/ai-interview/role-targeted" element={<LazyPage><RoleTargetedPage /></LazyPage>} />
+      <Route path="/ai-interview/pressure-mode" element={<LazyPage><PressureModePage /></LazyPage>} />
+      <Route path="/ai-interview/resume-deep-dive" element={<LazyPage><ResumeDeepDivePage /></LazyPage>} />
+      <Route path="/ai-interview/blind-mode" element={<LazyPage><BlindModePage /></LazyPage>} />
+      <Route path="/ai-interview/pair-programming" element={<LazyPage><PairProgrammingPage /></LazyPage>} />
     </Route>
     <Route
       path="/interview/:sessionId"
       element={
         <PrivateRoute>
-          <Suspense fallback={<InterviewRoomFallback />}>
-            <InterviewRoute />
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense fallback={<InterviewRoomFallback />}>
+              <InterviewRoute />
+            </Suspense>
+          </ErrorBoundary>
         </PrivateRoute>
       }
     />

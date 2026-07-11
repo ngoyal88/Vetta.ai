@@ -28,7 +28,9 @@
 
 ## 🌟 Overview
 
-**Vetta.ai** is an advanced AI-powered mock interview platform designed to help software developers and engineers prepare for technical interviews. The platform features real-time voice conversations with an AI interviewer, live coding challenges with instant test execution, and comprehensive feedback powered by Google's Gemini AI.
+**Vetta.ai** is an advanced AI-powered mock interview platform designed to help software developers and engineers prepare for technical interviews. The platform features real-time voice conversations with an AI interviewer (LiveKit + Deepgram STT + Edge TTS), optional live coding challenges, and comprehensive feedback via the platform LLM (Groq default; Gemini optional).
+
+> **Runtime note:** The primary interview transport is the **LiveKit agent** (`backend/run_livekit_agent.py`). WebSocket routes in `websocket_routes.py` are deprecated and not mounted. Post-session feedback and REST `/interview/complete` share `completion_guard.py` for idempotent completion.
 
 ### What Makes Vetta.ai Unique?
 

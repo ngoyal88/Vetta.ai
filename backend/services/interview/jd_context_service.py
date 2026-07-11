@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 from services.interview.llm_engine import LLMEngine
 from services.interview.prompt_contracts import extract_json_dict
 from services.jd_fit.jd_fit_weights import MIN_JD_CHARS
-from services.jd_fit.resume_skills import flatten_resume_skills
+from services.resume.skills_normalizer import flatten_skills_from_profile
 from utils.logger import get_logger
 
 logger = get_logger("JDContextService")
@@ -86,10 +86,6 @@ def _merge_jd_context(parsed: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[
     return merged
 
 
-def _resume_skills(resume_data: Optional[Dict[str, Any]]) -> List[str]:
-    return flatten_resume_skills(resume_data)[:20]
-
-
 def _role_probing_hints(target_role: str, interview_focus: str) -> List[str]:
     role_lower = (target_role or "").lower()
     hints: List[str] = []
@@ -133,7 +129,7 @@ def _fallback_context(
     jd_text = (job_description or "").strip()
     jd_lower = jd_text.lower()
     role_hints = _role_probing_hints(target_role, interview_focus)
-    skills = _resume_skills(resume_data)
+    skills = flatten_skills_from_profile(resume_data)[:20]
     focus_label = interview_focus.replace("_", " ")
 
     if jd_text:
@@ -218,7 +214,7 @@ class JDContextService:
         if len(jd_text) < MIN_JD_CHARS:
             return fallback
 
-        skills = _resume_skills(resume_data)
+        skills = flatten_skills_from_profile(resume_data)[:20]
         prompt = f"""Return ONLY JSON for a role-targeted interview context and application-fit analysis.
 
 Company: {target_company or ""}

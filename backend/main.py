@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import get_settings
-from routes import contact, jd_fit, livekit, vault
+from routes import contact, jd_fit, livekit, resume_builder, vault
 from routes.interview import router as interview_router
 from services.interview import InterviewService
 from utils.cors import apply_cors_headers
@@ -67,6 +67,13 @@ async def lifespan(app: FastAPI):
         log.info(
             "LiveKit agent not embedded in API process — run separately: "
             "python run_livekit_agent.py dev"
+        )
+
+    if settings.resume_builder_enabled:
+        log.info(
+            "Resume Builder compile service expected at %s — run separately in dev: "
+            "python run_compile_service.py",
+            settings.compile_service_url,
         )
 
     yield
@@ -190,6 +197,7 @@ async def access_log(request: Request, call_next):
 app.include_router(vault.router)
 app.include_router(jd_fit.router)
 app.include_router(livekit.router)
+app.include_router(resume_builder.router)
 app.include_router(contact.router)
 app.include_router(interview_router)
 

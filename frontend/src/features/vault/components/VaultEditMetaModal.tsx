@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import Modal from 'shared/components/Modal';
 
 import type { VaultEntry } from '../types';
 import { normalizeTagInput } from '../utils/vaultUtils';
 
 interface VaultEditMetaModalProps {
+  open: boolean;
   entry: VaultEntry | null;
   editName: string;
   editTags: string;
@@ -14,7 +15,11 @@ interface VaultEditMetaModalProps {
   onSave: () => void;
 }
 
+const fieldClass =
+  'mt-2 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-0)] px-3 py-2.5 text-[var(--color-on-surface)] transition-[border-color,box-shadow] duration-150 hover:border-[var(--color-primary)]/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]';
+
 export default function VaultEditMetaModal({
+  open,
   entry,
   editName,
   editTags,
@@ -24,64 +29,59 @@ export default function VaultEditMetaModal({
   onClose,
   onSave,
 }: VaultEditMetaModalProps) {
-  useEffect(() => {
-    if (!entry) return undefined;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [entry, onClose]);
-
-  if (!entry) return null;
-
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="w-full max-w-md rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-1)] p-6 shadow-[0_16px_48px_rgba(0,0,0,0.4)]"
-      >
-        <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--cream-4)]">Edit resume</p>
-        <h2 className="mt-2 text-lg font-medium text-[var(--cream-0)]">{entry.name}</h2>
+    <Modal open={open && Boolean(entry)} onClose={onClose} title="Edit resume details">
+      {entry ? (
+        <div className="space-y-5 text-[var(--color-on-surface)]">
+          <p className="type-body-md text-[var(--color-on-surface-variant)]">
+            Update how this resume appears in your library. Version history is unchanged.
+          </p>
 
-        <label className="mt-4 block text-xs text-[var(--cream-3)]">
-          Name
-          <input
-            value={editName}
-            onChange={(e) => onNameChange(e.target.value)}
-            className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-0)] px-3 py-2 text-sm text-[var(--cream-1)] outline-none focus:border-[var(--teal-2)]"
-          />
-        </label>
+          <label className="block text-sm">
+            <span className="type-label-sm uppercase tracking-[0.12em] text-[var(--color-on-surface-variant)]">
+              Resume name
+            </span>
+            <input
+              value={editName}
+              onChange={(event) => onNameChange(event.target.value)}
+              autoComplete="off"
+              className={fieldClass}
+            />
+          </label>
 
-        <label className="mt-3 block text-xs text-[var(--cream-3)]">
-          Tags (comma-separated)
-          <input
-            value={editTags}
-            onChange={(e) => onTagsChange(e.target.value)}
-            className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-0)] px-3 py-2 text-sm text-[var(--cream-1)] outline-none focus:border-[var(--teal-2)]"
-          />
-        </label>
+          <label className="block text-sm">
+            <span className="type-label-sm uppercase tracking-[0.12em] text-[var(--color-on-surface-variant)]">
+              Tags (comma-separated)
+            </span>
+            <input
+              value={editTags}
+              onChange={(event) => onTagsChange(event.target.value)}
+              autoComplete="off"
+              placeholder="React, Backend, 2026…"
+              className={fieldClass}
+            />
+          </label>
 
-        <div className="mt-6 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-[var(--border)] bg-[var(--bg-2)] px-4 py-2 text-xs uppercase tracking-[0.12em] text-[var(--cream-2)]"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={saving || !editName.trim()}
-            className="rounded-full bg-[var(--teal-2)] px-4 py-2 text-xs uppercase tracking-[0.12em] text-[var(--cream-0)] disabled:opacity-40"
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          <div className="flex justify-end gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-[var(--border-strong)] px-4 py-2.5 text-sm font-semibold text-[var(--color-on-surface)] transition-colors hover:bg-[var(--color-surface-container-high)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !editName.trim()}
+              className="rounded-xl bg-[var(--color-primary)] px-4 py-2.5 text-sm font-semibold text-[var(--color-on-primary)] transition-colors hover:bg-[var(--color-primary-container)] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </div>
-      </div>
-    </div>
+      ) : null}
+    </Modal>
   );
 }
 

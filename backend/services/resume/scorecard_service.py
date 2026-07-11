@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from models.resume import ResumeCoverageCounts, ResumeScorecardMeta, ResumeScorecardResponse
 from services.interview.llm_engine import get_platform_llm
 from services.interview.prompt_contracts import extract_json_dict
+from services.resume.skills_normalizer import flatten_skills_from_profile
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,31 +30,6 @@ def _safe_str_list(values: Any) -> List[str]:
         if text:
             out.append(text)
     return out
-
-
-def _flatten_skills(profile: Dict[str, Any]) -> List[str]:
-    skills = profile.get("skills")
-    if isinstance(skills, list):
-        # Legacy shape: [{"name": "..."}]
-        flat: List[str] = []
-        for entry in skills:
-            if isinstance(entry, dict):
-                value = _safe_str(entry.get("name"))
-                if value:
-                    flat.append(value)
-            else:
-                value = _safe_str(entry)
-                if value:
-                    flat.append(value)
-        return list(dict.fromkeys(flat))
-
-    if isinstance(skills, dict):
-        merged: List[str] = []
-        for key in ("languages", "frameworks", "databases", "cloud", "tools", "ml_ai", "other"):
-            merged.extend(_safe_str_list(skills.get(key)))
-        return list(dict.fromkeys(merged))
-
-    return []
 
 
 def _normalize_projects(profile: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -111,7 +87,7 @@ def _normalize_work_experience(profile: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def normalize_resume_for_scorecard(profile: Dict[str, Any]) -> Dict[str, Any]:
     normalized = {
-        "skills": _flatten_skills(profile),
+        "skills": flatten_skills_from_profile(profile),
         "projects": _normalize_projects(profile),
         "work_experience": _normalize_work_experience(profile),
     }
@@ -146,7 +122,7 @@ def build_rule_suggestions(counts: ResumeCoverageCounts) -> List[str]:
         )
     if counts.skills < 6:
         suggestions.append(
-            "Expand technical skills with role-relevant tools and group them by category."
+            "Expand technical skills with role-relevant tools and group them by topic."
         )
     if not suggestions:
         suggestions.append("Keep project and experience sections updated with recent, quantified achievements.")

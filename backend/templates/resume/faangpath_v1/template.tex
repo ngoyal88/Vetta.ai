@@ -1,0 +1,166 @@
+%-------------------------
+% Classic FAANG layout (Jinja) — resume.cls-compatible macros inlined
+% Matches FaangPath / sb2nov / Trey Hunner resume style
+%-------------------------
+
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[left=0.4in,top=0.4in,right=0.4in,bottom=0.4in]{geometry}
+\usepackage[parfill]{parskip}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue]{hyperref}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+\def \addressSep {$\diamond$}
+
+\def \printaddress #1{%
+  \begingroup%
+  \def \\ {\addressSep\ }%
+  \centerline{#1}%
+  \endgroup%
+  \par%
+  \smallskip%
+}
+
+\def \printname #1{%
+  \begingroup%
+  \hfil{\MakeUppercase{\huge\bfseries #1}}\hfil%
+  \bigskip\par%
+  \endgroup%
+}
+
+\newenvironment{rSection}[1]{%
+  \medskip%
+  \MakeUppercase{\bfseries #1}%
+  \medskip%
+  \hrule%
+  \begin{list}{}{%
+    \setlength{\leftmargin}{1.5em}%
+  }%
+  \item[]%
+}{%
+  \end{list}%
+}
+
+<% macro date_range(start, end) -%><< (start or '')|latex >><% if start and end %> - <% endif %><< (end or '')|latex >><% endmacro -%>
+<% macro degree_line(row) -%>{\bfseries << (row.degree or '')|latex >>}<% if row.field %>, << row.field|latex >><% endif %><% if row.institution %>, << row.institution|latex >><% endif %><% endmacro -%>
+
+\begin{document}
+
+<% set c = profile.contact %>
+<% set links = c.links if c else none %>
+\printname{<< profile.name|latex >>}
+<% if c and (c.phone or c.location) %>
+\printaddress{<% if c.phone %><< c.phone|latex >><% endif %><% if c.phone and c.location %> \\ <% endif %><% if c.location %><< c.location|latex >><% endif %>}
+<% endif %>
+<% set ns = namespace(parts=[]) %>
+<% if c and c.email %><% set _ = ns.parts.append('\\href{mailto:' ~ (c.email|latex) ~ '}{' ~ (c.email|latex) ~ '}') %><% endif %>
+<% if links and links.linkedin %><% set _ = ns.parts.append('\\href{' ~ (links.linkedin|latex) ~ '}{' ~ (links.linkedin|latex) ~ '}') %><% endif %>
+<% if links and links.github %><% set _ = ns.parts.append('\\href{' ~ (links.github|latex) ~ '}{' ~ (links.github|latex) ~ '}') %><% endif %>
+<% if links and links.portfolio %><% set _ = ns.parts.append('\\href{' ~ (links.portfolio|latex) ~ '}{' ~ (links.portfolio|latex) ~ '}') %><% endif %>
+<% if links %>
+<% for link in links.other or [] %>
+<% if link %><% set _ = ns.parts.append('\\href{' ~ (link|latex) ~ '}{' ~ (link|latex) ~ '}') %><% endif %>
+<% endfor %>
+<% endif %>
+<% if ns.parts %>
+\printaddress{<% for part in ns.parts %><% if not loop.first %> \\ <% endif %><< part >><% endfor %>}
+<% endif %>
+
+<% for section in layout %>
+<% if section.kind == 'summary' and profile.summary %>
+\begin{rSection}{<< section.label|latex >>}
+{<< profile.summary|latex >>}
+\end{rSection}
+<% elif section.kind == 'education' and profile.education %>
+\begin{rSection}{<< section.label|latex >>}
+<% for row in profile.education %>
+<% if row.degree or row.institution %>
+<< degree_line(row) >><% if row.start_date or row.end_date %> \hfill {<< date_range(row.start_date, row.end_date) >>}<% endif %>
+<% for highlight in row.highlights or [] %>
+<% if highlight.label and highlight.text %>
+\\ << highlight.label|latex >>: << highlight.text|latex >>
+<% endif %>
+<% endfor %>
+<% if row.cgpa %>
+<% set cgpa_val = (row.cgpa or '')|trim %>
+\\ <% if cgpa_val[:4]|lower == 'cgpa' or cgpa_val[:3]|lower == 'gpa' %><< cgpa_val|latex >><% else %>CGPA: << cgpa_val|latex >><% endif %>
+<% endif %>
+\smallskip
+<% endif %>
+<% endfor %>
+\end{rSection}
+<% elif section.kind == 'skills' and profile.skills %>
+<% set skill_ns = namespace(has=false) %>
+<% for group in profile.skills %>
+<% if group['items'] and group['items']|length > 0 %><% set skill_ns.has = true %><% endif %>
+<% endfor %>
+<% if skill_ns.has %>
+\begin{rSection}{<< section.label|latex >>}
+\begin{tabular}{ @{} >{\bfseries}l @{\hspace{6ex}} l }
+<% for group in profile.skills %>
+<% if group['items'] and group['items']|length > 0 %>
+<< (group['label'] or 'Skills')|latex >> & <% for value in group['items'] %><% if not loop.first %>, <% endif %><< value|latex >><% endfor %> \\
+<% endif %>
+<% endfor %>
+\end{tabular}
+\end{rSection}
+<% endif %>
+<% elif section.kind == 'work_experience' and profile.work_experience %>
+\begin{rSection}{<< section.label|latex >>}
+<% for row in profile.work_experience %>
+<% if row.title or row.company %>
+\textbf{<< (row.title or '')|latex >>}<% if row.start_date or row.end_date %> \hfill << date_range(row.start_date, row.end_date) >><% endif %>\\
+<< (row.company or '')|latex >><% if row.location %> \hfill \textit{<< row.location|latex >>}<% endif %>
+<% set bullets = (row.responsibilities or []) + (row.impact or []) %>
+<% if bullets %>
+ \begin{itemize}[itemsep=-3pt, topsep=2pt, leftmargin=*]
+<% for bullet in bullets %>
+<% if bullet %>
+    \item << bullet|latex >>
+<% endif %>
+<% endfor %>
+ \end{itemize}
+<% endif %>
+\smallskip
+<% endif %>
+<% endfor %>
+\end{rSection}
+<% elif section.kind == 'projects' and profile.projects %>
+\begin{rSection}{<< section.label|latex >>}
+\vspace{-1.25em}
+<% for row in profile.projects %>
+<% if row.name or row.description %>
+\item \textbf{<< (row.name or 'Project')|latex >>.} {<% if row.description %><% for line in row.description.split('\n') %><% if line.strip() %><< line.strip()|latex >><% if not loop.last %> <% endif %><% endif %><% endfor %><% endif %><% if row.link %> \href{<< row.link|latex >>}{(Try it here)}<% endif %>}
+<% endif %>
+<% endfor %>
+\end{rSection}
+<% elif section.kind == 'achievements' and profile.achievements %>
+\begin{rSection}{<< section.label|latex >>}
+<% for row in profile.achievements %>
+<% if row.title or row.description %>
+\item \textbf{<< (row.title or 'Achievement')|latex >>.} {<< (row.description or '')|latex >>}
+<% endif %>
+<% endfor %>
+\end{rSection}
+<% elif section.kind == 'publications' and profile.publications %>
+\begin{rSection}{<< section.label|latex >>}
+<% for row in profile.publications %>
+<% if row.title %>
+\item \textbf{<< row.title|latex >>}<% if row.year %> (<< row.year|latex >>)<% endif %><% if row.venue %>. << row.venue|latex >><% endif %>
+<% endif %>
+<% endfor %>
+\end{rSection}
+<% elif section.kind == 'custom' and section.custom_lines %>
+\begin{rSection}{<< section.label|latex >>}
+<% for line in section.custom_lines %>
+\item << line|latex >>
+<% endfor %>
+\end{rSection}
+<% endif %>
+<% endfor %>
+
+\end{document}

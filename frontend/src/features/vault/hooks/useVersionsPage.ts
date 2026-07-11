@@ -14,7 +14,7 @@ import { useVaultVersions } from './useVaultVersions';
 export function useVersionsPage() {
   const { resumeId } = useParams<{ resumeId: string }>();
   const navigate = useNavigate();
-  const { entries, loading: libraryLoading, updateMeta, restoreVersion } = useVaultLibraryContext();
+  const { entries, loading: libraryLoading, updateMeta, restoreVersion, uploadResume } = useVaultLibraryContext();
   const { versions, loading, error, refresh } = useVaultVersions(resumeId);
 
   const entry = useMemo(
@@ -23,6 +23,8 @@ export function useVersionsPage() {
   );
 
   const [editOpen, setEditOpen] = useState(false);
+  const [addVersionOpen, setAddVersionOpen] = useState(false);
+  const [uploadingVersion, setUploadingVersion] = useState(false);
   const [editName, setEditName] = useState('');
   const [editTags, setEditTags] = useState('');
   const [savingMeta, setSavingMeta] = useState(false);
@@ -43,6 +45,31 @@ export function useVersionsPage() {
   }, [entry]);
 
   const closeEdit = useCallback(() => setEditOpen(false), []);
+
+  const openAddVersion = useCallback(() => setAddVersionOpen(true), []);
+  const closeAddVersion = useCallback(() => setAddVersionOpen(false), []);
+
+  const uploadVersion = useCallback(
+    async (file: File, userNote: string) => {
+      if (!resumeId || !entry) return;
+      try {
+        setUploadingVersion(true);
+        await uploadResume({
+          file,
+          name: entry.name,
+          tags: (entry.tags || []).join(', '),
+          resumeId,
+          userNote: userNote || undefined,
+        });
+        await refresh();
+        setAddVersionOpen(false);
+        toast.success('Version added');
+      } finally {
+        setUploadingVersion(false);
+      }
+    },
+    [entry, refresh, resumeId, uploadResume],
+  );
 
   const saveMeta = useCallback(async () => {
     if (!resumeId || !editName.trim()) {
@@ -65,6 +92,16 @@ export function useVersionsPage() {
     (versionId: string) => {
       if (!resumeId) return;
       navigate(`/resume-vault/r/${resumeId}/${versionId}`);
+    },
+    [navigate, resumeId],
+  );
+
+  const openInBuilder = useCallback(
+    (versionId: string) => {
+      if (!resumeId) return;
+      navigate(
+        `/resume-vault/builder?resumeId=${encodeURIComponent(resumeId)}&versionId=${encodeURIComponent(versionId)}`,
+      );
     },
     [navigate, resumeId],
   );
@@ -160,6 +197,8 @@ export function useVersionsPage() {
     error,
     refresh,
     editOpen,
+    addVersionOpen,
+    uploadingVersion,
     editName,
     editTags,
     savingMeta,
@@ -168,8 +207,12 @@ export function useVersionsPage() {
     setEditTags,
     openEdit,
     closeEdit,
+    openAddVersion,
+    closeAddVersion,
+    uploadVersion,
     saveMeta,
     previewVersion,
+    openInBuilder,
     downloadVersion,
     compareVersion,
     restoreVersionById,

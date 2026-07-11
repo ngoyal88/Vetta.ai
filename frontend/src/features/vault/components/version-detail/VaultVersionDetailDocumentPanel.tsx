@@ -1,5 +1,5 @@
 import React from 'react';
-import { BadgeCheck, Clock, Download, FileText } from 'lucide-react';
+import { BadgeCheck, Clock, Download, FileText, Wand2 } from 'lucide-react';
 
 import VaultDocumentViewer from 'features/vault/components/VaultDocumentViewer';
 import { VAULT_VERSION_DETAIL_COPY } from 'features/vault/constants/versionDetailContent';
@@ -18,6 +18,7 @@ type VaultVersionDetailDocumentPanelProps = {
   onReanalyze: () => void;
   onRestore: () => void;
   onSetActive: () => void;
+  onOpenInBuilder: () => void;
   onDownload?: () => void;
   onBlobReady?: (blobUrl: string | null) => void;
   onFileSize?: (sizeBytes: number | null) => void;
@@ -36,6 +37,7 @@ export default function VaultVersionDetailDocumentPanel({
   onReanalyze,
   onRestore,
   onSetActive,
+  onOpenInBuilder,
   onDownload,
   onBlobReady,
   onFileSize,
@@ -48,6 +50,11 @@ export default function VaultVersionDetailDocumentPanel({
         <div className="vault-version-detail__document-meta">
           <FileText className="h-6 w-6 shrink-0 text-[var(--color-outline)]" aria-hidden />
           <h2 className="vault-version-detail__document-title">{filename}</h2>
+          {version.builder ? (
+            <span className="rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-primary)]">
+              Built in Vetta
+            </span>
+          ) : null}
           {fileSizeLabel ? (
             <span className="vault-version-detail__file-size">{fileSizeLabel}</span>
           ) : null}
@@ -75,6 +82,14 @@ export default function VaultVersionDetailDocumentPanel({
           <span>{lastAnalyzedLabel}</span>
         </div>
         <div className="vault-version-detail__actions">
+          <button
+            type="button"
+            onClick={onOpenInBuilder}
+            className="vault-version-detail__action-btn"
+          >
+            <Wand2 className="h-[18px] w-[18px]" aria-hidden />
+            Open in Builder
+          </button>
           <button
             type="button"
             disabled={reanalyzing}

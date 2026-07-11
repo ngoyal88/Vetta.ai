@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 import { useVaultLibraryContext } from '../context/VaultLibraryContext';
@@ -15,6 +15,7 @@ import { getErrorMessage } from '../utils/vaultUtils';
 
 export function useVersionDetailPage() {
   const { resumeId, versionId } = useParams<{ resumeId: string; versionId: string }>();
+  const navigate = useNavigate();
   const { entries, setActive, restoreVersion, reanalyze } = useVaultLibraryContext();
 
   const [version, setVersion] = useState<VaultVersion | null>(null);
@@ -131,6 +132,13 @@ export function useVersionDetailPage() {
     }
   }, [entry, setActive]);
 
+  const openInBuilder = useCallback(() => {
+    if (!resumeId || !versionId) return;
+    navigate(
+      `/resume-vault/builder?resumeId=${encodeURIComponent(resumeId)}&versionId=${encodeURIComponent(versionId)}`,
+    );
+  }, [navigate, resumeId, versionId]);
+
   return {
     resumeId,
     versionId,
@@ -147,5 +155,6 @@ export function useVersionDetailPage() {
     handleReanalyze,
     handleRestore,
     handleSetActive,
+    openInBuilder,
   };
 }

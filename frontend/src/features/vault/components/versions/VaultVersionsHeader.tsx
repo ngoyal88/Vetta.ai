@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Bolt, Pencil, Plus } from 'lucide-react';
+import { Bolt, Pencil, Plus, Wand2 } from 'lucide-react';
 
 import { VAULT_VERSIONS_COPY } from 'features/vault/constants/versionsContent';
 import type { VaultEntry, VaultVersion } from 'features/vault/types';
@@ -11,6 +11,7 @@ type VaultVersionsHeaderProps = {
   headVersion: VaultVersion | null;
   compatScore: number | null;
   onEdit: () => void;
+  onAddVersion: () => void;
 };
 
 export default function VaultVersionsHeader({
@@ -18,6 +19,7 @@ export default function VaultVersionsHeader({
   headVersion,
   compatScore,
   onEdit,
+  onAddVersion,
 }: VaultVersionsHeaderProps) {
   const copy = VAULT_VERSIONS_COPY;
   const headLabel = headVersion
@@ -34,6 +36,11 @@ export default function VaultVersionsHeader({
         </h1>
         <div className="mt-3 flex flex-wrap items-center gap-4">
           <span className="vault-versions-head-badge">{headLabel}</span>
+          {entry?.origin === 'builder' ? (
+            <span className="rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-primary)]">
+              Built in Vetta
+            </span>
+          ) : null}
           {compatScore != null ? (
             <div className="type-label-md flex items-center gap-2 text-[var(--color-on-surface-variant)]">
               <span>{copy.compatScore}:</span>
@@ -64,12 +71,22 @@ export default function VaultVersionsHeader({
         </button>
         {entry ? (
           <Link
-            to={`/resume-vault?resumeId=${encodeURIComponent(entry.id)}`}
+            to={`/resume-vault/builder?resumeId=${encodeURIComponent(entry.id)}`}
+            className="vault-versions-action-btn"
+          >
+            <Wand2 className="h-4 w-4" aria-hidden />
+            Open in Builder
+          </Link>
+        ) : null}
+        {entry ? (
+          <button
+            type="button"
+            onClick={onAddVersion}
             className="vault-versions-action-btn vault-versions-action-btn--primary"
           >
             <Plus className="h-4 w-4" aria-hidden />
             {copy.newVersion}
-          </Link>
+          </button>
         ) : null}
       </div>
     </header>

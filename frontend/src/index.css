@@ -201,34 +201,45 @@ body {
   overflow-y: auto;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
 }
 
 /* ===== Scrollbar ===== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-outline) 52%, transparent) transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: color-mix(in srgb, var(--color-surface-container-low) 18%, transparent);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(79, 219, 200, 0.35);
-  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-outline) 52%, transparent);
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(79, 219, 200, 0.55);
+  background: color-mix(in srgb, var(--color-secondary) 36%, var(--color-outline) 64%);
+  background-clip: padding-box;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 8px;
+  height: 8px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+  background: color-mix(in srgb, var(--color-surface-container-low) 14%, transparent);
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(79, 219, 200, 0.28);
-  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-secondary) 28%, transparent);
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
 }
 
 /* ===== Typography scale (DESIGN.md) ===== */
@@ -2551,6 +2562,74 @@ body {
     opacity: 0.85;
   }
 }
+
+/* ===== App loading — shimmer skeletons + bootstrap bar (no spinners) ===== */
+.app-shimmer {
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-surface-container-high) 72%, transparent) 0%,
+    color-mix(in srgb, var(--color-surface-container-highest) 96%, transparent) 50%,
+    color-mix(in srgb, var(--color-surface-container-high) 72%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: app-shimmer-slide 1.6s ease-in-out infinite;
+}
+
+@keyframes app-shimmer-slide {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+.app-indeterminate-bar {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 9999;
+  height: 2px;
+  width: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-surface-container-high) 55%, transparent);
+}
+
+.app-indeterminate-bar__track {
+  height: 100%;
+  width: 38%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-primary) 45%,
+    color-mix(in srgb, var(--color-primary-container) 90%, transparent) 100%
+  );
+  animation: app-indeterminate-bar 1.1s ease-in-out infinite;
+}
+
+@keyframes app-indeterminate-bar {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shimmer {
+    animation: none;
+    opacity: 0.65;
+  }
+
+  .app-indeterminate-bar__track {
+    animation: none;
+    width: 100%;
+    opacity: 0.55;
+  }
+}
+
 .resume-deep-dive-input {
   width: 100%;
   border-radius: var(--radius-lg);

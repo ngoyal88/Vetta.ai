@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from services.jd_fit.candidate_graph import CandidateIntelligenceGraph
-from services.jd_fit.resume_skills import flatten_resume_skills
+from services.resume.skills_normalizer import flatten_skills_from_profile
 
 MAX_COMPACT_CHARS = 4000
 
@@ -40,7 +40,7 @@ def compact_resume_for_alignment(profile: Dict[str, Any]) -> str:
     if isinstance(summary, str) and summary.strip():
         parts.append(f"Summary: {summary.strip()}")
 
-    skills = flatten_resume_skills(profile)
+    skills = flatten_skills_from_profile(profile)
     if skills:
         parts.append("Skills: " + ", ".join(skills[:40]))
 

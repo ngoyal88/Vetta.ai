@@ -11,9 +11,14 @@ from redis.exceptions import WatchError
 
 from config import get_settings
 from utils.logger import get_logger
+from utils.session_errors import SessionConflictError
 
 log = get_logger(__name__)
 settings = get_settings()
+
+
+def default_session_ttl() -> int:
+    return int(getattr(get_settings(), "interview_session_ttl_seconds", 7200))
 
 
 def create_redis_client(*, pooled: bool = True) -> Redis:
@@ -29,6 +34,7 @@ def create_redis_client(*, pooled: bool = True) -> Redis:
             socket_connect_timeout=10,
             socket_keepalive=pooled,
             health_check_interval=30 if pooled else 0,
+            max_connections=20 if pooled else None,
         )
 
     ssl_env = os.environ.get("REDIS_SSL", "").strip().lower()
@@ -46,6 +52,16 @@ def create_redis_client(*, pooled: bool = True) -> Redis:
 
 
 redis = create_redis_client()
+_reconnect_lock: Optional[Any] = None
+
+
+def _reconnect_lock_instance():
+    import asyncio
+
+    global _reconnect_lock
+    if _reconnect_lock is None:
+        _reconnect_lock = asyncio.Lock()
+    return _reconnect_lock
 
 
 async def get_redis() -> Redis:
@@ -56,17 +72,22 @@ async def get_redis() -> Redis:
         return redis
     except Exception as exc:
         log.warning("Redis connection stale; reconnecting: %s", exc)
-        # Do not call close_redis() here — the old pool may be bound to a dead loop.
-        redis = create_redis_client()
-        try:
-            await redis.ping()
-        except Exception as retry_exc:
-            log.error("Redis reconnect failed", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Session store unavailable",
-            ) from retry_exc
-        return redis
+        async with _reconnect_lock_instance():
+            try:
+                await redis.ping()
+                return redis
+            except Exception:
+                pass
+            redis = create_redis_client()
+            try:
+                await redis.ping()
+            except Exception as retry_exc:
+                log.error("Redis reconnect failed", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Session store unavailable",
+                ) from retry_exc
+            return redis
 
 
 async def close_redis() -> None:
@@ -110,10 +131,11 @@ async def test_connection() -> bool:
     return False
 
 
-async def create_session(session_id: str, data: dict, expire_seconds: int = 3600) -> None:
+async def create_session(session_id: str, data: dict, expire_seconds: Optional[int] = None) -> None:
+    ttl = expire_seconds if expire_seconds is not None else default_session_ttl()
     safe = jsonable_encoder(data)
     client = await get_redis()
-    await client.set(session_id, json.dumps(safe), ex=expire_seconds)
+    await client.set(session_id, json.dumps(safe), ex=ttl)
     log.info("Session %s created", session_id)
 
 
@@ -134,11 +156,12 @@ async def get_session(session_key: str):
     return None
 
 
-async def update_session(session_key: str, data: dict, expire_seconds: int = 3600) -> None:
+async def update_session(session_key: str, data: dict, expire_seconds: Optional[int] = None) -> None:
+    ttl = expire_seconds if expire_seconds is not None else default_session_ttl()
     try:
         safe = jsonable_encoder(data)
         client = await get_redis()
-        await client.set(session_key, json.dumps(safe), ex=expire_seconds)
+        await client.set(session_key, json.dumps(safe), ex=ttl)
         log.info("Session %s updated", session_key)
     except Exception as e:
         log.error("Error updating session %s: %s", session_key, e, exc_info=True)
@@ -148,11 +171,12 @@ async def update_session(session_key: str, data: dict, expire_seconds: int = 360
 async def merge_session(
     session_key: str,
     patch: dict,
-    expire_seconds: int = 3600,
+    expire_seconds: Optional[int] = None,
     *,
     redis_client: Optional[Any] = None,
 ) -> dict:
     """Shallow-merge patch into the existing session blob."""
+    ttl = expire_seconds if expire_seconds is not None else default_session_ttl()
 
     def _mutator(current: dict) -> dict:
         base = current if isinstance(current, dict) else {}
@@ -162,7 +186,7 @@ async def merge_session(
     return await update_session_atomic(
         session_key,
         _mutator,
-        expire_seconds=expire_seconds,
+        expire_seconds=ttl,
         redis_client=redis_client,
     )
 
@@ -170,12 +194,13 @@ async def merge_session(
 async def update_session_atomic(
     session_key: str,
     mutator: Callable[[dict], dict],
-    expire_seconds: int = 3600,
+    expire_seconds: Optional[int] = None,
     max_retries: int = 3,
     *,
     redis_client: Optional[Any] = None,
 ) -> dict:
     """Optimistic read-modify-write with Redis WATCH to reduce lost updates."""
+    ttl = expire_seconds if expire_seconds is not None else default_session_ttl()
     client = redis_client or await get_redis()
     last_error: Optional[Exception] = None
 
@@ -191,7 +216,7 @@ async def update_session_atomic(
             safe = jsonable_encoder(updated)
             pipe = client.pipeline()
             pipe.multi()
-            pipe.set(session_key, json.dumps(safe), ex=expire_seconds)
+            pipe.set(session_key, json.dumps(safe), ex=ttl)
             await pipe.execute()
             log.info("Session %s updated atomically (v=%s)", session_key, updated.get("_version"))
             return updated
@@ -209,9 +234,13 @@ async def update_session_atomic(
                 pass
 
     log.warning(
-        "Atomic session update exhausted retries for %s; falling back to SET",
+        "session_atomic_exhausted session_key=%s retries=%s",
         session_key,
+        max_retries,
+        extra={"session_key": session_key, "event": "session_atomic_exhausted"},
     )
+    if session_key.startswith("interview:"):
+        raise SessionConflictError(f"Session update conflict for {session_key}")
     raw = await client.get(session_key)
     current = json.loads(raw) if raw else {}
     updated = mutator(dict(current))
@@ -219,7 +248,7 @@ async def update_session_atomic(
         raise TypeError("Session mutator must return a dict")
     updated["_version"] = int(current.get("_version", 0)) + 1
     safe = jsonable_encoder(updated)
-    await client.set(session_key, json.dumps(safe), ex=expire_seconds)
+    await client.set(session_key, json.dumps(safe), ex=ttl)
     if last_error:
         log.debug("Last atomic retry error for %s: %s", session_key, last_error)
     return updated

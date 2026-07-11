@@ -24,6 +24,7 @@ from services.jd_fit.funnel_scoring import (
     identify_bottleneck,
     years_match_score,
 )
+from services.resume.profile_normalizer import profile_content_hash
 from services.jd_fit.hash_utils import jd_hash
 from services.jd_fit.jd_fit_models import (
     ComputeResponse,
@@ -254,6 +255,7 @@ class JDFitService:
 
         accepted_count = int(profile_memory.get("accepted_count") or 0)
         profile_revision = str(profile_memory.get("updated_at") or accepted_count)
+        content_hash = profile_content_hash(profile)
         digest = build_inputs_digest(
             uid,
             role,
@@ -262,6 +264,7 @@ class JDFitService:
             selected_version_id,
             target_company=target_company,
             profile_revision=profile_revision,
+            profile_content_hash=content_hash,
         )
         cached_id = await get_cached_snapshot_id(uid, digest)
         if cached_id:

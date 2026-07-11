@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
+from services.resume.profile_normalizer import profile_snapshot_dict
 from services.resume.resume_parser import parse_resume_llm
 from services.vault import (
     MAX_RESUMES_PER_USER,
@@ -199,14 +200,19 @@ async def upload_to_vault(
     if not normalized_resume_id:
         if resume_count >= MAX_RESUMES_PER_USER:
             raise HTTPException(403, f"Resume limit reached (max {MAX_RESUMES_PER_USER}).")
-        is_active = active_resume_id is None
-        entry = await create_resume_entry(uid, normalized_name, tags_list, is_active)
+        try:
+            entry = await create_resume_entry(
+                uid,
+                normalized_name,
+                tags_list,
+                active_resume_id is None,
+            )
+        except ValueError as exc:
+            if str(exc) == "resume_limit_reached":
+                raise HTTPException(403, f"Resume limit reached (max {MAX_RESUMES_PER_USER}).") from exc
+            raise
         normalized_resume_id = entry["id"]
         created_new_entry = True
-        resume_count += 1
-        if is_active:
-            active_resume_id = normalized_resume_id
-        await set_vault_meta(uid, resume_count, active_resume_id)
     else:
         entry = await get_vault_entry(uid, normalized_resume_id)
         if not entry:
@@ -238,7 +244,7 @@ async def upload_to_vault(
         version, scorecard = await add_version(
             uid,
             normalized_resume_id,
-            parsed.profile.model_dump(),
+            profile_snapshot_dict(parsed.profile.model_dump()),
             normalized_user_note,
             role=normalized_role,
             source_filename=file.filename,

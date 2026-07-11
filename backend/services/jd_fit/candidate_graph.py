@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Set
 
 from services.profile_memory.umbrella_terms import normalize_text
+from services.resume.profile_normalizer import profile_snapshot_dict
+from services.resume.skills_normalizer import flatten_skills_from_profile, normalize_skills_input
 
 SkillDepth = Literal["listed", "evidenced", "production"]
 SkillSource = Literal["resume", "vpm"]
@@ -51,18 +53,9 @@ def _collect_resume_skills(profile: Dict[str, Any]) -> Dict[str, Set[str]]:
             return
         placements.setdefault(key, set()).add(tag)
 
-    raw_skills = profile.get("skills")
-    if isinstance(raw_skills, dict):
-        for category in ("languages", "frameworks", "databases", "cloud", "tools", "ml_ai", "other"):
-            for item in raw_skills.get(category) or []:
-                if isinstance(item, str) and item.strip():
-                    add(item, "listed")
-    elif isinstance(raw_skills, list):
-        for item in raw_skills:
-            if isinstance(item, str):
-                add(item, "listed")
-            elif isinstance(item, dict) and isinstance(item.get("name"), str):
-                add(item["name"], "listed")
+    for group in normalize_skills_input(profile.get("skills")):
+        for item in group.items:
+            add(item, "listed")
 
     for exp in profile.get("work_experience") or []:
         if not isinstance(exp, dict):
@@ -105,10 +98,8 @@ def _flatten_corpus(profile: Dict[str, Any]) -> str:
                 parts.append(bullet)
 
     skills = profile.get("skills")
-    if isinstance(skills, dict):
-        for items in skills.values():
-            if isinstance(items, list):
-                parts.extend(str(s) for s in items if s)
+    for group in normalize_skills_input(skills):
+        parts.extend(group.items)
 
     for edu in profile.get("education") or []:
         if isinstance(edu, dict):
@@ -282,16 +273,17 @@ def build_candidate_graph(
     profile: Dict[str, Any],
     profile_memory: Dict[str, Any],
 ) -> CandidateIntelligenceGraph:
+    canonical = profile_snapshot_dict(profile) if isinstance(profile, dict) else {}
     work_experience = [
-        exp for exp in (profile.get("work_experience") or []) if isinstance(exp, dict)
+        exp for exp in (canonical.get("work_experience") or []) if isinstance(exp, dict)
     ]
-    placements = _collect_resume_skills(profile)
+    placements = _collect_resume_skills(canonical)
     skills_resume: Dict[str, SkillNode] = {}
 
     for key, tags in placements.items():
         depth: SkillDepth = "evidenced" if "evidenced" in tags else "listed"
         display = key
-        for orig in _all_skill_labels(profile):
+        for orig in _all_skill_labels(canonical):
             if normalize_text(orig) == key:
                 display = orig
                 break
@@ -322,8 +314,8 @@ def build_candidate_graph(
     for key, node in skills_vpm.items():
         skills_merged[key] = node
 
-    seniority = str(profile.get("seniority_level") or "unknown").lower()
-    years_raw = profile.get("years_experience")
+    seniority = str(canonical.get("seniority_level") or "unknown").lower()
+    years_raw = canonical.get("years_experience")
     years: Optional[float] = None
     if isinstance(years_raw, (int, float)) and float(years_raw) >= 0:
         years = float(years_raw)
@@ -341,21 +333,13 @@ def build_candidate_graph(
         title_tokens=_title_tokens(work_experience),
         has_tenure_gaps=_detect_tenure_gaps(work_experience),
         has_quantified_bullets=_has_quantified_bullets(work_experience),
-        resume_corpus=_flatten_corpus(profile),
-        education=[edu for edu in (profile.get("education") or []) if isinstance(edu, dict)],
-        profile_location=_profile_location(profile),
+        resume_corpus=_flatten_corpus(canonical),
+        education=[edu for edu in (canonical.get("education") or []) if isinstance(edu, dict)],
+        profile_location=_profile_location(canonical),
         experience_locations=_experience_locations(work_experience),
-        project_summaries=_project_summaries(profile),
+        project_summaries=_project_summaries(canonical),
     )
 
 
 def _all_skill_labels(profile: Dict[str, Any]) -> List[str]:
-    labels: List[str] = []
-    raw_skills = profile.get("skills")
-    if isinstance(raw_skills, dict):
-        for items in raw_skills.values():
-            if isinstance(items, list):
-                labels.extend(str(s) for s in items if s)
-    elif isinstance(raw_skills, list):
-        labels.extend(str(s) for s in raw_skills if s)
-    return labels
+    return flatten_skills_from_profile(profile)

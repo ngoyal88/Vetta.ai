@@ -9,6 +9,7 @@ import { HistorySessionList } from '../components/history/HistorySessionList';
 import { HistoryToolbar } from '../components/history/HistoryToolbar';
 import { TranscriptOverlay } from '../components/history/TranscriptOverlay';
 import { useHistoryPageState } from '../hooks/useHistoryPageState';
+import PageLoadingState from 'shared/components/PageLoadingState';
 import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
 import {
   AI_INTERVIEW_ANALYTICS_PATH,
@@ -73,10 +74,7 @@ const HistoryPage: React.FC = () => {
         </motion.header>
 
         {state.loading ? (
-          <div className="flex flex-col items-center justify-center py-24">
-            <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
-            <p className="type-body-md text-[var(--color-on-surface-variant)]">Loading sessions...</p>
-          </div>
+          <PageLoadingState variant="split" minHeightClassName="py-6" />
         ) : state.items.length === 0 ? (
           <div className="glass-panel rounded-xl py-20 text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-[var(--color-secondary)]/25 bg-[var(--color-secondary)]/10 text-[var(--color-secondary)]">
