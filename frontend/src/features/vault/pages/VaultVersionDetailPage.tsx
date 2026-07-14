@@ -102,7 +102,12 @@ export default function VaultVersionDetailPage() {
       </div>
 
       <div className="vault-version-detail-page__layout">
-        <div className={mobileTab === 'insights' ? 'block' : 'hidden lg:block'}>
+        <div
+          className={[
+            'vault-version-detail-page__insights-column',
+            mobileTab === 'insights' ? 'block' : 'hidden lg:block',
+          ].join(' ')}
+        >
           {loading || !metadataReady ? (
             <PageLoadingState variant="version-detail-insights" minHeightClassName="min-h-[24rem]" />
           ) : (
@@ -116,7 +121,12 @@ export default function VaultVersionDetailPage() {
           )}
         </div>
 
-        <div className={mobileTab === 'document' ? 'block' : 'hidden lg:block'}>
+        <div
+          className={[
+            'vault-version-detail-page__document-column',
+            mobileTab === 'document' ? 'block' : 'hidden lg:flex',
+          ].join(' ')}
+        >
           {loading || !metadataReady || !version || !presentation ? (
             <DocumentPanelSkeleton />
           ) : (

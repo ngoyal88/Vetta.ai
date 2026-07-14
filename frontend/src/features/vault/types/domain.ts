@@ -81,6 +81,11 @@ export interface ResumePublicationItem {
   link?: string | null;
 }
 
+export interface ResumeCustomSection {
+  title: string;
+  lines?: string[];
+}
+
 export interface ResumeProfile {
   name?: ResumeName;
   contact?: {
@@ -103,6 +108,7 @@ export interface ResumeProfile {
   projects?: ResumeProjectItem[];
   achievements?: ResumeAchievementItem[];
   publications?: ResumePublicationItem[];
+  custom_sections?: ResumeCustomSection[];
   weak_areas?: string[];
   raw_text?: string | null;
   [key: string]: unknown;

@@ -91,7 +91,7 @@ export default function VaultVersionDetailInsights({
         )}
       </div>
 
-      <div className="vault-version-detail__card vault-version-detail__card--grow">
+      <div className="vault-version-detail__card">
         <div className="vault-version-detail__card-title-row vault-version-detail__card-title-row--bordered">
           <Lightbulb className="h-5 w-5 text-[var(--color-primary)]" aria-hidden />
           <h3 className="vault-version-detail__card-title">{copy.optimization}</h3>

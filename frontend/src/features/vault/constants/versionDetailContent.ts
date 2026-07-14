@@ -51,6 +51,10 @@ export const VAULT_VERSION_DETAIL_COPY = {
 
   insightsTab: 'Insights',
 
+  viewOriginalPdf: 'Original PDF',
+
+  viewParsedResume: 'Parsed resume',
+
   noFileStored: 'No file stored for this version',
 
   reuploadHint: 'Re-upload this version to enable file preview.',
