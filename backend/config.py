@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    # Optional override for structured JSON calls (JD Fit judge, vault, etc.).
+    # Empty → use groq_model. Do NOT hardcode an 8B instant model for adjudication quality.
+    groq_json_model: str = ""
 
     livekit_url: str = ""
     livekit_api_key: str = ""

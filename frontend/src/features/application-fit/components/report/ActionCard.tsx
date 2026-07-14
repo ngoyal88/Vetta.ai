@@ -1,12 +1,15 @@
 import { Link } from 'react-router-dom';
 import { BadgeCheck } from 'lucide-react';
 
-import type { RankedAction } from '../../types/applicationFitTypes';
-import { practiceInterviewHref } from '../../types/applicationFitTypes';
+import type { ComputeResponse, RankedAction } from '../../types/applicationFitTypes';
+import {
+  builderEditHrefFromReport,
+  practiceInterviewHref,
+} from '../../types/applicationFitTypes';
 
 type ActionCardProps = {
   action: RankedAction;
-  snapshotId: string;
+  report: ComputeResponse;
   targetRole: string;
 };
 
@@ -17,8 +20,9 @@ const PRIORITY_SURFACE: Record<string, string> = {
   LOW: 'application-fit-action-card',
 };
 
-export function ActionCard({ action, snapshotId, targetRole }: ActionCardProps) {
+export function ActionCard({ action, report, targetRole }: ActionCardProps) {
   const surface = PRIORITY_SURFACE[action.priority] ?? PRIORITY_SURFACE.MEDIUM;
+  const builderHref = builderEditHrefFromReport(report, report.snapshot_id);
 
   return (
     <div className={surface}>
@@ -53,13 +57,17 @@ export function ActionCard({ action, snapshotId, targetRole }: ActionCardProps) 
               : 'Guidance'}
         </span>
         {action.action_type === 'resume_edit' ? (
-          <Link to="/resume-vault" className="btn-ghost shrink-0 px-3 py-1.5 type-label-sm">
+          <Link
+            to={builderHref ?? '/resume-vault'}
+            className="btn-ghost shrink-0 px-3 py-1.5 type-label-sm"
+            title={builderHref ? undefined : 'No resume linked to this fit snapshot'}
+          >
             Edit now
           </Link>
         ) : null}
         {action.action_type === 'practice' ? (
           <Link
-            to={practiceInterviewHref(snapshotId, targetRole)}
+            to={practiceInterviewHref(report.snapshot_id, targetRole)}
             className="btn-primary shrink-0 px-3 py-1.5 type-label-sm"
           >
             Start mock

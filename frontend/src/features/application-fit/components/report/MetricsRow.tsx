@@ -28,6 +28,11 @@ export function MetricsRow({ report }: MetricsRowProps) {
               {FIT_BAND_LABELS[report.fit_band]}
             </span>
           </div>
+          {report.score_explanation?.evidence_summary ? (
+            <p className="max-w-[18rem] text-center type-body-sm text-[var(--color-on-surface-variant)]">
+              {report.score_explanation.evidence_summary}
+            </p>
+          ) : null}
         </div>
       </div>
 

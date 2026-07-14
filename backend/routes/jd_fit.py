@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import asyncio
 
-from services.jd_fit.jd_fit_models import ComputeRequest, ComputeResponse, HistoryResponse
+from fastapi import APIRouter, Depends, File, UploadFile
+
+from services.jd_fit.jd_fit_models import (
+    ComputeRequest,
+    ComputeResponse,
+    ExtractJdTextResponse,
+    HistoryResponse,
+)
 from services.jd_fit.jd_fit_service import JDFitService
+from services.jd_fit.jd_text_extract import JD_EXTRACT_MAX_BYTES, extract_jd_text_from_bytes
 from utils.auth import verify_firebase_token
 from utils.rate_limit import check_rate_limit
 
@@ -53,3 +61,19 @@ async def jd_fit_get_snapshot(
 ) -> ComputeResponse:
     await check_rate_limit(uid, "jd_fit_history", limit=120, window_seconds=60)
     return await _service.get_snapshot_response(uid, snapshot_id)
+
+
+@router.post("/extract-text", response_model=ExtractJdTextResponse)
+async def jd_fit_extract_text(
+    file: UploadFile = File(...),
+    uid: str = Depends(verify_firebase_token),
+) -> ExtractJdTextResponse:
+    await check_rate_limit(uid, "jd_fit_extract_text", limit=60, window_seconds=3600)
+
+    blob = await file.read(JD_EXTRACT_MAX_BYTES + 1)
+    text, warnings = await asyncio.to_thread(
+        extract_jd_text_from_bytes,
+        blob,
+        file.filename or "jd.txt",
+    )
+    return ExtractJdTextResponse(text=text, char_count=len(text), warnings=warnings)

@@ -2,7 +2,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import type { ComputeResponse, HeroVerdict, RankedAction } from '../../types/applicationFitTypes';
-import { practiceInterviewHref } from '../../types/applicationFitTypes';
+import { builderEditHrefFromReport, practiceInterviewHref } from '../../types/applicationFitTypes';
 
 type BottleneckHeroProps = {
   report: ComputeResponse;
@@ -48,7 +48,9 @@ const HERO_COPY: Record<
 
 function heroActionHref(action: RankedAction | undefined, report: ComputeResponse, targetRole: string): string | null {
   if (!action) return null;
-  if (action.action_type === 'resume_edit') return '/resume-vault';
+  if (action.action_type === 'resume_edit') {
+    return builderEditHrefFromReport(report, report.snapshot_id) ?? '/resume-vault';
+  }
   if (action.action_type === 'practice') return practiceInterviewHref(report.snapshot_id, targetRole);
   if (action.action_type === 'apply') return '#application-fit-funnel';
   return '#application-fit-actions';

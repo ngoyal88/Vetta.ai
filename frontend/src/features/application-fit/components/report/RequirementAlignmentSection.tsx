@@ -87,10 +87,18 @@ function AlignmentRow({ row }: { row: RequirementAlignment }) {
   );
 }
 
+function formatRequirementLabel(requirement: RequirementAlignmentV2['requirement']): string {
+  const alternatives = requirement.alternatives?.filter(Boolean) ?? [];
+  if (requirement.satisfy_mode === 'any' && alternatives.length > 0) {
+    return `${requirement.text} (or ${alternatives.join(', ')})`;
+  }
+  return requirement.text;
+}
+
 function AlignmentRowV2({ row }: { row: RequirementAlignmentV2 }) {
   const legacyStatus = V2_STATUS_TO_LEGACY[row.status];
   const legacyRow: RequirementAlignment = {
-    jd_requirement: row.requirement.text,
+    jd_requirement: formatRequirementLabel(row.requirement),
     match_status: legacyStatus,
     confidence: row.confidence,
     resume_evidence: row.evidence,
@@ -186,9 +194,14 @@ export function RequirementAlignmentSection({ report }: RequirementAlignmentSect
   if (useFallbackView) {
     return (
       <div className="flex flex-col gap-3">
-        {report.warnings.includes('alignment_fallback') || report.alignment_mode === 'fallback' ? (
+        {report.warnings.includes('alignment_fallback')
+          || report.warnings.includes('evidence_judge_unavailable')
+          || report.warnings.includes('evidence_judge_partial')
+          || report.alignment_mode === 'fallback' ? (
           <div className="application-fit-notice type-body-md">
-            Requirement alignment used keyword fallback — semantic matching was unavailable.
+            {report.warnings.includes('evidence_judge_unavailable')
+              ? 'We could not fully analyze requirement evidence — retry compute for a complete read.'
+              : 'Requirement alignment used a degraded path — treat gaps as provisional until recomputed.'}
           </div>
         ) : null}
         <SkillChipsSection report={report} />

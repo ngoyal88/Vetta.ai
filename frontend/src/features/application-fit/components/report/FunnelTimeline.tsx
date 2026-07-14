@@ -22,26 +22,34 @@ function verdictClass(verdict: LayerVerdict): string {
 }
 
 export function FunnelTimeline({ report }: FunnelTimelineProps) {
+  const recruiterCoverage = Math.round((report.funnel.recruiter.signals?.coverage_pct ?? report.funnel.recruiter.score) * 100);
+  const hmCoverage = Math.round(report.funnel.hm_application.score * 100);
   const baseSteps: FunnelStep[] = [
     {
       key: 'ats',
       title: 'ATS Filter',
       verdict: report.funnel.ats.verdict,
-      body: `${Math.round(report.funnel.ats.coverage_pct * 100)}% requirement coverage on your resume.`,
+      body:
+        report.funnel.ats.missing_keywords.length > 0
+          ? `${Math.round(report.funnel.ats.coverage_pct * 100)}% coverage. Gaps: ${report.funnel.ats.missing_keywords.slice(0, 3).join(', ')}.`
+          : `${Math.round(report.funnel.ats.coverage_pct * 100)}% coverage of ATS-stage requirements on your resume.`,
       isPrepared: false,
     },
     {
       key: 'recruiter',
       title: 'Recruiter Scan',
       verdict: report.funnel.recruiter.verdict,
-      body: 'Title, tenure, and quantified impact signals from a quick scan.',
+      body: `${recruiterCoverage}% coverage of recruiter-stage requirements (experience, seniority, education).`,
       isPrepared: false,
     },
     {
       key: 'hm',
       title: 'HM Review',
       verdict: report.funnel.hm_application.verdict,
-      body: 'Skill depth evidenced in experience bullets if you pass the screen.',
+      body:
+        report.funnel.hm_application.missing_skills.length > 0
+          ? `${hmCoverage}% coverage. Still thin on: ${report.funnel.hm_application.missing_skills.slice(0, 3).join(', ')}.`
+          : `${hmCoverage}% coverage of HM-stage requirements evidenced on your resume.`,
       isPrepared: false,
     },
   ];

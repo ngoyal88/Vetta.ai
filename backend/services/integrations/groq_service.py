@@ -102,8 +102,8 @@ class GroqService:
 
     async def json_completion(self, system_prompt: str, user_prompt: str) -> str:
         """
-        Generate JSON via Groq. Inputs are truncated to stay under free-tier TPM limits.
-        Uses llama-3.1-8b-instant for json_object (smaller context footprint than 70B).
+        Generate JSON via Groq with response_format=json_object.
+        Uses GROQ_JSON_MODEL when set, otherwise GROQ_MODEL (same quality as chat extraction).
         """
         if not self.client:
             return "{}"
@@ -114,17 +114,19 @@ class GroqService:
             text = text.strip()
             return text if len(text) <= max_len else text[:max_len]
 
-        sys_c = _clip(system_prompt, 10000)
-        usr_c = _clip(user_prompt, 8000)
+        json_model = (getattr(settings, "groq_json_model", None) or "").strip() or self.model
+        # Larger models can handle fuller JD Fit corpora; clip only for pathological prompts.
+        sys_c = _clip(system_prompt, 12000)
+        usr_c = _clip(user_prompt, 24000)
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": sys_c},
                     {"role": "user", "content": usr_c},
                 ],
-                model="llama-3.1-8b-instant",
+                model=json_model,
                 temperature=0.0,
-                max_tokens=min(2048, int(self.max_tokens or 2048)),
+                max_tokens=min(4096, int(self.max_tokens or 4096)),
                 stream=False,
                 response_format={"type": "json_object"},
             )
@@ -136,6 +138,6 @@ class GroqService:
             )
             return content or "{}"
         except Exception as e:
-            logger.error(f"Groq JSON completion error: {e}", exc_info=True)
+            logger.error(f"Groq JSON completion error (model={json_model}): {e}", exc_info=True)
             return "{}"
 

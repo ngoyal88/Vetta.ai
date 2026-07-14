@@ -7,6 +7,7 @@ import {
   formatEmploymentTypeLabel,
   getResumeDisplayName,
   normalizeAchievements,
+  normalizeCustomSections,
   normalizeEducation,
   normalizeLinkItems,
   normalizeProjects,
@@ -54,6 +55,7 @@ export function ParsedResumePreview({ profile }: ParsedResumePreviewProps) {
   const skillGroups = normalizeSkillGroups(profile.skills);
   const education = normalizeEducation(profile.education);
   const achievements = normalizeAchievements(profile.achievements);
+  const customSections = normalizeCustomSections(profile.custom_sections);
   const projects = normalizeProjects(profile.projects);
   const workExperience: ResumeWorkExperienceItem[] = Array.isArray(profile.work_experience)
     ? profile.work_experience
@@ -195,7 +197,11 @@ export function ParsedResumePreview({ profile }: ParsedResumePreviewProps) {
                     <div className="application-fit-resume-preview__card-header-main min-w-0">
                       <p className="application-fit-resume-preview__card-heading">{project.name || 'Project'}</p>
                       {description ? (
-                        <p className="application-fit-resume-preview__project-description">{description}</p>
+                        <div className="application-fit-resume-preview__project-description">
+                          {description.split('\n').map((line, lineIndex) => (
+                            <p key={`${project.name}-desc-${lineIndex}`}>{line}</p>
+                          ))}
+                        </div>
                       ) : null}
                     </div>
                     {project.link ? (
@@ -279,6 +285,18 @@ export function ParsedResumePreview({ profile }: ParsedResumePreviewProps) {
           </div>
         </ParsedSection>
       ) : null}
+
+      {customSections.map((section) => (
+        <ParsedSection key={section.title} title={section.title}>
+          <ul className="application-fit-resume-preview__bullet-list">
+            {section.lines.map((line, index) => (
+              <li key={`${section.title}-${index}`} className="application-fit-resume-preview__bullet-item">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </ParsedSection>
+      ))}
 
       {profile.raw_text ? (
         <details className="application-fit-resume-preview__raw">

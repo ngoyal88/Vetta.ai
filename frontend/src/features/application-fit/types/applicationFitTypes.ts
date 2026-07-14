@@ -35,6 +35,7 @@ export type RequirementCategoryGroup =
   | 'leadership'
   | 'resume_signal';
 export type GateStatus = 'clear' | 'risky' | 'blocked';
+export type EvidenceSource = 'resume' | 'profile_memory';
 
 export type RequirementAlignment = {
   jd_requirement: string;
@@ -44,10 +45,14 @@ export type RequirementAlignment = {
   equivalent_terms_found: string[];
 };
 
+export type RequirementSatisfyMode = 'all' | 'any';
+
 export type TypedRequirement = {
   id: string;
   category: RequirementCategory;
   text: string;
+  alternatives?: string[];
+  satisfy_mode?: RequirementSatisfyMode;
   importance: RequirementImportance;
   strictness: RequirementStrictness;
   funnel_stage: RequirementFunnelStage;
@@ -61,6 +66,43 @@ export type RequirementAlignmentV2 = {
   confidence: number;
   evidence?: string | null;
   reason: string;
+};
+
+export type EvidenceChunk = {
+  id: string;
+  source: EvidenceSource;
+  section: string;
+  label: string;
+  text: string;
+  visible_on_resume: boolean;
+  verified: boolean;
+};
+
+export type RequirementEvidenceResult = {
+  requirement_id: string;
+  requirement_text: string;
+  category: RequirementCategory;
+  importance: RequirementImportance;
+  funnel_stage?: RequirementFunnelStage;
+  weight?: number;
+  resume_status: RequirementAlignmentStatus;
+  candidate_status: RequirementAlignmentStatus;
+  confidence: number;
+  resume_evidence?: EvidenceChunk | null;
+  memory_evidence?: EvidenceChunk | null;
+  reason: string;
+  score_impact: number;
+};
+
+export type ScoreExplanation = {
+  required_met: number;
+  required_partial: number;
+  required_missing: number;
+  preferred_met: number;
+  hard_gates_failed: string[];
+  top_strengths: string[];
+  top_gaps: string[];
+  evidence_summary: string;
 };
 
 export type CategoryScore = {
@@ -138,6 +180,11 @@ export type ComputeResponse = {
   application_fit_score: number;
   prepared_fit_score: number | null;
   prepared_fit_delta: number;
+  resume_fit_score?: number | null;
+  candidate_fit_score?: number | null;
+  resume_gap_score: number;
+  score_explanation: ScoreExplanation;
+  requirement_results: RequirementEvidenceResult[];
   fit_band: FitBand;
   posting_freshness?: PostingFreshness | null;
   funnel: FunnelResult;
@@ -219,4 +266,32 @@ export function practiceInterviewHref(snapshotId: string, targetRole: string): s
     target_role: targetRole,
   });
   return `/ai-interview/role-targeted?${params.toString()}`;
+}
+
+export function canOpenBuilderFromReport(report: Pick<ComputeResponse, 'resume_id'>): boolean {
+  return Boolean(report.resume_id?.trim());
+}
+
+export function builderEditHref(args: {
+  resumeId: string;
+  versionId?: string | null;
+  jdFitSnapshotId?: string | null;
+}): string {
+  const params = new URLSearchParams({ resumeId: args.resumeId });
+  if (args.versionId?.trim()) params.set('versionId', args.versionId.trim());
+  if (args.jdFitSnapshotId?.trim()) params.set('jd_fit_snapshot_id', args.jdFitSnapshotId.trim());
+  return `/resume-vault/builder?${params.toString()}`;
+}
+
+export function builderEditHrefFromReport(
+  report: Pick<ComputeResponse, 'resume_id' | 'version_id'>,
+  jdFitSnapshotId: string,
+): string | null {
+  const resumeId = report.resume_id?.trim();
+  if (!resumeId) return null;
+  return builderEditHref({
+    resumeId,
+    versionId: report.version_id,
+    jdFitSnapshotId,
+  });
 }
