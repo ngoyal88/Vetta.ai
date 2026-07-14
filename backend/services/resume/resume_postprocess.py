@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
-from models.resume import AchievementItem, ResumeProfile
+from models.resume import AchievementItem, ResumeProfile, WorkExperienceItem
+from services.resume.contact_link_utils import reconcile_profile_links
 
 CGPA_INLINE_RE = re.compile(
     r",?\s*((?:cgpa|gpa)\s*[:\-]?\s*[\d\.]+(?:/\d+(?:\.\d+)?)?)",
@@ -195,38 +196,75 @@ def _looks_like_url(value: str) -> bool:
     return text.startswith(("http://", "https://", "www.")) or "mailto:" in text or ".com/" in text
 
 
-def _canonical_link(value: str) -> str:
-    return value.strip().lower().rstrip("/").replace("https://", "").replace("http://", "").replace("www.", "")
-
-
-def sanitize_profile_links_and_skills(profile: ResumeProfile) -> None:
-    links = profile.contact.links
-    canonical: set[str] = set()
-    for value in (links.github, links.linkedin, links.portfolio):
-        if value:
-            canonical.add(_canonical_link(value))
-
-    cleaned_other: List[str] = []
-    for value in links.other or []:
-        text = (value or "").strip()
-        if not text:
-            continue
-        lower = text.lower()
-        if "github.com" in lower and not links.github:
-            links.github = text
-            canonical.add(_canonical_link(text))
-            continue
-        if "linkedin.com" in lower and not links.linkedin:
-            links.linkedin = text
-            canonical.add(_canonical_link(text))
-            continue
-        link_key = _canonical_link(text)
-        if link_key in canonical:
-            continue
-        canonical.add(link_key)
-        cleaned_other.append(text)
-    links.other = cleaned_other
-
-    skill_categories = profile.skills
-    for group in skill_categories:
+def sanitize_profile_links_and_skills(
+    profile: ResumeProfile,
+    raw_text: str = "",
+    pdf_links: Optional[Iterable[str]] = None,
+) -> None:
+    reconcile_profile_links(profile, raw_text, pdf_links)
+    for group in profile.skills:
         group.items[:] = [item for item in group.items if item and not _looks_like_url(item)]
+
+
+def _norm_work_key(value: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", (value or "").lower().strip())
+
+
+def _work_entries_similar(left: WorkExperienceItem, right: WorkExperienceItem) -> bool:
+    left_company = _norm_work_key(left.company)
+    right_company = _norm_work_key(right.company)
+    left_title = _norm_work_key(left.title)
+    right_title = _norm_work_key(right.title)
+    if left_company and right_company and (
+        left_company in right_company or right_company in left_company
+    ):
+        return True
+    if left_title and right_title and (
+        left_title in right_title or right_title in left_title
+    ):
+        return True
+    return False
+
+
+def _merge_work_entries(
+    left: WorkExperienceItem,
+    right: WorkExperienceItem,
+) -> WorkExperienceItem:
+    merged = left.model_dump()
+    other = right.model_dump()
+    for field in ("title", "company", "location", "start_date", "end_date", "employment_type"):
+        if not merged.get(field) and other.get(field):
+            merged[field] = other[field]
+    bullets: List[str] = []
+    seen: set[str] = set()
+    for source in (merged.get("responsibilities") or [], other.get("responsibilities") or []):
+        for bullet in source:
+            key = _norm_work_key(bullet)
+            if key and key not in seen:
+                seen.add(key)
+                bullets.append(bullet)
+    merged["responsibilities"] = bullets
+    tech: List[str] = list(dict.fromkeys(
+        [*(merged.get("tech_stack") or []), *(other.get("tech_stack") or [])]
+    ))
+    merged["tech_stack"] = tech
+    impact: List[str] = list(dict.fromkeys(
+        [*(merged.get("impact") or []), *(other.get("impact") or [])]
+    ))
+    merged["impact"] = impact
+    return WorkExperienceItem(**merged)
+
+
+def dedupe_work_experience(items: List[WorkExperienceItem]) -> List[WorkExperienceItem]:
+    kept: List[WorkExperienceItem] = []
+    for candidate in items:
+        duplicate_index: Optional[int] = None
+        for index, existing in enumerate(kept):
+            if _work_entries_similar(existing, candidate):
+                duplicate_index = index
+                break
+        if duplicate_index is None:
+            kept.append(candidate)
+        else:
+            kept[duplicate_index] = _merge_work_entries(kept[duplicate_index], candidate)
+    return kept

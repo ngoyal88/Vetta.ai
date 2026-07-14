@@ -4,6 +4,7 @@ import hashlib
 
 from services.resume_builder.compile_client import compile_preview
 from services.resume_builder.draft_store import delete_draft, get_draft
+from services.resume_builder.layout_from_profile import builder_custom_sections_to_profile
 from services.resume_builder.models import (
     PublishDraftRequest,
     PublishDraftResponse,
@@ -48,6 +49,7 @@ async def publish_draft(uid: str, draft_id: str, request: PublishDraftRequest) -
         raise ValueError("draft_not_found")
 
     validate_publish_profile(draft.profile, custom_sections=draft.custom_sections)
+    publish_profile = builder_custom_sections_to_profile(draft.profile, draft.custom_sections)
     tex = render_template(draft.template_id, draft)
     pdf_bytes, _page_count = await compile_preview(tex)
 
@@ -74,7 +76,7 @@ async def publish_draft(uid: str, draft_id: str, request: PublishDraftRequest) -
         version, scorecard = await add_version(
             uid,
             resume_id,
-            draft.profile.model_dump(),
+            publish_profile.model_dump(),
             request.user_note.strip(),
             source_filename=_BUILDER_SOURCE_FILENAME,
             source_blob=pdf_bytes,

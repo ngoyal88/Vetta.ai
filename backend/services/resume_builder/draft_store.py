@@ -11,6 +11,7 @@ from firebase_config import db
 from models.resume import ResumeProfile
 from services.resume.profile_normalizer import profile_snapshot_dict
 from services.resume_builder.draft_names import next_resume_draft_name
+from services.resume_builder.layout_from_profile import derive_layout_from_profile
 from services.resume_builder.models import (
     CreateDraftRequest,
     DraftPatchRequest,
@@ -64,15 +65,22 @@ async def create_draft(
         profile_payload = source_profile or (
             request.profile.model_dump() if request.profile is not None else _default_profile().model_dump()
         )
+        profile = ResumeProfile.model_validate(profile_snapshot_dict(profile_payload))
+        if source_profile is not None:
+            section_layout, custom_sections, profile = derive_layout_from_profile(profile)
+        else:
+            section_layout = default_section_layout()
+            custom_sections = []
+
         payload = {
             "name": draft_name,
             "created_at": now,
             "updated_at": now,
             "template_id": request.template_id,
             "template_version": "1.0.0",
-            "profile": profile_snapshot_dict(profile_payload),
-            "section_layout": [section.model_dump() for section in default_section_layout()],
-            "custom_sections": [],
+            "profile": profile_snapshot_dict(profile.model_dump()),
+            "section_layout": [section.model_dump() for section in section_layout],
+            "custom_sections": [section.model_dump() for section in custom_sections],
             "target_resume_id": request.resume_id,
             "source_resume_id": request.resume_id,
             "source_version_id": request.version_id,

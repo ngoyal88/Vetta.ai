@@ -288,16 +288,20 @@ async def add_version(
     )
 
     try:
-        await asyncio.to_thread(
-            _persist_version_txn,
-            uid,
-            resume_id,
-            version_id,
-            version_data,
-            score_point,
-            scorecard,
-            now,
-        )
+        def _run() -> None:
+            transaction = db.transaction()
+            _persist_version_txn(
+                transaction,
+                uid,
+                resume_id,
+                version_id,
+                version_data,
+                score_point,
+                scorecard,
+                now,
+            )
+
+        await asyncio.to_thread(_run)
         await _invalidate_jd_fit_cache(uid)
     except ValueError as exc:
         if str(exc) == "version_limit_reached" and file_meta.get("has_source_file"):
@@ -481,13 +485,14 @@ def _set_active_resume_txn(transaction: firestore.Transaction, uid: str, resume_
     if not entry_ref.get(transaction=transaction).exists:
         raise ValueError("resume_not_found")
 
+    meta_ref = _vault_meta_ref(uid)
+    meta_snap = meta_ref.get(transaction=transaction)
+    meta = meta_snap.to_dict() if meta_snap.exists else {}
+
     for doc in _vault_collection(uid).stream(transaction=transaction):
         ref = doc.reference
         transaction.set(ref, {"is_active": ref.id == resume_id}, merge=True)
 
-    meta_ref = _vault_meta_ref(uid)
-    meta_snap = meta_ref.get(transaction=transaction)
-    meta = meta_snap.to_dict() if meta_snap.exists else {}
     transaction.set(
         meta_ref,
         {
