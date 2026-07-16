@@ -1,3 +1,5 @@
+import json
+import re
 from typing import Any, Dict, List, Optional
 
 from services.interview.llm_engine import LLMEngine
@@ -12,6 +14,22 @@ INTERVIEW_FOCUS_VALUES = {"mixed", "technical", "behavioral", "system_design", "
 
 # Backward-compatible alias for interview callers.
 MIN_JD_CHARS_FOR_LLM = MIN_JD_CHARS
+
+# Match whole skill tokens only — substring "go" must not hit "good" / "growth".
+_WORD_BOUNDARY_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _term_in_jd(term: str, jd_lower: str) -> bool:
+    key = term.strip().lower()
+    if not key:
+        return False
+    if " " in key:
+        return key in jd_lower
+    pattern = _WORD_BOUNDARY_CACHE.get(key)
+    if pattern is None:
+        pattern = re.compile(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", re.I)
+        _WORD_BOUNDARY_CACHE[key] = pattern
+    return bool(pattern.search(jd_lower))
 
 
 def clean_optional_text(value: Optional[str], max_len: int = 8000) -> Optional[str]:
@@ -32,21 +50,25 @@ def _safe_list(value: Any, limit: int = 8) -> List[str]:
     return out[:limit]
 
 
-def _safe_typed_requirements(value: Any, fallback: Dict[str, Any], limit: int = 16) -> List[Dict[str, Any]]:
+def _safe_typed_requirements(value: Any, fallback: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     if isinstance(value, list):
-        for idx, item in enumerate(value[:limit]):
+        for idx, item in enumerate(value):
             if not isinstance(item, dict):
                 continue
             text = str(item.get("text") or item.get("requirement") or "").strip()[:220]
             category = str(item.get("category") or "technical_skill").strip()
             if not text:
                 continue
+            alternatives = item.get("alternatives") if isinstance(item.get("alternatives"), list) else []
+            satisfy_mode = str(item.get("satisfy_mode") or "all").strip()
             rows.append(
                 {
                     "id": str(item.get("id") or f"req_{idx + 1}").strip()[:80],
                     "category": category,
                     "text": text,
+                    "alternatives": alternatives,
+                    "satisfy_mode": satisfy_mode,
                     "importance": str(item.get("importance") or "required").strip(),
                     "strictness": str(item.get("strictness") or "flexible").strip(),
                     "funnel_stage": str(item.get("funnel_stage") or "hm_review").strip(),
@@ -62,7 +84,7 @@ def _safe_typed_requirements(value: Any, fallback: Dict[str, Any], limit: int = 
     return [req.model_dump() for req in fallback_typed_requirements(
         fallback.get("required_skills") or [],
         fallback.get("nice_to_have_skills") or [],
-    )][:limit]
+    )]
 
 
 def _merge_jd_context(parsed: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
@@ -84,6 +106,59 @@ def _merge_jd_context(parsed: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[
     merged["summary"] = summary or str(fallback.get("summary") or "").strip()[:600]
     merged["typed_requirements"] = _safe_typed_requirements(parsed.get("typed_requirements"), merged)
     return merged
+
+
+_OR_REPAIR_SYSTEM = (
+    "You repair JD typed_requirements so OR / one-of skill groups are correct. Return ONLY JSON: "
+    "{\"typed_requirements\":[same schema as input rows]}.\n"
+    "Rules:\n"
+    "- When the JD asks for one of several options (e.g. \"Node.js, Python, Java, or similar\", "
+    "\"React preferred; Angular or Vue\", \"AWS, GCP, or Azure\"), merge those into ONE row with "
+    "satisfy_mode \"any\", text=primary/preferred option, alternatives=rest. Delete the standalone "
+    "duplicate rows for those alternatives.\n"
+    "- Do not invent requirements that are not in the JD or the input list.\n"
+    "- Preferred Qualifications / bonus skills must have importance \"preferred\" or \"bonus\", never \"required\".\n"
+    "- Experience years must match the JD band exactly (e.g. \"1-2 years\", not \"2+\" if JD says 1-2).\n"
+    "- Preserve ids when merging: keep the primary row id; drop ids of collapsed alternatives.\n"
+    "- Keep funnel_stage/category/weight sensible; keep hard gates unchanged."
+)
+
+
+async def _repair_or_groups(
+    engine: LLMEngine,
+    jd_text: str,
+    typed_requirements: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Second-pass LLM repair so alternatives are not scored as independent must-haves."""
+    if not typed_requirements or len(jd_text.strip()) < MIN_JD_CHARS:
+        return typed_requirements
+    tech_rows = [
+        row
+        for row in typed_requirements
+        if isinstance(row, dict) and str(row.get("category") or "") == "technical_skill"
+    ]
+    if len(tech_rows) < 2:
+        return typed_requirements
+
+    payload = {
+        "job_description": jd_text[:8000],
+        "typed_requirements": typed_requirements,
+    }
+    try:
+        raw = await engine.generate_raw(
+            f"{_OR_REPAIR_SYSTEM}\n\nINPUT:\n{json.dumps(payload, ensure_ascii=True)}",
+            0.1,
+            empty_fallback="{}",
+        )
+        parsed = extract_json_dict(raw)
+        repaired = parsed.get("typed_requirements") if isinstance(parsed, dict) else None
+        if not isinstance(repaired, list) or not repaired:
+            return typed_requirements
+        cleaned = _safe_typed_requirements(repaired, {"required_skills": [], "nice_to_have_skills": []})
+        return cleaned or typed_requirements
+    except Exception as exc:
+        logger.warning("OR-group repair failed; keeping original requirements: %s", exc)
+        return typed_requirements
 
 
 def _role_probing_hints(target_role: str, interview_focus: str) -> List[str]:
@@ -138,7 +213,7 @@ def _fallback_context(
             "postgres", "redis", "aws", "gcp", "azure", "kubernetes", "docker",
             "system design", "microservices", "api", "security", "machine learning",
         ]
-        required = [term for term in common_terms if term in jd_lower][:8]
+        required = [term for term in common_terms if _term_in_jd(term, jd_lower)][:8]
         strengths = [skill for skill in skills if skill.lower() in jd_lower][:5]
         gaps = [term for term in required if term.lower() not in {s.lower() for s in skills}][:5]
         probing = gaps or required[:4] or role_hints
@@ -234,6 +309,8 @@ JSON schema:
       "id": string,
       "category": "technical_skill" | "experience" | "education" | "certification" | "domain" | "seniority" | "location" | "work_authorization" | "language" | "management" | "travel" | "employment_type" | "soft_skill",
       "text": string,
+      "alternatives": [string],
+      "satisfy_mode": "all" | "any",
       "importance": "required" | "preferred" | "bonus",
       "strictness": "hard" | "flexible",
       "funnel_stage": "ats_filter" | "recruiter_screen" | "hm_review",
@@ -252,13 +329,43 @@ Requirement extraction rules:
 - Extract all meaningful JD requirements, not only skills.
 - Mark work authorization, security clearance, mandatory location/onsite, required licenses, required language fluency, and strict required certifications as hard gates.
 - Use "unknown" only later during alignment; extraction should describe the JD requirement itself.
-- Keep weights modest, usually 0.03 to 0.12, with required requirements above preferred requirements."""
+- Keep weights modest, usually 0.03 to 0.12, with required requirements above preferred requirements.
+- OR / one-of groups: when the JD asks for proficiency in ONE OF several options — including phrasing like
+  "Node.js, Python, Java, or similar", "one of C++/Python/Java", "React preferred; Angular or Vue considered",
+  "AWS, GCP, or Azure" — emit ONE typed_requirements row with satisfy_mode "any", text = the primary/preferred
+  option, alternatives = the remaining options. Do NOT emit separate required rows for each alternative.
+  Also do NOT list each alternative as its own entry in required_skills.
+- AND requirements: when the JD requires multiple distinct skills (e.g. "Python and SQL"), emit separate rows with satisfy_mode "all" (default).
+- Preferred / bonus: experience shipping React Native, GraphQL, Docker/cloud, Next.js, LLM APIs, etc. listed under
+  Preferred Qualifications → importance "preferred" or "bonus", never "required".
+- Experience years: emit one short experience row (e.g. "1–2 years professional software engineering experience")
+  with funnel_stage "recruiter_screen", not the full JD paragraph.
+- required_skills must mirror typed technical requirements without duplicating OR alternatives.
+
+Examples:
+JD: "Proficiency in one of C++, Python, or Java"
+→ {{ "text": "Python", "alternatives": ["C++", "Java"], "satisfy_mode": "any", "importance": "required", "category": "technical_skill", "funnel_stage": "ats_filter" }}
+
+JD: "Solid server-side programming experience (Node.js, Python, Java, or similar)"
+→ {{ "text": "Node.js", "alternatives": ["Python", "Java"], "satisfy_mode": "any", "importance": "required", "category": "technical_skill", "funnel_stage": "ats_filter" }}
+
+JD: "Proficiency with at least one modern frontend framework (React preferred; Angular or Vue considered)"
+→ {{ "text": "React", "alternatives": ["Angular", "Vue"], "satisfy_mode": "any", "importance": "required", "category": "technical_skill", "funnel_stage": "ats_filter" }}
+
+JD: "Strong Python and SQL experience required"
+→ two rows: {{ "text": "Python", "satisfy_mode": "all" }} and {{ "text": "SQL", "satisfy_mode": "all" }}"""
         try:
             raw = await self._engine.generate_raw(prompt, 0.25, empty_fallback="{}")
             parsed = extract_json_dict(raw)
             if not parsed:
                 return fallback
-            return _merge_jd_context(parsed, fallback)
+            merged = _merge_jd_context(parsed, fallback)
+            merged["typed_requirements"] = await _repair_or_groups(
+                self._engine,
+                jd_text,
+                merged.get("typed_requirements") or [],
+            )
+            return merged
         except Exception as exc:
             logger.warning("JD context generation failed; using fallback: %s", exc)
             return fallback

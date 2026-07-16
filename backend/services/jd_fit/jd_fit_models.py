@@ -34,6 +34,7 @@ RequirementCategory = Literal[
 RequirementImportance = Literal["required", "preferred", "bonus"]
 RequirementStrictness = Literal["hard", "flexible"]
 RequirementFunnelStage = Literal["ats_filter", "recruiter_screen", "hm_review"]
+RequirementSatisfyMode = Literal["all", "any"]
 RequirementAlignmentStatus = Literal["met", "partial", "missing", "unknown", "not_applicable"]
 RequirementCategoryGroup = Literal[
     "technical",
@@ -46,6 +47,7 @@ RequirementCategoryGroup = Literal[
     "resume_signal",
 ]
 GateStatus = Literal["clear", "risky", "blocked"]
+EvidenceSource = Literal["resume", "profile_memory"]
 
 
 class ComputeRequest(BaseModel):
@@ -105,6 +107,8 @@ class TypedRequirement(BaseModel):
     id: str
     category: RequirementCategory
     text: str
+    alternatives: List[str] = Field(default_factory=list)
+    satisfy_mode: RequirementSatisfyMode = "all"
     importance: RequirementImportance = "required"
     strictness: RequirementStrictness = "flexible"
     funnel_stage: RequirementFunnelStage = "hm_review"
@@ -118,6 +122,45 @@ class RequirementAlignmentV2(BaseModel):
     confidence: float = Field(default=0.5, ge=0, le=1)
     evidence: Optional[str] = None
     reason: str = ""
+
+
+class EvidenceChunk(BaseModel):
+    id: str
+    source: EvidenceSource
+    section: str
+    label: str = ""
+    text: str
+    visible_on_resume: bool = True
+    verified: bool = False
+
+
+class RequirementEvidenceResult(BaseModel):
+    requirement_id: str
+    requirement_text: str
+    category: RequirementCategory
+    importance: RequirementImportance
+    alternatives: List[str] = Field(default_factory=list)
+    satisfy_mode: RequirementSatisfyMode = "all"
+    funnel_stage: RequirementFunnelStage = "hm_review"
+    weight: float = Field(default=0.05, ge=0, le=1)
+    resume_status: RequirementAlignmentStatus
+    candidate_status: RequirementAlignmentStatus
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    resume_evidence: Optional[EvidenceChunk] = None
+    memory_evidence: Optional[EvidenceChunk] = None
+    reason: str = ""
+    score_impact: int = 0
+
+
+class ScoreExplanation(BaseModel):
+    required_met: int = 0
+    required_partial: int = 0
+    required_missing: int = 0
+    preferred_met: int = 0
+    hard_gates_failed: List[str] = Field(default_factory=list)
+    top_strengths: List[str] = Field(default_factory=list)
+    top_gaps: List[str] = Field(default_factory=list)
+    evidence_summary: str = ""
 
 
 class CategoryScore(BaseModel):
@@ -165,6 +208,11 @@ class ComputeResponse(BaseModel):
     application_fit_score: int
     prepared_fit_score: Optional[int] = None
     prepared_fit_delta: int = 0
+    resume_fit_score: Optional[int] = None
+    candidate_fit_score: Optional[int] = None
+    resume_gap_score: int = 0
+    score_explanation: ScoreExplanation = Field(default_factory=ScoreExplanation)
+    requirement_results: List[RequirementEvidenceResult] = Field(default_factory=list)
     fit_band: FitBand
     posting_freshness: Optional[PostingFreshness] = None
     funnel: FunnelResult
@@ -206,3 +254,9 @@ class HistoryEntry(BaseModel):
 
 class HistoryResponse(BaseModel):
     history: List[HistoryEntry] = Field(default_factory=list)
+
+
+class ExtractJdTextResponse(BaseModel):
+    text: str
+    char_count: int
+    warnings: List[str] = Field(default_factory=list)

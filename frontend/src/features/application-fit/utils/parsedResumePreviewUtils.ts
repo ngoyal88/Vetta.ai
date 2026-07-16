@@ -16,6 +16,8 @@ export type EducationPreviewRow = {
 
 export type AchievementPreviewRow = { title: string; description: string; date: string };
 
+export type CustomSectionPreviewRow = { title: string; lines: string[] };
+
 export type ProjectPreviewRow = {
   name: string;
   description: string;
@@ -73,6 +75,47 @@ export function formatEmploymentTypeLabel(value: unknown): string | null {
   return EMPLOYMENT_TYPE_LABELS[value] ?? value.replace(/_/g, ' ');
 }
 
+const LINK_LABELS = new Set([
+  'link',
+  'links',
+  'github',
+  'linkedin',
+  'portfolio',
+  'leetcode',
+  'codeforces',
+  'codechef',
+  'email',
+  'phone',
+  'website',
+  'blog',
+]);
+
+function isPlausibleResumeUrl(value: string): boolean {
+  const text = value.trim().toLowerCase();
+  if (!text || LINK_LABELS.has(text)) return false;
+  if (text.startsWith('mailto:')) return text.includes('@');
+  if (text.startsWith('tel:')) return false;
+  if (text.includes(' ')) return false;
+  if (text.startsWith('xn--')) return false;
+  if (!text.includes('.') && !text.startsWith('http')) return false;
+
+  try {
+    const url = new URL(text.startsWith('http') ? text : `https://${text}`);
+    const host = url.hostname.replace(/^www\./, '');
+    if (!host || host.startsWith('xn--') || !host.includes('.')) return false;
+    const bareProviders = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com'];
+    if (bareProviders.includes(host)) return false;
+    if (host.endsWith('.edu') && !url.pathname.replace(/\//g, '')) return false;
+    const hasPath = Boolean(url.pathname.replace(/\//g, ''));
+    const portfolioSuffixes = ['.vercel.app', '.netlify.app', '.github.io', '.onrender.com'];
+    if (!hasPath && !portfolioSuffixes.some((suffix) => host.endsWith(suffix))) return false;
+    const tld = host.split('.').pop() ?? '';
+    return tld.length >= 2;
+  } catch {
+    return false;
+  }
+}
+
 function linkLabelFromUrl(value: string): string {
   const lower = value.toLowerCase();
   if (lower.includes('linkedin.com')) return 'LinkedIn';
@@ -86,6 +129,7 @@ function linkLabelFromUrl(value: string): string {
 
 function formatLinkDisplay(value: string): string {
   if (value.startsWith('mailto:')) return value.replace(/^mailto:/i, '');
+  if (!isPlausibleResumeUrl(value)) return '';
   try {
     const url = new URL(value.startsWith('http') ? value : `https://${value}`);
     const host = url.hostname.replace(/^www\./, '');
@@ -93,11 +137,12 @@ function formatLinkDisplay(value: string): string {
     const compact = `${host}${path}`;
     return compact.length > 44 ? `${compact.slice(0, 41)}…` : compact;
   } catch {
-    return value.length > 44 ? `${value.slice(0, 41)}…` : value;
+    return '';
   }
 }
 
-function toHref(value: string): string {
+function toHref(value: string): string | null {
+  if (!isPlausibleResumeUrl(value)) return null;
   if (value.startsWith('mailto:')) return value;
   if (value.startsWith('http://') || value.startsWith('https://')) return value;
   return `https://${value}`;
@@ -107,8 +152,11 @@ export function normalizeLinkItems(links: ContactLinks): LinkItem[] {
   const items: LinkItem[] = [];
   const pushLink = (label: string, raw: unknown) => {
     const value = asString(raw);
-    if (!value) return;
-    items.push({ label, href: toHref(value), text: formatLinkDisplay(value) });
+    if (!value || !isPlausibleResumeUrl(value)) return;
+    const href = toHref(value);
+    const text = formatLinkDisplay(value);
+    if (!href || !text) return;
+    items.push({ label, href, text });
   };
 
   pushLink('LinkedIn', links.linkedin);
@@ -173,7 +221,7 @@ export function normalizeProjects(value: unknown): ProjectPreviewRow[] {
       return {
         name: asString(record.name) || asString(record.title),
         description: asString(record.description) || asString(record.summary),
-        link: asString(record.link),
+        link: isPlausibleResumeUrl(asString(record.link)) ? asString(record.link) : '',
         role: asString(record.role),
         scale: asString(record.scale),
         techStack,
@@ -193,14 +241,15 @@ export function fallbackProjectDescription(name: string, rawText: string | null 
   if (startIndex < 0) return '';
 
   const collected: string[] = [];
+  const bulletPrefix = /^[•\-–—]\s*/;
   for (let index = startIndex + 1; index < lines.length && collected.length < 3; index += 1) {
     const line = lines[index];
     if (/^(education|projects|achievements|technical skills|skills|work experience)$/i.test(line)) break;
     if (line.length < 4) continue;
-    if (!line.startsWith('•') && !line.startsWith('-') && collected.length > 0) break;
-    collected.push(line.replace(/^[•-]\s*/, '').trim());
+    if (!bulletPrefix.test(line) && collected.length > 0) break;
+    collected.push(line.replace(bulletPrefix, '').trim());
   }
-  return collected.join(' ');
+  return collected.join('\n');
 }
 
 export function normalizeAchievements(value: unknown): AchievementPreviewRow[] {
@@ -223,4 +272,18 @@ export function normalizeAchievements(value: unknown): AchievementPreviewRow[] {
         (item.title.match(/https?:\/\//g) ?? []).length + (item.description.match(/https?:\/\//g) ?? []).length;
       return urlCount < 2;
     });
+}
+
+export function normalizeCustomSections(value: unknown): CustomSectionPreviewRow[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const record = isRecord(item) ? item : {};
+      const title = asString(record.title);
+      const lines = Array.isArray(record.lines)
+        ? record.lines.filter((line): line is string => typeof line === 'string' && line.trim().length > 0)
+        : [];
+      return { title, lines };
+    })
+    .filter((section) => section.title && section.lines.length > 0);
 }

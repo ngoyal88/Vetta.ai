@@ -2,6 +2,7 @@ import '../application-fit.css';
 import { useState } from 'react';
 
 import { ResumePreviewOverlay } from 'features/application-fit/components/input/ResumePreviewOverlay';
+import { JD_FILE_ACCEPT } from 'shared/utils/jdInputUtils';
 import { ApplicationFitLoadingCard } from '../components/loading/ApplicationFitLoadingCard';
 import { JobDescriptionPanel } from '../components/input/JobDescriptionPanel';
 import { ResumeContextCard } from '../components/input/ResumeContextCard';
@@ -26,6 +27,10 @@ export default function ApplicationFitPage() {
     version,
     analyzeFit,
     analyzeAgain,
+    fileInputRef,
+    jdUploading,
+    handleJdUploadClick,
+    handleJdFileChange,
   } = useApplicationFit();
 
   if (view === 'loading') {
@@ -81,11 +86,21 @@ export default function ApplicationFitPage() {
             value={jobDescription}
             onChange={setJobDescription}
             onClear={() => setJobDescription('')}
+            onUploadClick={handleJdUploadClick}
+            uploading={jdUploading}
             canAnalyze={canAnalyze}
             onAnalyze={() => void analyzeFit()}
           />
         </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={JD_FILE_ACCEPT}
+        className="hidden"
+        onChange={(event) => void handleJdFileChange(event)}
+      />
 
       <ResumePreviewOverlay
         open={resumePreviewOpen}

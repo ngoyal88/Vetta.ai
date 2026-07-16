@@ -383,10 +383,17 @@ export function useResumeBuilder() {
         setPublishSetActive(true);
       }
       if (replaceRoute) {
-        navigate(`/resume-vault/builder/${nextDraft.id}`, { replace: true });
+        const jdFitSnapshotId = searchParams.get('jd_fit_snapshot_id')?.trim();
+        const path = `/resume-vault/builder/${nextDraft.id}`;
+        navigate(
+          jdFitSnapshotId
+            ? `${path}?jd_fit_snapshot_id=${encodeURIComponent(jdFitSnapshotId)}`
+            : path,
+          { replace: true },
+        );
       }
     },
-    [navigate],
+    [navigate, searchParams],
   );
 
   const updateDraft = useCallback(

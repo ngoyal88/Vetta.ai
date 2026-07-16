@@ -11,7 +11,6 @@ from services.jd_fit.jd_fit_models import (
     FunnelResult,
     HMLayerResult,
     RankedAction,
-    RecruiterLayerResult,
     RequirementAlignment,
     RequirementAlignmentV2,
 )
@@ -34,10 +33,7 @@ def build_ranked_actions(
     if bottleneck == "ats_filter":
         actions.extend(_ats_actions(funnel.ats, alignments))
     elif bottleneck == "recruiter_screen":
-        actions.extend(_recruiter_actions(funnel.recruiter, target_role, cig))
-        years_action = _experience_years_action(experience_alignment)
-        if years_action:
-            actions.append(years_action)
+        actions.extend(_recruiter_actions(alignments, experience_alignment))
     elif bottleneck == "hm_review":
         actions.extend(_hm_actions(funnel.hm_application, alignments=alignments))
     else:
@@ -111,42 +107,25 @@ def _ats_actions(
 
 
 def _recruiter_actions(
-    recruiter: RecruiterLayerResult,
-    target_role: str,
-    cig: CandidateIntelligenceGraph,
+    alignments: List[RequirementAlignment],
+    experience_alignment: RequirementAlignmentV2 | None,
 ) -> List[RankedAction]:
     actions: List[RankedAction] = []
-    seniority = recruiter.signals.get("title_seniority_match", 1.0)
-    if seniority < 0.6:
-        actions.append(
-            RankedAction(
-                priority="CRITICAL",
-                label=f"Align title framing with '{target_role}'",
-                detail="Your current seniority signals may not match what recruiters scan for.",
-                estimated_impact="Likely improves recruiter scan signals",
-                action_type="resume_edit",
-            )
-        )
-    if not cig.has_quantified_bullets:
+    missing_rows = [row for row in alignments if row.match_status in {"missing", "unclear"}]
+    for row in missing_rows[:2]:
         actions.append(
             RankedAction(
                 priority="HIGH",
-                label="Add quantified impact to recent role bullets",
-                detail="Recruiter scans favor measurable outcomes in the first roles they read.",
-                estimated_impact="Likely improves recruiter scan signals",
+                label=f"Strengthen recruiter-screen evidence for {row.jd_requirement}",
+                detail=row.resume_evidence or "Recruiter-screen requirements need clearer resume evidence.",
+                estimated_impact="Improves recruiter-screen alignment",
                 action_type="resume_edit",
             )
         )
-    if cig.has_tenure_gaps:
-        actions.append(
-            RankedAction(
-                priority="MEDIUM",
-                label="Address tenure gap narrative in summary",
-                detail="Gaps over six months may trigger recruiter filters.",
-                estimated_impact="Reduces recruiter screen risk",
-                action_type="resume_edit",
-            )
-        )
+    if experience_alignment and experience_alignment.status in {"partial", "missing", "unknown"}:
+        years_action = _experience_years_action(experience_alignment)
+        if years_action:
+            actions.append(years_action)
     return actions
 
 

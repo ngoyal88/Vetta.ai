@@ -1,4 +1,5 @@
 /* Resume Vault - feature styles (imported via VaultLayout.tsx) */
+@import '../../shared/styles/parsed-resume-preview.css';
 
 /* ===== Vault hub & library shell pages ===== */
 .vault-shell-page {
@@ -388,6 +389,7 @@
   font-weight: 600;
   line-height: 1.25rem;
   color: var(--color-primary);
+  text-decoration: none;
   transition:
     background-color var(--transition),
     border-color var(--transition),
@@ -626,11 +628,28 @@
   min-height: 0;
 }
 
+.vault-version-detail-page__insights-column,
+.vault-version-detail-page__document-column {
+  min-height: 0;
+}
+
 @media (min-width: 1024px) {
   .vault-version-detail-page__layout {
     grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
     gap: 1.5rem;
     height: calc(100vh - 11rem);
+  }
+
+  .vault-version-detail-page__insights-column {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .vault-version-detail-page__document-column {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
   }
 }
 
@@ -678,8 +697,9 @@
 .vault-version-detail__insights {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 1rem;
-  height: 100%;
+  max-height: 100%;
   overflow-y: auto;
   padding-right: 0.25rem;
 }
@@ -702,10 +722,6 @@
 .vault-version-detail__card--warning {
   border-color: color-mix(in srgb, var(--color-error) 22%, transparent);
   background: color-mix(in srgb, var(--color-error-container) 8%, transparent);
-}
-
-.vault-version-detail__card--grow {
-  flex: 1;
 }
 
 .vault-version-detail__card-glow {
@@ -931,6 +947,7 @@
 .vault-version-detail__document {
   display: flex;
   flex-direction: column;
+  flex: 1;
   height: 100%;
   min-height: 28rem;
   overflow: hidden;
@@ -940,29 +957,119 @@
 .vault-version-detail__document-header {
   display: flex;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
   border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
   background: color-mix(in srgb, var(--color-surface-container-low) 55%, transparent);
-  padding: 0 1.5rem;
-  min-height: 4rem;
+  padding: 0.875rem 1.25rem;
+}
+
+.vault-version-detail__document-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.vault-version-detail__document-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.vault-document-view-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-high) 72%, transparent);
+}
+
+.vault-document-view-switch--full {
+  display: flex;
+  width: 100%;
+}
+
+.vault-document-view-switch--full .vault-document-view-switch__btn {
+  flex: 1;
+  justify-content: center;
+}
+
+.vault-document-view-switch__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0 0.75rem;
+  border: none;
+  border-radius: 0.625rem;
+  background: transparent;
+  color: var(--color-on-surface-variant);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+
+.vault-document-view-switch__btn:hover {
+  color: var(--color-on-surface);
+}
+
+.vault-document-view-switch__btn--active {
+  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface-container-highest));
+  color: var(--color-on-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 24%, transparent);
 }
 
 .vault-version-detail__document-meta {
   display: flex;
   min-width: 0;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
+}
+
+.vault-version-detail__document-title-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
 }
 
 .vault-version-detail__document-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 1.125rem;
+  font-size: 1rem;
   font-weight: 600;
+  line-height: 1.35;
   color: var(--color-on-surface);
+}
+
+.vault-version-detail__document-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vault-version-detail__builder-badge {
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  padding: 0.15rem 0.5rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-primary);
 }
 
 .vault-version-detail__file-size {
@@ -993,9 +1100,57 @@
 }
 
 .vault-version-detail__document-viewer {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
-  background: var(--color-surface-container-lowest);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-surface-container-lowest) 92%, black);
+}
+
+.vault-version-detail__document-viewer--parsed {
+  overflow-y: auto;
+}
+
+.vault-version-detail__parsed-resume {
+  width: 100%;
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 1.5rem;
+}
+
+.vault-version-detail__parsed-resume .application-fit-resume-preview {
+  max-width: none;
+  margin: 0;
+}
+
+@media (max-width: 1023px) {
+  .vault-version-detail__document-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .vault-version-detail__document-header-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .vault-version-detail__download-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .vault-version-detail__document-footer {
+    padding: 0.875rem 1rem;
+  }
+
+  .vault-version-detail__actions {
+    width: 100%;
+  }
+
+  .vault-version-detail__action-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }
 
 .vault-version-detail__document-footer {
@@ -1026,6 +1181,9 @@
 }
 
 .vault-version-detail__action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-outline-variant);
   padding: 0.625rem 1.25rem;
@@ -1062,6 +1220,7 @@
   display: flex;
   height: 100%;
   min-height: 0;
+  flex: 1;
   flex-direction: column;
 }
 
@@ -1069,18 +1228,20 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  padding: 1.5rem;
-  background: color-mix(in srgb, var(--color-surface-container-lowest) 92%, black);
+  padding: 1rem 1.25rem 1.25rem;
+  background: transparent;
 }
 
 .vault-document-viewer__frame {
   height: 100%;
-  min-height: 24rem;
+  min-height: 20rem;
   width: 100%;
   border: 0;
-  border-radius: var(--radius-lg);
-  background: white;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  border-radius: 0.75rem;
+  background: var(--bg-0);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, black 18%, transparent),
+    0 12px 32px color-mix(in srgb, black 24%, transparent);
 }
 
 .vault-document-viewer__state {

@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from config import get_settings
 from services.interview.llm_engine import get_platform_llm
 from services.interview.prompt_contracts import extract_json_dict
-from services.jd_fit.funnel_scoring import build_keyword_alignment_fallback
 from services.jd_fit.jd_fit_models import (
     RequirementAlignment,
     RoleRelevanceSignals,
     SemanticAlignmentResult,
 )
+from services.profile_memory.umbrella_terms import normalize_text
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,6 +21,44 @@ logger = get_logger(__name__)
 MAX_REQUIREMENTS_IN_PROMPT = 15
 VALID_MATCH_STATUSES = frozenset({"strong", "partial", "missing", "unclear"})
 VALID_ROLE_LEVELS = frozenset({"strong", "partial", "weak"})
+
+
+def _corpus_has_keyword(corpus: str, keyword: str) -> bool:
+    norm = normalize_text(keyword)
+    if norm in corpus:
+        return True
+    pattern = re.escape(norm).replace(r"\ ", r"[\s_-]*")
+    return bool(re.search(pattern, corpus, re.IGNORECASE))
+
+
+def build_keyword_alignment_fallback(
+    resume_corpus: str,
+    required_skills: List[str],
+    nice_to_have_skills: List[str],
+) -> SemanticAlignmentResult:
+    """Legacy keyword fallback for deprecated semantic_alignment path."""
+    requirements: List[RequirementAlignment] = []
+    seen: set[str] = set()
+    for skill in list(required_skills) + list(nice_to_have_skills[:4]):
+        label = skill.strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        matched = _corpus_has_keyword(resume_corpus, skill)
+        requirements.append(
+            RequirementAlignment(
+                jd_requirement=skill,
+                match_status="strong" if matched else "missing",
+                confidence=0.6 if matched else 0.4,
+                resume_evidence=None,
+                equivalent_terms_found=[],
+            )
+        )
+    return SemanticAlignmentResult(
+        requirements=requirements,
+        role_relevance=RoleRelevanceSignals(),
+        alignment_mode="fallback",
+    )
 
 
 def _safe_str_list(value: Any) -> List[str]:

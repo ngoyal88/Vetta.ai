@@ -15,15 +15,15 @@ from services.interview.llm_engine import get_platform_llm
 from services.jd_fit.action_builder import build_ranked_actions
 from services.jd_fit.ats_format_checks import compute_ats_format_warnings
 from services.jd_fit.candidate_graph import build_candidate_graph
-from services.jd_fit.funnel_scoring import (
-    apply_role_relevance_blend,
-    apply_years_experience_blend,
-    compute_ats_layer_from_alignment,
-    compute_hm_layer_from_alignment,
-    compute_recruiter_layer,
-    identify_bottleneck,
-    years_match_score,
+from services.jd_fit.evidence_index import build_evidence_chunks
+from services.jd_fit.evidence_judge import judge_requirement_evidence
+from services.jd_fit.fit_score import (
+    evidence_results_to_legacy_alignments,
+    evidence_results_to_v2_alignments,
+    resolve_prepared_fit,
+    score_from_evidence_results,
 )
+from services.jd_fit.funnel_scoring import compute_funnel_from_evidence_results
 from services.resume.profile_normalizer import profile_content_hash
 from services.jd_fit.hash_utils import jd_hash
 from services.jd_fit.jd_fit_models import (
@@ -33,6 +33,8 @@ from services.jd_fit.jd_fit_models import (
     HistoryResponse,
     PostingFreshness,
     RankedAction,
+    RequirementAlignmentV2,
+    SemanticAlignmentResult,
 )
 from services.jd_fit.jd_fit_repository import (
     build_inputs_digest,
@@ -44,27 +46,20 @@ from services.jd_fit.jd_fit_repository import (
 )
 from services.jd_fit.jd_fit_weights import (
     BOTTLENECK_LABELS,
-    FUNNEL_COMPOSITE_SCORE_BLEND,
     MIN_JD_CHARS,
-    TYPED_WEIGHTED_SCORE_BLEND,
 )
 from services.jd_fit.narrative import build_why_this_score
 from services.jd_fit.profile_loader import load_resume_snapshot
-from services.jd_fit.resume_compact import build_cig_summary, compact_resume_for_alignment
-from services.jd_fit.score_derivation import derive_scores, fit_band_from_score
-from services.jd_fit.semantic_alignment import (
-    derive_skill_lists_from_alignment,
-    run_semantic_alignment,
-)
+from services.jd_fit.score_derivation import fit_band_from_score
 from services.jd_fit.typed_requirement_alignment import (
-    align_typed_requirements,
+    apply_requirement_soft_cap,
+    demote_skills_from_preferred_section,
     ensure_experience_requirements,
     fallback_typed_requirements,
-    legacy_alignments_from_v2,
+    merge_or_groups_from_jd,
     normalize_typed_requirements,
-    parse_years_from_text,
     pick_experience_years_alignment,
-    summarize_v2_alignment,
+    reconcile_experience_band_from_jd,
 )
 from services.profile_memory.profile_claims_repository import get_profile_memory_summary
 from utils.logger import get_logger
@@ -202,6 +197,49 @@ def _hero_primary_action_label(top_action: RankedAction | None) -> str | None:
     return top_action.label
 
 
+def _bottleneck_from_evidence(results, gate_status: str) -> str:
+    if gate_status == "blocked":
+        return "ats_filter"
+    missing_required = [
+        row for row in results if row.importance == "required" and row.resume_status in {"missing", "unknown"}
+    ]
+    if not missing_required:
+        return "none"
+
+    stage_rank = {"ats_filter": 0, "recruiter_screen": 1, "hm_review": 2}
+
+    def _stage_for(row) -> str:
+        stage = getattr(row, "funnel_stage", None)
+        if stage in stage_rank:
+            return stage
+        if row.category in {"technical_skill", "certification", "work_authorization", "location"}:
+            return "ats_filter"
+        if row.category in {"experience", "seniority", "education"}:
+            return "recruiter_screen"
+        return "hm_review"
+
+    # Earliest funnel stage among missing required requirements wins.
+    return min((_stage_for(row) for row in missing_required), key=lambda s: stage_rank.get(s, 2))
+
+
+def _status_lists_from_evidence(results) -> tuple[list[str], list[str]]:
+    matched = [row.requirement_text for row in results if row.resume_status in {"met", "partial"}]
+    missing = [row.requirement_text for row in results if row.resume_status in {"missing", "unknown"}]
+    return matched[:12], missing[:12]
+
+
+def _base_requirement_rows(typed_requirements) -> list[RequirementAlignmentV2]:
+    return [
+        RequirementAlignmentV2(
+            requirement=requirement,
+            status="unknown",
+            confidence=0.35,
+            reason="No evidence adjudication has been applied yet.",
+        )
+        for requirement in typed_requirements
+    ]
+
+
 class JDFitService:
     def __init__(self) -> None:
         self._jd_context = JDContextService(get_platform_llm())
@@ -297,97 +335,86 @@ class JDFitService:
             )
         if not typed_requirements:
             warnings.append("typed_requirement_extraction_empty")
+        typed_requirements = merge_or_groups_from_jd(typed_requirements, jd_text)
+        typed_requirements = demote_skills_from_preferred_section(typed_requirements, jd_text)
         typed_requirements = ensure_experience_requirements(typed_requirements, jd_text, role)
-        semantic_required_skills = list(jd_context.required_skills)
-        for req in typed_requirements:
-            if req.category == "technical_skill" and req.importance == "required":
-                semantic_required_skills.append(req.text)
-        semantic_required_skills = list(dict.fromkeys(s for s in semantic_required_skills if s.strip()))
+        typed_requirements = reconcile_experience_band_from_jd(typed_requirements, jd_text)
+        typed_requirements, truncated = apply_requirement_soft_cap(typed_requirements)
+        if truncated:
+            warnings.append("requirements_truncated")
 
-        compact_resume = compact_resume_for_alignment(profile)
-        cig_summary = build_cig_summary(cig)
-
-        alignment = await run_semantic_alignment(
-            target_role=role,
-            target_company=target_company,
-            job_description=jd_text,
-            compact_resume=compact_resume,
-            cig_summary=cig_summary,
-            required_skills=semantic_required_skills,
-            nice_to_have_skills=jd_context.nice_to_have_skills,
-            resume_corpus=cig.resume_corpus,
+        base_requirement_alignments_v2 = _base_requirement_rows(typed_requirements)
+        evidence_chunks = build_evidence_chunks(profile, profile_memory)
+        if not evidence_chunks:
+            warnings.append("evidence_empty")
+        requirement_results, alignment_mode, judge_unavailable = await judge_requirement_evidence(
+            typed_requirements,
+            evidence_chunks,
         )
+        if judge_unavailable:
+            warnings.append("evidence_judge_unavailable")
+        elif alignment_mode == "fallback":
+            warnings.append("evidence_judge_partial")
 
-        if alignment.alignment_mode == "fallback":
-            warnings.append("alignment_fallback")
-
-        requirement_alignments_v2 = align_typed_requirements(
-            requirements=typed_requirements,
-            cig=cig,
-            semantic_alignment=alignment,
+        requirement_alignments_v2 = evidence_results_to_v2_alignments(
+            base_requirement_alignments_v2,
+            requirement_results,
         )
-        experience_alignment = pick_experience_years_alignment(requirement_alignments_v2)
         (
+            application_score,
+            candidate_score,
+            resume_gap_score,
             category_scores,
             gate_status,
             hard_gate_findings,
-            unknown_signals,
-            score_reducers,
-            score_strengths,
-            typed_weighted_score,
-        ) = summarize_v2_alignment(requirement_alignments_v2)
-
-        if not alignment.requirements and requirement_alignments_v2:
-            alignment.requirements = legacy_alignments_from_v2(requirement_alignments_v2)
-
-        format_warnings = compute_ats_format_warnings(profile)
-        ats = compute_ats_layer_from_alignment(alignment, format_warnings)
-        recruiter = compute_recruiter_layer(cig, role, semantic_required_skills)
-        recruiter = apply_role_relevance_blend(recruiter, alignment.role_relevance)
-        required_years = (
-            parse_years_from_text(experience_alignment.requirement.text)
-            if experience_alignment
-            else None
-        )
-        recruiter = apply_years_experience_blend(
-            recruiter,
-            years_match_score(required_years, cig.years_experience),
-        )
-        hm_application = compute_hm_layer_from_alignment(cig, alignment, include_vpm=False)
-
-        hm_prepared = None
-        vpm_boostable: list[str] = []
-        if accepted_count > 0:
-            hm_prepared = compute_hm_layer_from_alignment(cig, alignment, include_vpm=True)
-            vpm_boostable = hm_prepared.vpm_boostable_skills
-
-        funnel = FunnelResult(
-            ats=ats,
-            recruiter=recruiter,
-            hm_application=hm_application,
-            hm_prepared=hm_prepared,
-        )
-
-        bottleneck = identify_bottleneck(ats, recruiter, hm_application)
-        bottleneck_label = BOTTLENECK_LABELS.get(bottleneck, bottleneck)
-
-        legacy_application_score, prepared_score, prepared_delta, _fit_band = derive_scores(
-            funnel, accepted_count=accepted_count
-        )
-        application_score = int(
-            round((typed_weighted_score * TYPED_WEIGHTED_SCORE_BLEND) + (legacy_application_score * FUNNEL_COMPOSITE_SCORE_BLEND))
-        )
+            score_explanation,
+        ) = score_from_evidence_results(requirement_results, requirement_alignments_v2)
         if "typed_requirement_extraction_empty" in warnings:
             application_score = min(application_score, 55)
+            candidate_score = max(application_score, min(candidate_score, 55))
+        prepared_score, prepared_delta = resolve_prepared_fit(
+            resume_score=application_score,
+            candidate_score=candidate_score,
+            accepted_count=accepted_count,
+        )
+        # Public gap mirrors Prepared Fit (VPM-gated); raw candidate remains on candidate_fit_score.
+        resume_gap_score = prepared_delta
         fit_band = fit_band_from_score(application_score)
-        if prepared_score is not None:
-            prepared_score = max(
-                application_score,
-                int(round((prepared_score * FUNNEL_COMPOSITE_SCORE_BLEND) + (typed_weighted_score * TYPED_WEIGHTED_SCORE_BLEND))),
-            )
-            prepared_delta = max(0, prepared_score - application_score)
 
-        matched_skills, missing_skills = derive_skill_lists_from_alignment(alignment)
+        alignment = SemanticAlignmentResult(
+            requirements=evidence_results_to_legacy_alignments(requirement_results),
+            alignment_mode=alignment_mode,
+        )
+
+        experience_alignment = pick_experience_years_alignment(requirement_alignments_v2)
+        unknown_signals = [
+            f"{row.requirement_text}: {row.reason or 'not clearly evidenced on the resume'}"
+            for row in requirement_results
+            if row.resume_status == "unknown"
+        ][:8]
+        score_reducers = [
+            f"{row.requirement_text}: {row.reason or 'required evidence is missing'}"
+            for row in requirement_results
+            if row.resume_status in {"missing", "unknown"}
+        ][:8]
+        score_strengths = [
+            f"{row.requirement_text}: {row.reason or 'matched with visible resume evidence'}"
+            for row in requirement_results
+            if row.resume_status == "met"
+        ][:8]
+
+        format_warnings = compute_ats_format_warnings(profile)
+        funnel = compute_funnel_from_evidence_results(
+            requirement_results,
+            format_warnings,
+            include_prepared=accepted_count > 0,
+        )
+        vpm_boostable = funnel.hm_prepared.vpm_boostable_skills if funnel.hm_prepared else []
+
+        bottleneck = _bottleneck_from_evidence(requirement_results, gate_status)
+        bottleneck_label = BOTTLENECK_LABELS.get(bottleneck, bottleneck)
+
+        matched_skills, missing_skills = _status_lists_from_evidence(requirement_results)
 
         ranked_actions = build_ranked_actions(
             bottleneck=bottleneck,
@@ -437,6 +464,11 @@ class JDFitService:
             application_fit_score=application_score,
             prepared_fit_score=prepared_score,
             prepared_fit_delta=prepared_delta,
+            resume_fit_score=application_score,
+            candidate_fit_score=candidate_score,
+            resume_gap_score=resume_gap_score,
+            score_explanation=score_explanation,
+            requirement_results=requirement_results,
             fit_band=fit_band,
             posting_freshness=_posting_freshness(first_seen),
             funnel=funnel,

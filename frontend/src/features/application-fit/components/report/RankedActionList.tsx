@@ -23,7 +23,7 @@ export function RankedActionList({ report, targetRole }: RankedActionListProps) 
           <ActionCard
             key={`${action.label}-${index}`}
             action={action}
-            snapshotId={report.snapshot_id}
+            report={report}
             targetRole={targetRole}
           />
         ))}

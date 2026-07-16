@@ -3,6 +3,11 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 import { useActiveVaultResume } from 'features/modes/resume-deep-dive/hooks/useActiveVaultResume';
+import { useJobDescriptionFileUpload } from 'shared/hooks/useJobDescriptionFileUpload';
+import {
+  applyJdTargetHints,
+  extractJdTargetHints,
+} from 'shared/utils/jdInputUtils';
 
 import { applicationFitApi } from '../services/applicationFitApi';
 import type { ApplicationFitView, ComputeResponse } from '../types/applicationFitTypes';
@@ -24,6 +29,28 @@ export function useApplicationFit() {
   const [targetCompany, setTargetCompany] = useState('');
   const [jobDescription, setJobDescription] = useState('');
   const [report, setReport] = useState<ComputeResponse | null>(null);
+
+  const onJdTextLoaded = useCallback(
+    (text: string) => {
+      setJobDescription(text);
+      applyJdTargetHints(
+        extractJdTargetHints(text),
+        { role: targetRole, company: targetCompany },
+        { setRole: setTargetRole, setCompany: setTargetCompany },
+      );
+    },
+    [targetRole, targetCompany],
+  );
+
+  const {
+    fileInputRef,
+    jdUploading,
+    handleUploadClick: handleJdUploadClick,
+    handleFileChange: handleJdFileChange,
+  } = useJobDescriptionFileUpload({
+    maxChars: JD_MAX_CHARS,
+    onTextLoaded: onJdTextLoaded,
+  });
 
   useEffect(() => {
     const state = (location.state as LocationState | null) ?? {};
@@ -61,8 +88,9 @@ export function useApplicationFit() {
     () =>
       canAnalyzeApplicationFit(targetRole, jobDescription) &&
       !resumeLoading &&
+      !jdUploading &&
       Boolean(entry && version),
-    [targetRole, jobDescription, resumeLoading, entry, version],
+    [targetRole, jobDescription, resumeLoading, jdUploading, entry, version],
   );
 
   const analyzeFit = useCallback(async () => {
@@ -106,5 +134,9 @@ export function useApplicationFit() {
     version,
     analyzeFit,
     analyzeAgain,
+    fileInputRef,
+    jdUploading,
+    handleJdUploadClick,
+    handleJdFileChange,
   };
 }

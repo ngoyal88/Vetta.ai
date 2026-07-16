@@ -3,23 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
-from services.jd_fit.candidate_graph import CandidateIntelligenceGraph
-from services.jd_fit.funnel_scoring import years_match_score
 from services.jd_fit.jd_fit_models import (
-    CategoryScore,
-    GateStatus,
-    HardGateFinding,
-    RequirementAlignment,
     RequirementAlignmentV2,
-    RequirementCategory,
     RequirementCategoryGroup,
-    RequirementAlignmentStatus,
-    SemanticAlignmentResult,
     TypedRequirement,
 )
-from services.jd_fit.jd_fit_weights import SENIORITY_RANK
 from services.profile_memory.umbrella_terms import normalize_text
 
 VALID_CATEGORIES = {
@@ -40,6 +30,10 @@ VALID_CATEGORIES = {
 VALID_IMPORTANCE = {"required", "preferred", "bonus"}
 VALID_STRICTNESS = {"hard", "flexible"}
 VALID_STAGES = {"ats_filter", "recruiter_screen", "hm_review"}
+VALID_SATISFY_MODES = {"all", "any"}
+
+# Soft cap — required rows are never dropped; only preferred/bonus trimmed.
+REQUIREMENT_SOFT_CAP = 30
 
 CATEGORY_GROUPS: Dict[str, RequirementCategoryGroup] = {
     "technical_skill": "technical",
@@ -57,39 +51,10 @@ CATEGORY_GROUPS: Dict[str, RequirementCategoryGroup] = {
     "soft_skill": "resume_signal",
 }
 
-STATUS_SCORE = {
-    "met": 1.0,
-    "partial": 0.6,
-    "missing": 0.0,
-    "unknown": 0.35,
-    "not_applicable": 1.0,
-}
-
 IMPORTANCE_WEIGHT = {
     "required": 1.25,
     "preferred": 0.8,
     "bonus": 0.35,
-}
-
-DEGREE_LEVELS = {
-    "phd": 5,
-    "doctorate": 5,
-    "doctoral": 5,
-    "master": 4,
-    "masters": 4,
-    "ms": 4,
-    "m.s": 4,
-    "mba": 4,
-    "bachelor": 3,
-    "bachelors": 3,
-    "bs": 3,
-    "b.s": 3,
-    "ba": 3,
-    "b.a": 3,
-    "btech": 3,
-    "b.tech": 3,
-    "associate": 2,
-    "diploma": 1,
 }
 
 HARD_GATE_CATEGORIES = {
@@ -100,6 +65,367 @@ HARD_GATE_CATEGORIES = {
     "travel",
     "employment_type",
 }
+
+
+def format_requirement_label(text: str, alternatives: Sequence[str], satisfy_mode: str) -> str:
+    cleaned_alts = [alt.strip() for alt in alternatives if isinstance(alt, str) and alt.strip()]
+    if satisfy_mode == "any" and cleaned_alts:
+        return f"{text.strip()} (or {', '.join(cleaned_alts)})"
+    return text.strip()
+
+
+def _normalize_alternatives(raw: Any) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip()[:120]
+        if not cleaned:
+            continue
+        key = normalize_text(cleaned)
+        if not key or key in {"similar", "etc", "and", "or"}:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(cleaned)
+    return out[:8]
+
+
+def _dedupe_key(category: str, text: str, alternatives: Sequence[str], satisfy_mode: str) -> str:
+    alt_key = "|".join(sorted(normalize_text(alt) for alt in alternatives))
+    return f"{category}:{normalize_text(text)}:{alt_key}:{satisfy_mode}"
+
+
+def apply_requirement_soft_cap(requirements: Sequence[TypedRequirement], cap: int = REQUIREMENT_SOFT_CAP) -> tuple[List[TypedRequirement], bool]:
+    rows = list(requirements)
+    if len(rows) <= cap:
+        return rows, False
+    required = [row for row in rows if row.importance == "required"]
+    optional = sorted(
+        [row for row in rows if row.importance in {"preferred", "bonus"}],
+        key=lambda row: row.weight,
+        reverse=True,
+    )
+    kept = required + optional[: max(0, cap - len(required))]
+    return kept, True
+
+
+def collapse_or_group_duplicates(requirements: Sequence[TypedRequirement]) -> List[TypedRequirement]:
+    """Drop standalone rows whose text is already covered by a satisfy_mode=any group."""
+    rows = list(requirements)
+    covered: set[str] = set()
+    for row in rows:
+        if row.satisfy_mode != "any":
+            continue
+        for label in [row.text, *row.alternatives]:
+            key = normalize_text(label)
+            if key:
+                covered.add(key)
+
+    if not covered:
+        return rows
+
+    out: List[TypedRequirement] = []
+    for row in rows:
+        if row.satisfy_mode == "any":
+            out.append(row)
+            continue
+        key = normalize_text(row.text)
+        # Drop duplicate skills that are already alternatives in an OR group.
+        if row.category == "technical_skill" and key in covered:
+            continue
+        out.append(row)
+    return out
+
+
+_SKILL_TOKEN_RE = re.compile(r"[A-Za-z][\w.+#]*(?:\.js)?|C\+\+|C#", re.I)
+# "Node.js, Python, Java, or similar" / "one of C++, Python, or Java"
+_OR_LIST_RE = re.compile(
+    r"(?:"
+    r"(?:one|any)\s+of\s+"
+    r"|"
+    r"(?:proficien(?:cy|t)|experience|familiar(?:ity)?|skills?)\s+(?:in|with|using)?\s*"
+    r")?"
+    r"(?P<body>"
+    r"(?:[A-Za-z][\w.+#]*(?:\.js)?|C\+\+|C#)"
+    r"(?:\s*[,/]\s*(?:[A-Za-z][\w.+#]*(?:\.js)?|C\+\+|C#)){1,8}"
+    r"\s*,?\s*(?:or|/)\s+"
+    r"(?:[A-Za-z][\w.+#]*(?:\.js)?|C\+\+|C#)"
+    r"(?:\s+or\s+similar)?"
+    r")",
+    re.I,
+)
+_PAREN_OR_RE = re.compile(r"\(([^)]{6,140}?\bor\b[^)]{0,100})\)", re.I)
+_PREFERRED_SECTION_RE = re.compile(
+    r"(?is)(?:preferred\s+qualifications?|nice\s+to\s+have|bonus(?:\s+points?)?|pluses)\s*:?\s*(.*)$"
+)
+_STOP_SKILL_WORDS = {
+    "and", "or", "similar", "preferred", "considered", "experience", "proficiency",
+    "familiar", "familiarity", "with", "using", "including", "etc", "the", "a", "an",
+    "solid", "strong", "modern", "framework", "frameworks", "language", "languages",
+    "server", "side", "programming", "at", "least", "one", "of", "any",
+}
+
+
+def _canon_skill(token: str) -> str:
+    t = normalize_text(token)
+    t = t.replace(".js", "").replace("nodejs", "node").replace("reactjs", "react")
+    t = t.replace("cplusplus", "c++").replace("c plus plus", "c++")
+    return t.strip()
+
+
+def _display_skill(token: str) -> str:
+    raw = token.strip().rstrip(",;")
+    if not raw:
+        return raw
+    lower = raw.lower()
+    mapping = {
+        "nodejs": "Node.js",
+        "node.js": "Node.js",
+        "node": "Node.js",
+        "reactjs": "React",
+        "react.js": "React",
+        "javascript": "JavaScript",
+        "typescript": "TypeScript",
+        "postgres": "PostgreSQL",
+        "postgresql": "PostgreSQL",
+        "c++": "C++",
+        "c#": "C#",
+    }
+    return mapping.get(lower, raw)
+
+
+def _tokens_from_or_body(body: str) -> List[str]:
+    cleaned = re.sub(r"(?i)\bor\s+similar\b", " ", body)
+    cleaned = re.sub(r"(?i)\b(?:preferred|considered)\b", " ", cleaned)
+    found: List[str] = []
+    seen: set[str] = set()
+    for match in _SKILL_TOKEN_RE.finditer(cleaned):
+        raw = match.group(0)
+        key = _canon_skill(raw)
+        if not key or key in _STOP_SKILL_WORDS or len(key) < 2:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(_display_skill(raw))
+    return found
+
+
+def extract_or_groups_from_jd(jd_text: str) -> List[List[str]]:
+    """Deterministic OR/one-of skill groups from JD wording (LLM-independent)."""
+    if not jd_text or not jd_text.strip():
+        return []
+    groups: List[List[str]] = []
+    seen_keys: set[frozenset[str]] = set()
+
+    def _add(tokens: List[str]) -> None:
+        if len(tokens) < 2:
+            return
+        key = frozenset(_canon_skill(t) for t in tokens)
+        if len(key) < 2 or key in seen_keys:
+            return
+        seen_keys.add(key)
+        groups.append(tokens)
+
+    for match in _OR_LIST_RE.finditer(jd_text):
+        _add(_tokens_from_or_body(match.group("body")))
+    for match in _PAREN_OR_RE.finditer(jd_text):
+        _add(_tokens_from_or_body(match.group(1)))
+    return groups
+
+
+def merge_or_groups_from_jd(
+    requirements: Sequence[TypedRequirement],
+    jd_text: str,
+) -> List[TypedRequirement]:
+    """
+    Merge standalone technical_skill rows that the JD lists as one-of alternatives.
+    Survives weak LLM extraction that emits Java, Python, Node as separate requireds.
+    """
+    rows = list(requirements)
+    groups = extract_or_groups_from_jd(jd_text)
+    if not groups:
+        return collapse_or_group_duplicates(rows)
+
+    for group in groups:
+        canon = {_canon_skill(t): t for t in group}
+        matches: List[TypedRequirement] = []
+        others: List[TypedRequirement] = []
+        for row in rows:
+            if row.category != "technical_skill":
+                others.append(row)
+                continue
+            if row.satisfy_mode == "any":
+                existing = {_canon_skill(x) for x in [row.text, *row.alternatives]}
+                if existing & set(canon.keys()):
+                    merged_labels = [row.text, *row.alternatives]
+                    for key, label in canon.items():
+                        if key not in existing:
+                            merged_labels.append(label)
+                    primary = merged_labels[0]
+                    alts = [x for x in merged_labels[1:] if _canon_skill(x) != _canon_skill(primary)]
+                    others.append(
+                        row.model_copy(
+                            update={
+                                "text": primary,
+                                "alternatives": alts,
+                                "satisfy_mode": "any",
+                            }
+                        )
+                    )
+                else:
+                    others.append(row)
+                continue
+            key = _canon_skill(row.text)
+            if key in canon:
+                matches.append(row)
+            else:
+                others.append(row)
+
+        already_merged = any(
+            r.satisfy_mode == "any"
+            and ({_canon_skill(x) for x in [r.text, *r.alternatives]} & set(canon.keys()))
+            for r in others
+        )
+        if len(matches) < 2 and already_merged:
+            rows = others
+            continue
+
+        if len(matches) == 1:
+            primary_row = matches[0]
+            primary = primary_row.text
+            alts = [canon[k] for k in canon if k != _canon_skill(primary)]
+            others.append(
+                primary_row.model_copy(
+                    update={
+                        "alternatives": alts,
+                        "satisfy_mode": "any",
+                    }
+                )
+            )
+            rows = others
+            continue
+
+        if len(matches) >= 2:
+            primary_row = matches[0]
+            ordered = [primary_row.text]
+            seen = {_canon_skill(primary_row.text)}
+            for label in group:
+                key = _canon_skill(label)
+                if key not in seen:
+                    ordered.append(label)
+                    seen.add(key)
+            for row in matches[1:]:
+                key = _canon_skill(row.text)
+                if key not in seen:
+                    ordered.append(row.text)
+                    seen.add(key)
+            others.append(
+                primary_row.model_copy(
+                    update={
+                        "text": ordered[0],
+                        "alternatives": ordered[1:],
+                        "satisfy_mode": "any",
+                        "importance": "required",
+                        "funnel_stage": primary_row.funnel_stage or "ats_filter",
+                        "weight": max(r.weight for r in matches),
+                    }
+                )
+            )
+            rows = others
+            continue
+
+        rows = matches + others
+
+    return collapse_or_group_duplicates(rows)
+
+
+def demote_skills_from_preferred_section(
+    requirements: Sequence[TypedRequirement],
+    jd_text: str,
+) -> List[TypedRequirement]:
+    """If a skill appears only under Preferred/Nice-to-have, force importance preferred."""
+    match = _PREFERRED_SECTION_RE.search(jd_text or "")
+    if not match:
+        return list(requirements)
+    preferred_blob = match.group(1).lower()
+    required_blob = jd_text[: match.start()].lower()
+
+    out: List[TypedRequirement] = []
+    for row in requirements:
+        if row.category != "technical_skill" or row.importance != "required":
+            out.append(row)
+            continue
+        labels = [row.text, *row.alternatives]
+        keys = [_canon_skill(label) for label in labels if _canon_skill(label)]
+        if not keys:
+            out.append(row)
+            continue
+        in_pref = all(key in preferred_blob for key in keys)
+        in_req = any(key in required_blob for key in keys)
+        if in_pref and not in_req:
+            out.append(
+                row.model_copy(
+                    update={
+                        "importance": "preferred",
+                        "funnel_stage": "hm_review",
+                        "weight": min(row.weight, 0.04),
+                        "is_hard_gate": False,
+                    }
+                )
+            )
+        else:
+            out.append(row)
+    return out
+
+
+def reconcile_experience_band_from_jd(
+    requirements: Sequence[TypedRequirement],
+    jd_text: str,
+) -> List[TypedRequirement]:
+    """Rewrite experience rows to match the JD's literal years band (e.g. 1-2, not 2+)."""
+    if not jd_text.strip():
+        return list(requirements)
+    range_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)",
+        jd_text,
+        re.I,
+    )
+    band_text: Optional[str] = None
+    if range_match:
+        lo, hi = range_match.group(1), range_match.group(2)
+        band_text = f"{lo}–{hi} years of professional software engineering experience"
+    else:
+        min_match = re.search(
+            r"(?:at\s+least|minimum\s+of)\s+(\d+(?:\.\d+)?)\s*(?:years?|yrs?)",
+            jd_text,
+            re.I,
+        )
+        if min_match:
+            band_text = (
+                f"{min_match.group(1)}+ years of professional software engineering experience"
+            )
+    if not band_text:
+        return list(requirements)
+
+    out: List[TypedRequirement] = []
+    replaced = False
+    for row in requirements:
+        if (
+            not replaced
+            and row.category in ("experience", "seniority")
+            and parse_years_from_text(row.text) is not None
+        ):
+            out.append(row.model_copy(update={"text": band_text}))
+            replaced = True
+        else:
+            out.append(row)
+    return out
 
 
 def normalize_typed_requirements(raw_rows: Sequence[Any]) -> List[TypedRequirement]:
@@ -123,13 +449,20 @@ def normalize_typed_requirements(raw_rows: Sequence[Any]) -> List[TypedRequireme
         stage = str(raw.get("funnel_stage") or "hm_review").strip().lower()
         if stage not in VALID_STAGES:
             stage = "hm_review"
+        satisfy_mode = str(raw.get("satisfy_mode") or "all").strip().lower()
+        if satisfy_mode not in VALID_SATISFY_MODES:
+            satisfy_mode = "all"
+        alternatives = _normalize_alternatives(raw.get("alternatives"))
+        # If alternatives exist without any-mode, treat as OR group.
+        if alternatives and satisfy_mode == "all":
+            satisfy_mode = "any"
         weight = raw.get("weight", _default_weight(category, importance))
         if not isinstance(weight, (int, float)):
             weight = _default_weight(category, importance)
         is_hard_gate = bool(raw.get("is_hard_gate", False)) or (
             importance == "required" and strictness == "hard" and category in HARD_GATE_CATEGORIES
         )
-        key = f"{category}:{normalize_text(text)}"
+        key = _dedupe_key(category, text, alternatives, satisfy_mode)
         if key in seen:
             continue
         seen.add(key)
@@ -138,6 +471,8 @@ def normalize_typed_requirements(raw_rows: Sequence[Any]) -> List[TypedRequireme
                 id=str(raw.get("id") or f"req_{idx + 1}")[:80],
                 category=category,  # type: ignore[arg-type]
                 text=text[:240],
+                alternatives=alternatives,
+                satisfy_mode=satisfy_mode,  # type: ignore[arg-type]
                 importance=importance,  # type: ignore[arg-type]
                 strictness=strictness,  # type: ignore[arg-type]
                 funnel_stage=stage,  # type: ignore[arg-type]
@@ -145,7 +480,7 @@ def normalize_typed_requirements(raw_rows: Sequence[Any]) -> List[TypedRequireme
                 is_hard_gate=is_hard_gate,
             )
         )
-    return rows[:20]
+    return collapse_or_group_duplicates(rows)
 
 
 def fallback_typed_requirements(required_skills: Sequence[str], nice_to_have_skills: Sequence[str]) -> List[TypedRequirement]:
@@ -237,15 +572,33 @@ def ensure_experience_requirements(
 ) -> List[TypedRequirement]:
     rows = list(requirements)
     if _has_experience_years_requirement(rows):
-        return rows[:20]
+        return rows
 
     jd_snippets = extract_experience_requirements_from_jd(jd_text)
     if jd_snippets:
+        snippet = jd_snippets[0]
+        range_match = re.search(
+            r"(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)",
+            snippet,
+            re.I,
+        )
+        if range_match:
+            text = (
+                f"{range_match.group(1)}–{range_match.group(2)} years of "
+                "professional software engineering experience"
+            )
+        else:
+            years = parse_years_from_text(snippet)
+            text = (
+                f"{years:g}+ years of professional software engineering experience"
+                if years is not None
+                else snippet[:120]
+            )
         rows.append(
             TypedRequirement(
                 id="req_exp_jd_scan",
                 category="experience",
-                text=jd_snippets[0],
+                text=text,
                 importance="required",
                 strictness="flexible",
                 funnel_stage="recruiter_screen",
@@ -253,7 +606,7 @@ def ensure_experience_requirements(
                 is_hard_gate=False,
             )
         )
-        return rows[:20]
+        return rows
 
     seniority = _seniority_from_role(target_role)
     if seniority and not any(req.category == "seniority" for req in rows):
@@ -269,7 +622,7 @@ def ensure_experience_requirements(
                 is_hard_gate=False,
             )
         )
-        return rows[:20]
+        return rows
 
     if not rows:
         rows.append(
@@ -284,7 +637,7 @@ def ensure_experience_requirements(
                 is_hard_gate=False,
             )
         )
-    return rows[:20]
+    return rows
 
 
 def pick_experience_years_alignment(
@@ -294,84 +647,6 @@ def pick_experience_years_alignment(
         if row.requirement.category == "experience" and parse_years_from_text(row.requirement.text) is not None:
             return row
     return None
-
-
-def align_typed_requirements(
-    *,
-    requirements: Sequence[TypedRequirement],
-    cig: CandidateIntelligenceGraph,
-    semantic_alignment: SemanticAlignmentResult,
-) -> List[RequirementAlignmentV2]:
-    skill_rows = _skill_alignment_map(semantic_alignment.requirements)
-    out: List[RequirementAlignmentV2] = []
-    for req in requirements:
-        if req.category == "technical_skill":
-            out.append(_align_technical(req, skill_rows, cig))
-        elif req.category == "education":
-            out.append(_align_education(req, cig))
-        elif req.category == "experience":
-            out.append(_align_experience(req, cig))
-        elif req.category == "seniority":
-            out.append(_align_seniority(req, cig))
-        elif req.category == "location":
-            out.append(_align_location(req, cig))
-        elif req.category == "certification":
-            out.append(_align_keyword_category(req, cig, "certification"))
-        elif req.category == "domain":
-            out.append(_align_keyword_category(req, cig, "domain"))
-        elif req.category == "management":
-            out.append(_align_management(req, cig))
-        elif req.category in {"work_authorization", "language", "travel", "employment_type"}:
-            out.append(_align_explicit_unknown_or_keyword(req, cig))
-        else:
-            out.append(_align_keyword_category(req, cig, req.category))
-    return out
-
-
-def summarize_v2_alignment(
-    alignments: Sequence[RequirementAlignmentV2],
-) -> Tuple[List[CategoryScore], GateStatus, List[HardGateFinding], List[str], List[str], List[str], int]:
-    category_scores = _category_scores(alignments)
-    gate_status, hard_gates = _gate_summary(alignments)
-    unknowns = [
-        f"{row.requirement.text}: not shown in your profile"
-        for row in alignments
-        if row.status == "unknown"
-    ][:8]
-    reducers = [
-        f"{row.requirement.text}: {row.reason or 'required evidence is missing'}"
-        for row in alignments
-        if row.status in ("missing", "unknown")
-    ][:8]
-    strengths = [
-        f"{row.requirement.text}: {row.reason or 'matched with profile evidence'}"
-        for row in alignments
-        if row.status == "met"
-    ][:8]
-    weighted_score = _weighted_score(alignments)
-    return category_scores, gate_status, hard_gates, unknowns, reducers, strengths, weighted_score
-
-
-def legacy_alignments_from_v2(alignments: Sequence[RequirementAlignmentV2]) -> List[RequirementAlignment]:
-    rows: List[RequirementAlignment] = []
-    for row in alignments:
-        status = {
-            "met": "strong",
-            "partial": "partial",
-            "missing": "missing",
-            "unknown": "unclear",
-            "not_applicable": "strong",
-        }.get(row.status, "unclear")
-        rows.append(
-            RequirementAlignment(
-                jd_requirement=row.requirement.text,
-                match_status=status,  # type: ignore[arg-type]
-                confidence=row.confidence,
-                resume_evidence=row.evidence,
-                equivalent_terms_found=[],
-            )
-        )
-    return rows
 
 
 def _default_weight(category: str, importance: str) -> float:
@@ -387,231 +662,3 @@ def _default_weight(category: str, importance: str) -> float:
         "management": 0.07,
     }.get(category, 0.05)
     return base * IMPORTANCE_WEIGHT.get(importance, 1.0)
-
-
-def _skill_alignment_map(rows: Sequence[RequirementAlignment]) -> Dict[str, RequirementAlignment]:
-    return {normalize_text(row.jd_requirement): row for row in rows}
-
-
-def _align_technical(
-    req: TypedRequirement,
-    skill_rows: Dict[str, RequirementAlignment],
-    cig: CandidateIntelligenceGraph,
-) -> RequirementAlignmentV2:
-    key = normalize_text(req.text)
-    row = skill_rows.get(key)
-    if not row:
-        for candidate_key, candidate_row in skill_rows.items():
-            if key in candidate_key or candidate_key in key:
-                row = candidate_row
-                break
-    if row:
-        status: RequirementAlignmentStatus = {
-            "strong": "met",
-            "partial": "partial",
-            "missing": "missing",
-            "unclear": "unknown",
-        }.get(row.match_status, "unknown")  # type: ignore[assignment]
-        return RequirementAlignmentV2(
-            requirement=req,
-            status=status,
-            confidence=row.confidence,
-            evidence=row.resume_evidence,
-            reason=_reason_for_status(status, "technical evidence"),
-        )
-    if _contains_text(cig.resume_corpus, req.text):
-        return RequirementAlignmentV2(
-            requirement=req,
-            status="partial",
-            confidence=0.55,
-            evidence=_snippet(cig.resume_corpus, req.text),
-            reason="Term appears in resume, but semantic evidence depth is unclear",
-        )
-    return RequirementAlignmentV2(requirement=req, status="missing", confidence=0.45, reason="Skill is not visible in resume")
-
-
-def _align_education(req: TypedRequirement, cig: CandidateIntelligenceGraph) -> RequirementAlignmentV2:
-    if not cig.education:
-        return RequirementAlignmentV2(requirement=req, status="unknown", confidence=0.45, reason="Education is not shown in profile")
-    req_level = _degree_level(req.text)
-    best_text = _join_education(cig.education)
-    candidate_level = _degree_level(best_text)
-    if req_level and candidate_level >= req_level:
-        return RequirementAlignmentV2(requirement=req, status="met", confidence=0.82, evidence=best_text[:260], reason="Education level appears to meet the JD")
-    if req_level and candidate_level:
-        return RequirementAlignmentV2(requirement=req, status="partial", confidence=0.62, evidence=best_text[:260], reason="Education is present but may not meet the requested level")
-    if _contains_text(best_text, req.text):
-        return RequirementAlignmentV2(requirement=req, status="met", confidence=0.75, evidence=best_text[:260], reason="Education requirement appears in profile")
-    if "equivalent" in req.text.lower() and cig.years_experience and cig.years_experience >= 4:
-        return RequirementAlignmentV2(requirement=req, status="partial", confidence=0.64, evidence=f"{cig.years_experience:g} years experience", reason="JD allows equivalent experience")
-    return RequirementAlignmentV2(requirement=req, status="unknown", confidence=0.5, evidence=best_text[:260], reason="Education is present but exact JD match is unclear")
-
-
-def _align_experience(req: TypedRequirement, cig: CandidateIntelligenceGraph) -> RequirementAlignmentV2:
-    required_years = parse_years_from_text(req.text)
-    if required_years is not None:
-        if cig.years_experience is None:
-            return RequirementAlignmentV2(requirement=req, status="unknown", confidence=0.45, reason="Years of experience are not shown in profile")
-        evidence = f"{cig.years_experience:g} years experience"
-        years_score = years_match_score(required_years, cig.years_experience)
-        if years_score is None:
-            return RequirementAlignmentV2(requirement=req, status="unknown", confidence=0.45, reason="Years of experience are not shown in profile")
-        if years_score >= 1.0:
-            return RequirementAlignmentV2(requirement=req, status="met", confidence=0.84, evidence=evidence, reason="Years of experience meet the JD")
-        if years_score >= 0.6:
-            return RequirementAlignmentV2(requirement=req, status="partial", confidence=0.64, evidence=evidence, reason="Experience is close to the JD requirement")
-        return RequirementAlignmentV2(requirement=req, status="missing", confidence=0.7, evidence=evidence, reason="Years of experience are below the JD requirement")
-    return _align_keyword_category(req, cig, "experience")
-
-
-def _align_seniority(req: TypedRequirement, cig: CandidateIntelligenceGraph) -> RequirementAlignmentV2:
-    text = req.text.lower()
-    level = next((lvl for lvl in SENIORITY_RANK if lvl in text and lvl not in {"unknown", "middle"}), None)
-    if not level:
-        return _align_keyword_category(req, cig, "seniority")
-    candidate = SENIORITY_RANK.get(cig.seniority_level, 2)
-    target = SENIORITY_RANK.get(level, 2)
-    if candidate >= target:
-        return RequirementAlignmentV2(requirement=req, status="met", confidence=0.78, evidence=cig.seniority_level, reason="Seniority signal meets the JD")
-    if candidate == target - 1:
-        return RequirementAlignmentV2(requirement=req, status="partial", confidence=0.6, evidence=cig.seniority_level, reason="Seniority signal is close but not exact")
-    return RequirementAlignmentV2(requirement=req, status="missing", confidence=0.62, evidence=cig.seniority_level, reason="Seniority signal appears below the JD")
-
-
-def _align_location(req: TypedRequirement, cig: CandidateIntelligenceGraph) -> RequirementAlignmentV2:
-    locations = [loc for loc in [cig.profile_location, *cig.experience_locations] if loc]
-    if not locations:
-        return RequirementAlignmentV2(requirement=req, status="unknown", confidence=0.45, reason="Location/work mode is not shown in profile")
-    joined = "; ".join(locations)
-    if _any_token_overlap(req.text, joined):
-        return RequirementAlignmentV2(requirement=req, status="met", confidence=0.72, evidence=joined[:260], reason="Location signal appears aligned")
-    if any(term in req.text.lower() for term in ("remote", "hybrid", "onsite", "on-site")):
-        return RequirementAlignmentV2(requirement=req, status="unknown", confidence=0.48, evidence=joined[:260], reason="Work mode preference is not shown in profile")
-    return RequirementAlignmentV2(requirement=req, status="partial", confidence=0.52, evidence=joined[:260], reason="Location exists, but exact JD location match is unclear")
-
-
-def _align_management(req: TypedRequirement, cig: CandidateIntelligenceGraph) -> RequirementAlignmentV2:
-    corpus = cig.resume_corpus
-    if re.search(r"\b(led|lead|managed|mentored|hired|coached|team|stakeholder)\b", corpus, re.I):
-        return RequirementAlignmentV2(requirement=req, status="partial", confidence=0.62, evidence=_first_matching_sentence(corpus, ("led", "managed", "team", "mentored")), reason="Leadership terms appear in resume")
-    return RequirementAlignmentV2(requirement=req, status="unknown", confidence=0.45, reason="Management scope is not clearly shown in profile")
-
-
-def _align_explicit_unknown_or_keyword(req: TypedRequirement, cig: CandidateIntelligenceGraph) -> RequirementAlignmentV2:
-    if _contains_text(cig.resume_corpus, req.text):
-        return RequirementAlignmentV2(requirement=req, status="met", confidence=0.72, evidence=_snippet(cig.resume_corpus, req.text), reason="Requirement appears explicitly in profile")
-    return RequirementAlignmentV2(requirement=req, status="unknown", confidence=0.42, reason=f"{req.category.replace('_', ' ')} is not shown in profile")
-
-
-def _align_keyword_category(req: TypedRequirement, cig: CandidateIntelligenceGraph, category: str) -> RequirementAlignmentV2:
-    haystacks = [cig.resume_corpus, " ".join(cig.project_summaries)]
-    joined = " ".join(haystacks)
-    if _contains_text(joined, req.text) or _any_token_overlap(req.text, joined):
-        return RequirementAlignmentV2(requirement=req, status="partial", confidence=0.58, evidence=_first_matching_sentence(joined, tuple(req.text.split()[:5])), reason=f"{category.replace('_', ' ')} evidence appears related")
-    return RequirementAlignmentV2(requirement=req, status="unknown" if req.category not in {"technical_skill"} else "missing", confidence=0.45, reason=f"{category.replace('_', ' ')} evidence is not clearly shown")
-
-
-def _category_scores(alignments: Sequence[RequirementAlignmentV2]) -> List[CategoryScore]:
-    by_group: Dict[str, List[RequirementAlignmentV2]] = {}
-    for row in alignments:
-        group = CATEGORY_GROUPS.get(row.requirement.category, "resume_signal")
-        by_group.setdefault(group, []).append(row)
-    scores: List[CategoryScore] = []
-    for group, rows in by_group.items():
-        score = round(sum(STATUS_SCORE[row.status] for row in rows) / max(1, len(rows)) * 100)
-        scores.append(
-            CategoryScore(
-                category=group,  # type: ignore[arg-type]
-                score=max(0, min(100, score)),
-                met=sum(1 for r in rows if r.status == "met"),
-                partial=sum(1 for r in rows if r.status == "partial"),
-                missing=sum(1 for r in rows if r.status == "missing"),
-                unknown=sum(1 for r in rows if r.status == "unknown"),
-            )
-        )
-    order = ["technical", "experience", "education", "certifications", "domain", "logistics", "leadership", "resume_signal"]
-    return sorted(scores, key=lambda item: order.index(item.category) if item.category in order else 99)
-
-
-def _gate_summary(alignments: Sequence[RequirementAlignmentV2]) -> Tuple[GateStatus, List[HardGateFinding]]:
-    findings: List[HardGateFinding] = []
-    status: GateStatus = "clear"
-    for row in alignments:
-        if not row.requirement.is_hard_gate:
-            continue
-        if row.status == "missing":
-            status = "blocked"
-            findings.append(HardGateFinding(requirement=row.requirement.text, status=row.status, category=row.requirement.category, reason=row.reason))
-        elif row.status == "unknown" and status != "blocked":
-            status = "risky"
-            findings.append(HardGateFinding(requirement=row.requirement.text, status=row.status, category=row.requirement.category, reason=row.reason))
-    return status, findings[:8]
-
-
-def _weighted_score(alignments: Sequence[RequirementAlignmentV2]) -> int:
-    rows = [row for row in alignments if row.status != "not_applicable"]
-    if not rows:
-        return 35
-    total_weight = 0.0
-    score = 0.0
-    for row in rows:
-        weight = row.requirement.weight * IMPORTANCE_WEIGHT.get(row.requirement.importance, 1.0)
-        total_weight += weight
-        score += STATUS_SCORE[row.status] * weight
-    return max(0, min(100, int(round((score / max(total_weight, 0.01)) * 100))))
-
-
-def _reason_for_status(status: RequirementAlignmentStatus, noun: str) -> str:
-    if status == "met":
-        return f"Matched with {noun}"
-    if status == "partial":
-        return f"Partially matched with {noun}"
-    if status == "missing":
-        return f"Missing clear {noun}"
-    return f"{noun.capitalize()} is not shown clearly enough"
-
-
-def _degree_level(text: str) -> int:
-    norm = normalize_text(text)
-    return max((level for key, level in DEGREE_LEVELS.items() if re.search(rf"\b{re.escape(key)}\b", norm)), default=0)
-
-
-def _join_education(education: Sequence[Dict[str, Any]]) -> str:
-    rows: List[str] = []
-    for item in education:
-        bits = [item.get("school") or item.get("institution"), item.get("degree"), item.get("field_of_study") or item.get("major")]
-        line = ", ".join(str(bit).strip() for bit in bits if bit)
-        if line:
-            rows.append(line)
-    return "; ".join(rows)
-
-
-def _contains_text(corpus: str, needle: str) -> bool:
-    key = normalize_text(needle)
-    if not key:
-        return False
-    if key in normalize_text(corpus):
-        return True
-    tokens = [token for token in key.split() if len(token) > 2]
-    return bool(tokens) and all(token in normalize_text(corpus) for token in tokens[:4])
-
-
-def _any_token_overlap(a: str, b: str) -> bool:
-    a_tokens = {tok for tok in re.findall(r"[a-zA-Z][a-zA-Z0-9+#.-]{2,}", a.lower()) if tok not in {"the", "and", "with", "for", "must", "have"}}
-    b_tokens = set(re.findall(r"[a-zA-Z][a-zA-Z0-9+#.-]{2,}", b.lower()))
-    return bool(a_tokens.intersection(b_tokens))
-
-
-def _snippet(corpus: str, needle: str) -> Optional[str]:
-    return _first_matching_sentence(corpus, tuple(needle.split()[:5]))
-
-
-def _first_matching_sentence(corpus: str, tokens: Iterable[str]) -> Optional[str]:
-    wanted = [normalize_text(token) for token in tokens if len(token) > 2]
-    if not wanted:
-        return None
-    for sentence in re.split(r"(?<=[.!?])\s+|[\n;]+", corpus):
-        norm = normalize_text(sentence)
-        if any(token in norm for token in wanted):
-            return sentence.strip()[:260]
-    return None

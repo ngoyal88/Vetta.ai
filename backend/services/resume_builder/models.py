@@ -195,70 +195,9 @@ def has_meaningful_resume_content(
     *,
     custom_sections: Sequence[BuilderCustomSection] | None = None,
 ) -> bool:
-    if isinstance(profile.summary, str) and profile.summary.strip():
-        return True
-    if any(group.label.strip() or any(item.strip() for item in group.items) for group in profile.skills):
-        return True
-    if any(
-        any(
-            isinstance(value, str) and value.strip()
-            for value in [
-                item.name,
-                item.description,
-                item.role,
-                item.scale,
-                item.start_date,
-                item.end_date,
-                item.link,
-            ]
-        )
-        or any(skill.strip() for skill in item.tech_stack)
-        for item in profile.projects
-    ):
-        return True
-    if any(
-        any(
-            isinstance(value, str) and value.strip()
-            for value in [
-                item.title,
-                item.company,
-                item.location,
-                item.start_date,
-                item.end_date,
-                item.employment_type,
-            ]
-        )
-        or any(text.strip() for text in [*item.responsibilities, *item.impact, *item.tech_stack])
-        for item in profile.work_experience
-    ):
-        return True
-    if any(
-        any(
-            isinstance(value, str) and value.strip()
-            for value in [
-                item.degree,
-                item.field,
-                item.minor,
-                item.institution,
-                item.start_date,
-                item.end_date,
-                item.cgpa,
-                item.location,
-            ]
-        )
-        or any((highlight.label.strip() or highlight.text.strip()) for highlight in item.highlights)
-        for item in profile.education
-    ):
-        return True
-    if any(
-        any(isinstance(value, str) and value.strip() for value in [item.title, item.description, item.date])
-        for item in profile.achievements
-    ):
-        return True
-    if any(
-        any(isinstance(value, str) and value.strip() for value in [item.title, item.venue, item.year, item.link])
-        for item in profile.publications
-    ):
+    from services.resume_builder.layout_from_profile import BUILTIN_CONTENT_KINDS, section_has_content
+
+    if any(section_has_content(profile, kind) for kind in BUILTIN_CONTENT_KINDS):
         return True
     if custom_sections:
         for section in custom_sections:

@@ -2,15 +2,21 @@ import re
 import json
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 from PyPDF2 import PdfReader
 import docx
 from docx.oxml.ns import qn
 
+try:
+    import fitz  # PyMuPDF
+except Exception:  # pragma: no cover - exercised only when dependency is unavailable
+    fitz = None
+
 from firebase_config import db
 from models.resume import (
     AchievementItem,
+    CustomSectionItem,
     EducationRecord,
     ParsedResumeResponse,
     ProjectItem,
@@ -18,13 +24,608 @@ from models.resume import (
     SkillGroup,
 )
 from services.interview.llm_engine import get_platform_llm
+from services.resume.contact_link_utils import unique_plausible_urls
 from services.resume.resume_postprocess import (
     dedupe_achievements,
-    merge_education_entries,
+    dedupe_work_experience,
     normalize_education_record,
-    parse_degree_field_minor,
     sanitize_profile_links_and_skills,
 )
+
+_RESUME_INPUT_MAX_CHARS = 6000
+_GAP_SPACE_THRESHOLD = 2.0
+_LONG_LINE_SPLIT_THRESHOLD = 120
+
+_RESUME_PROFILE_SCHEMA = (
+    '  "profile": {\n'
+    '    "name": string or null,\n'
+    '    "contact": {\n'
+    '      "email": string or null,\n'
+    '      "phone": string or null,\n'
+    '      "location": string or null,\n'
+    '      "links": {\n'
+    '        "github": string or null,\n'
+    '        "linkedin": string or null,\n'
+    '        "portfolio": string or null,\n'
+    '        "other": string array\n'
+    "      }\n"
+    "    },\n"
+    '    "summary": string or null,\n'
+    '    "years_experience": number or null,\n'
+    '    "seniority_level": "junior" | "mid" | "senior" | "lead" | "principal" | "unknown",\n'
+    '    "skills": [{ "label": string, "items": string array }],\n'
+    '    "education": [{\n'
+    '      "degree": string or null, "field": string or null, "minor": string or null,\n'
+    '      "institution": string or null, "start_date": string or null, "end_date": string or null,\n'
+    '      "cgpa": string or null, "location": string or null\n'
+    "    }],\n"
+    '    "work_experience": [{\n'
+    '      "title": string or null, "company": string or null, "location": string or null,\n'
+    '      "start_date": string or null, "end_date": string or null,\n'
+    '      "employment_type": "intern" | "full_time" | "part_time" | "contract" | "freelance" | "co_op" | "temporary" | "volunteer" | "other" | null,\n'
+    '      "responsibilities": string array, "tech_stack": string array, "impact": string array\n'
+    "    }],\n"
+    '    "projects": [{\n'
+    '      "name": string or null,\n'
+    '      "description": string or null — newline-separated bullet points for this project,\n'
+    '      "tech_stack": string array — technology/tool names only (not bullet sentences),\n'
+    '      "role": string or null, "scale": string or null,\n'
+    '      "start_date": string or null, "end_date": string or null, "link": string or null\n'
+    "    }],\n"
+    '    "achievements": [{ "title": string, "description": string or null, "date": string or null }],\n'
+    '    "publications": [{ "title": string, "venue": string or null, "year": string or null, "link": string or null }],\n'
+    '    "custom_sections": [{ "title": string, "lines": string array }],\n'
+    '    "weak_areas": string array,\n'
+    '    "raw_text": string or null\n'
+    "  }"
+)
+
+_RESUME_PARSER_SYSTEM_PROMPT = (
+    "You extract structured data from a resume into JSON. Return ONLY valid JSON — no markdown, no commentary.\n\n"
+    "{\n"
+    f"{_RESUME_PROFILE_SCHEMA},\n"
+    '  "meta": { "uid": string, "source": string, "model": string, "parsed_at": string, "version": string }\n'
+    "}\n\n"
+    "CONTRACT (all rules are mandatory):\n"
+    "1. GROUNDED — Include only facts explicitly present in the source. "
+    "Do not invent skills, tools, companies, dates, or metrics.\n"
+    "2. VERBATIM — Copy the candidate's exact wording for summary, bullets, descriptions, and achievements. "
+    "One resume bullet or sentence = one array element. Never shorten, merge, or paraphrase.\n"
+    "3. SECTION-CORRECT — Place each item in the field that matches its resume section header:\n"
+    "   • work_experience → jobs, internships, simulations (Experience / Work / Employment / Simulations)\n"
+    "   • projects → builds, products, portfolio items (Projects / Product / Portfolio / Featured)\n"
+    "   • achievements → awards, certifications, honors, competitive programming (Achievements / Certifications / Honors)\n"
+    "   • Never put the same item in both work_experience and projects.\n"
+    "4. NUMBERED — Input lines are prefixed [line NNNN]. Copy bullet text exactly from those lines. "
+    "One bullet = one array element. Never merge multiple numbered lines into one field.\n"
+    "5. UNKNOWN_SECTIONS — Non-standard headers (e.g. Experience & Simulations, Achievements & Coursework, "
+    "Achievements & Certifications, Soft Skills) → map achievement/certification/honor lines to achievements[]; "
+    "map coursework/soft-skill lines to custom_sections; never drop recognizable section content.\n"
+    "6. SKILL_SUBGROUPS — Preserve sub-labels (Languages, Frontend, Backend, Database, Tools, Concepts, etc.) "
+    "as separate skills[].label groups with their items.\n"
+    "7. CONTACT — Primary email in contact.email; profile URLs only in contact.links "
+    "(linkedin, github profile root, portfolio, leetcode). Additional emails in contact.links.other.\n"
+    "8. PROJECT_BULLETS — Put each project bullet sentence in projects[].description (join with newlines). "
+    "projects[].tech_stack = short tool names only. Repository / Live Demo / demo-site URLs go in projects[].link — "
+    "never in contact.links.\n"
+    "9. PDF_HYPERLINKS — When an EXTRACTED PDF HYPERLINKS block is provided, those URIs are authoritative. "
+    "Copy them exactly into contact.links or projects[].link. Never invent URLs from visible link labels.\n\n"
+    "Defaults: employment_type and impact[] only when clearly stated; otherwise null and []. "
+    "weak_areas: []. custom_sections: [] when nothing extra."
+)
+
+_INLINE_BULLET_SPLIT_RE = re.compile(
+    r"\s+[–—]\s+(?=(?:Implemented|Designed|Built|Engineered|Architected|Developed|"
+    r"Completed|Produced|Translated|Analyzed|Demonstrated|Integrated|Developed)\b)",
+    re.I,
+)
+_PROJECT_TITLE_SPLIT_RE = re.compile(r"(?<=\S)\s+(?=[A-Z][A-Za-z0-9]{2,}\s+[–—\-]\s+)")
+_LINK_FOOTER_RE = re.compile(r"\n\n\[Links:\s*.+\]\s*$", re.S | re.I)
+_ACHIEVEMENT_SECTION_TITLE_RE = re.compile(
+    r"\b(achievement|achievements|certification|certifications|honors?|awards?)\b",
+    re.I,
+)
+_PROJECT_BULLET_IN_TECH_RE = re.compile(
+    r"^(?:implemented|designed|built|engineered|architected|developed|completed|integrated|"
+    r"produced|translated|analyzed|demonstrated)\b",
+    re.I,
+)
+_SECTION_ALIASES = {
+    "summary": {"summary", "profile", "professional summary", "objective"},
+    "skills": {"skills", "technical skills", "core skills", "technologies"},
+    "work": {"work experience", "experience", "employment", "professional experience", "internships"},
+    "projects": {"projects", "featured product & design projects", "featured projects", "product projects", "portfolio"},
+    "education": {"education", "academic background"},
+    "achievements": {"achievements", "certifications", "honors", "awards", "achievements & certifications"},
+}
+_DATE_LINE_RE = re.compile(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4}|present)\b", re.I)
+_RESPONSIBILITY_START_RE = re.compile(
+    r"^(?:[-*•]\s*)?(?:built|implemented|designed|developed|engineered|architected|led|created|"
+    r"managed|integrated|optimized|reduced|improved|achieved|focused|database|end-to-end)\b",
+    re.I,
+)
+_TITLE_WORD_RE = re.compile(r"\b(?:engineer|developer|intern|researcher|manager|lead|architect|analyst|consultant)s?\b", re.I)
+_KNOWN_TECH_RE = re.compile(
+    r"\b(FastAPI|Redis|PostgreSQL|MongoDB|Node\.js|Express|React|Tailwind|TensorFlow|Keras|Python|"
+    r"JavaScript|TypeScript|Docker|Kubernetes|Kafka|Gemini)\b",
+    re.I,
+)
+
+
+def _normalize_grounding_key(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _grounding_variants(value: str) -> List[str]:
+    normalized = _normalize_grounding_key(value)
+    if not normalized:
+        return []
+    variants = {normalized}
+    variants.add(re.sub(r"(?<=[a-z])(?=\d)", " ", normalized))
+    variants.add(re.sub(r"(?<=\d)(?=\d)", " ", normalized))
+    variants.add(re.sub(r"(?<=\d)(?=[a-z])", " ", normalized))
+    return [variant for variant in variants if variant]
+
+
+def _is_grounded_value(value: Optional[str], text_norm: str) -> bool:
+    if not value:
+        return False
+    collapsed_text = _normalize_grounding_key(text_norm)
+    for variant in _grounding_variants(value):
+        if variant in collapsed_text:
+            return True
+    return False
+
+
+def _strip_link_footer(text: str) -> str:
+    return _LINK_FOOTER_RE.sub("", text).strip()
+
+
+def _norm_match_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _section_key(line: str) -> Optional[str]:
+    normalized = _norm_match_key(line)
+    for key, aliases in _SECTION_ALIASES.items():
+        if normalized in {_norm_match_key(alias) for alias in aliases}:
+            return key
+    return None
+
+
+def split_sections(text: str) -> Dict[str, List[str]]:
+    sections: Dict[str, List[str]] = {}
+    current = "summary"
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        section = _section_key(line)
+        if section:
+            current = section
+            sections.setdefault(current, [])
+            continue
+        sections.setdefault(current, []).append(line)
+    return sections
+
+
+def _clean_bullet(line: str) -> str:
+    return re.sub(r"^\s*[-*•]\s*", "", str(line or "").strip())
+
+
+def extract_summary(sections: Dict[str, List[str]]) -> Optional[str]:
+    summary = " ".join(_clean_bullet(line) for line in sections.get("summary", []) if line.strip()).strip()
+    return summary or None
+
+
+def extract_education(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    lines = [_clean_bullet(line) for line in sections.get("education", []) if line.strip()]
+    if not lines:
+        return []
+
+    record: Dict[str, Any] = {
+        "institution": None,
+        "degree": None,
+        "field": None,
+        "dates": None,
+        "cgpa": None,
+        "location": None,
+    }
+    institution_line = lines[0]
+    if "," in institution_line:
+        institution, location = [part.strip() for part in institution_line.split(",", 1)]
+        record["institution"] = institution
+        record["location"] = location
+    else:
+        record["institution"] = institution_line
+
+    for line in lines[1:]:
+        if re.search(r"\b(?:cgpa|gpa)\b", line, re.I):
+            record["cgpa"] = line
+            continue
+        if re.search(r"\b\d{4}\b", line):
+            record["dates"] = line
+            continue
+        degree_match = re.match(r"(.+?)\s+in\s+(.+)", line, re.I)
+        if degree_match:
+            record["degree"] = degree_match.group(1).strip()
+            record["field"] = degree_match.group(2).strip()
+        elif record["degree"] is None:
+            record["degree"] = line
+
+    return [record]
+
+
+def extract_achievements(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    achievements: List[Dict[str, Any]] = []
+    for line in sections.get("achievements", []):
+        text = _clean_bullet(line)
+        if not text:
+            continue
+        title, description = text, None
+        if ":" in text:
+            title, description = [part.strip() for part in text.split(":", 1)]
+        date_match = re.search(r"\b(20\d{2}|19\d{2})\b", text)
+        achievements.append(
+            {
+                "title": title,
+                "description": description,
+                "date": date_match.group(1) if date_match else None,
+            }
+        )
+    return achievements
+
+
+def _extract_known_tech(text: str) -> List[str]:
+    seen: set[str] = set()
+    tools: List[str] = []
+    for match in _KNOWN_TECH_RE.finditer(text or ""):
+        tool = match.group(1)
+        key = tool.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        tools.append(tool)
+    return tools
+
+
+def extract_projects(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    lines = [_clean_bullet(line) for line in sections.get("projects", []) if line.strip()]
+    if not lines:
+        return []
+
+    projects: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    for line in lines:
+        looks_like_title = not _RESPONSIBILITY_START_RE.match(line) and (
+            " - " in line or " – " in line or " — " in line or re.search(r"\(.+\)", line)
+        )
+        if current is None or looks_like_title:
+            if current:
+                projects.append(current)
+            link_match = re.search(r"https?://\S+", line)
+            title = re.sub(r"https?://\S+", "", line).strip(" -–—")
+            current = {
+                "name": re.split(r"\s[-–—]\s", title, maxsplit=1)[0].strip() or title,
+                "description": "",
+                "tech_stack": _extract_known_tech(line),
+                "link": link_match.group(0) if link_match else None,
+            }
+            continue
+
+        description = current.get("description") or ""
+        current["description"] = "\n".join(part for part in [description, line] if part)
+        current["tech_stack"] = list(dict.fromkeys([*current.get("tech_stack", []), *_extract_known_tech(line)]))
+
+    if current:
+        projects.append(current)
+    return projects
+
+
+def _is_next_work_title(lines: List[str], index: int) -> bool:
+    if index + 1 >= len(lines):
+        return False
+    line = lines[index]
+    next_line = lines[index + 1]
+    if _RESPONSIBILITY_START_RE.match(line):
+        return False
+    return bool(_TITLE_WORD_RE.search(line)) and not _DATE_LINE_RE.search(next_line)
+
+
+def extract_work_experience(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    lines = [_clean_bullet(line) for line in sections.get("work", []) if line.strip()]
+    entries: List[Dict[str, Any]] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if "|" in line:
+            parts = [part.strip() for part in line.split("|")]
+            entry = {
+                "title": parts[0] if parts else None,
+                "company": parts[1] if len(parts) > 1 else None,
+                "dates": parts[2] if len(parts) > 2 else None,
+                "responsibilities": [],
+            }
+            index += 1
+        else:
+            if index + 1 >= len(lines):
+                break
+            entry = {
+                "title": line,
+                "company": lines[index + 1],
+                "dates": None,
+                "responsibilities": [],
+            }
+            index += 2
+            if index < len(lines) and _norm_match_key(lines[index]) in {"intern", "full time", "part time", "contract"}:
+                index += 1
+            if index < len(lines) and _DATE_LINE_RE.search(lines[index]):
+                entry["dates"] = lines[index]
+                index += 1
+
+        responsibilities: List[str] = []
+        while index < len(lines):
+            if _is_next_work_title(lines, index):
+                break
+            responsibilities.append(lines[index])
+            index += 1
+        entry["responsibilities"] = responsibilities
+        entries.append(entry)
+    return entries
+
+
+def _prefer_verbatim_bullets(llm_bullets: List[str], source_bullets: List[str], work_lines: List[str]) -> List[str]:
+    if not source_bullets:
+        return llm_bullets
+    source_blob = " ".join(_norm_match_key(line) for line in work_lines)
+    if not source_blob:
+        return llm_bullets
+    for bullet in llm_bullets:
+        if _norm_match_key(bullet) and _norm_match_key(bullet) not in source_blob:
+            return source_bullets
+    return source_bullets if len(" ".join(source_bullets)) > len(" ".join(llm_bullets)) else llm_bullets
+
+
+def _build_pdf_links_prompt_appendix(pdf_links: List[str]) -> str:
+    urls = unique_plausible_urls(pdf_links)
+    if not urls:
+        return ""
+    return "\n".join(
+        ["", "EXTRACTED PDF HYPERLINKS (clickable URIs from the PDF — use these exact URLs):"]
+        + [f"- {url}" for url in urls]
+    )
+
+
+def _promote_achievement_custom_sections(profile: ResumeProfile) -> None:
+    remaining: List[CustomSectionItem] = []
+    promoted: List[AchievementItem] = []
+
+    for section in profile.custom_sections:
+        if _ACHIEVEMENT_SECTION_TITLE_RE.search(section.title):
+            for line in section.lines:
+                text = line.strip()
+                if text:
+                    promoted.append(AchievementItem(title=text, description=None, date=None))
+            continue
+        remaining.append(section)
+
+    if promoted:
+        profile.achievements = dedupe_achievements([*profile.achievements, *promoted])
+    profile.custom_sections = remaining
+
+
+def _normalize_project_records(profile: ResumeProfile) -> None:
+    normalized: List[ProjectItem] = []
+    for project in profile.projects:
+        data = project.model_dump()
+        description = str(data.get("description") or "").strip()
+        tech_stack = list(data.get("tech_stack") or [])
+        bullet_lines: List[str] = []
+        tools: List[str] = []
+
+        for item in tech_stack:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if len(text) > 60 or _PROJECT_BULLET_IN_TECH_RE.match(text):
+                bullet_lines.append(text.lstrip("–—- ").strip())
+            else:
+                tools.append(text)
+
+        if bullet_lines:
+            description = "\n".join(
+                part for part in [description, *bullet_lines] if part and part.strip()
+            ).strip()
+
+        data["description"] = description or None
+        data["tech_stack"] = tools
+        normalized.append(ProjectItem(**data))
+
+    profile.projects = normalized
+
+
+def _build_numbered_resume_prompt(raw_text: str, max_chars: int = _RESUME_INPUT_MAX_CHARS) -> str:
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    numbered = [f"[line {index:04d}] {line}" for index, line in enumerate(lines, 1)]
+    blob = "\n".join(numbered)
+    return blob[:max_chars]
+
+
+def _join_spans_with_gaps(spans: List[Dict[str, Any]]) -> str:
+    ordered = sorted(spans, key=lambda span: float(span["x0"]))
+    parts: List[str] = []
+    prev_x1: Optional[float] = None
+    for span in ordered:
+        text = str(span.get("text") or "")
+        if not text:
+            continue
+        if prev_x1 is not None and float(span["x0"]) - prev_x1 > _GAP_SPACE_THRESHOLD:
+            parts.append(" ")
+        parts.append(text)
+        prev_x1 = float(span["x1"])
+    return re.sub(r"\s+", " ", "".join(parts)).strip()
+
+
+def split_long_inline_line(line: str) -> List[str]:
+    """ponytail: heuristic split for meg-lines when PDF blocks glue projects/bullets."""
+    stripped = line.strip()
+    if not stripped or len(stripped) <= _LONG_LINE_SPLIT_THRESHOLD:
+        return [stripped] if stripped else []
+
+    segments = _INLINE_BULLET_SPLIT_RE.split(stripped)
+    if len(segments) > 1:
+        result = [segments[0].strip()]
+        for segment in segments[1:]:
+            text = segment.strip()
+            if text:
+                result.append(f"– {text}")
+        return [part for part in result if part]
+
+    project_parts = _PROJECT_TITLE_SPLIT_RE.split(stripped)
+    if len(project_parts) > 1:
+        return [part.strip() for part in project_parts if part.strip()]
+
+    pipe_parts = [part.strip() for part in re.split(r"\s+\|\s+", stripped) if part.strip()]
+    if len(pipe_parts) > 1 and len(stripped) > _LONG_LINE_SPLIT_THRESHOLD:
+        return pipe_parts
+
+    return [stripped]
+
+
+def _split_extracted_lines(lines: List[str]) -> List[str]:
+    expanded: List[str] = []
+    for line in lines:
+        expanded.extend(split_long_inline_line(line))
+    return expanded
+
+
+def _rebuild_lines_from_page_words(page: Any) -> List[str]:
+    data = page.get_text("dict") or {}
+    raw_lines: List[Dict[str, Any]] = []
+
+    for block in data.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans: List[Dict[str, Any]] = []
+            for span in line.get("spans", []):
+                text = str(span.get("text") or "")
+                if not text.strip():
+                    continue
+                bbox = span.get("bbox") or [0, 0, 0, 0]
+                spans.append(
+                    {
+                        "x0": float(bbox[0]),
+                        "y0": float(bbox[1]),
+                        "x1": float(bbox[2]),
+                        "y1": float(bbox[3]),
+                        "text": text,
+                    }
+                )
+            if not spans:
+                continue
+            raw_lines.append(
+                {
+                    "x0": min(span["x0"] for span in spans),
+                    "y0": min(span["y0"] for span in spans),
+                    "x1": max(span["x1"] for span in spans),
+                    "y1": max(span["y1"] for span in spans),
+                    "text": _join_spans_with_gaps(spans),
+                }
+            )
+
+    ordered_texts, _ = _order_pdf_text_blocks(raw_lines, float(page.rect.width))
+    return _split_extracted_lines(ordered_texts)
+
+
+def _normalize_education_profile(profile: ResumeProfile) -> None:
+    profile.education = [
+        EducationRecord(**normalize_education_record(record.model_dump()))
+        for record in profile.education
+    ]
+
+
+def _merge_fallback_achievements(profile: ResumeProfile, raw_text: str) -> None:
+    fallback_items = [
+        AchievementItem(**item)
+        for item in extract_achievements(split_sections(raw_text))
+        if item.get("title")
+    ]
+    if fallback_items:
+        profile.achievements = dedupe_achievements([*profile.achievements, *fallback_items])
+
+
+def _apply_grounding_and_cleanup(
+    profile: ResumeProfile,
+    raw_text: str,
+    pdf_links: Optional[List[str]] = None,
+) -> None:
+    text_norm = raw_text.lower()
+
+    profile.skills = [
+        SkillGroup(
+            label=group.label,
+            items=[item for item in group.items if _is_grounded_value(item, text_norm)],
+        )
+        for group in profile.skills
+        if group.label or group.items
+    ]
+
+    profile.projects = [
+        project
+        for project in profile.projects
+        if _is_grounded_value(project.name, text_norm)
+        or (
+            project.description
+            and _is_grounded_value(project.description[:64], text_norm)
+        )
+        or any(_is_grounded_value(item, text_norm) for item in project.tech_stack)
+    ]
+
+    _normalize_project_records(profile)
+
+    profile.work_experience = [
+        work
+        for work in profile.work_experience
+        if _is_grounded_value(work.company, text_norm) or _is_grounded_value(work.title, text_norm)
+    ]
+    profile.work_experience = dedupe_work_experience(profile.work_experience)
+
+    profile.achievements = dedupe_achievements(
+        [
+            achievement
+            for achievement in profile.achievements
+            if _is_grounded_value(achievement.title, text_norm)
+            or (
+                achievement.description
+                and _is_grounded_value(achievement.description[:64], text_norm)
+            )
+        ]
+    )
+
+    profile.publications = [
+        publication
+        for publication in profile.publications
+        if _is_grounded_value(publication.title, text_norm)
+    ]
+
+    grounded_sections: List[CustomSectionItem] = []
+    for section in profile.custom_sections:
+        lines = [line for line in section.lines if _is_grounded_value(line, text_norm)]
+        if section.title.strip() and lines:
+            grounded_sections.append(CustomSectionItem(title=section.title, lines=lines))
+    profile.custom_sections = grounded_sections
+
+    _promote_achievement_custom_sections(profile)
+
+    sanitize_profile_links_and_skills(profile, raw_text, pdf_links)
+    _normalize_education_profile(profile)
+
+    if profile.years_experience is not None and profile.years_experience < 0:
+        profile.years_experience = None
+    if profile.seniority_level not in {"junior", "mid", "senior", "lead", "principal", "unknown"}:
+        profile.seniority_level = "unknown"
+
 
 async def parse_resume_llm(
     file_bytes: bytes,
@@ -33,14 +634,12 @@ async def parse_resume_llm(
     persist: bool = True,
 ) -> ParsedResumeResponse:
     """
-    LLM-powered resume parser.
-    - Extracts raw text.
-    - Calls Groq llama-3.1-8b-instant in JSON mode (via GroqService.json_completion).
-    - Validates against ResumeProfile.
-    - Drops hallucinated skills/projects/experience entries not present in the raw text.
-    - Writes the parsed profile to Firestore under users/{uid}/profiles/resume_parsed.
+    LLM-authoritative resume parser (v2).
+    - Layout-aware text extraction with word-level line rebuild.
+    - Single Groq JSON call on numbered lines.
+    - Minimal post-process: grounding, dedupe, sanitize, education normalize.
     """
-    raw_text = extract_text(file_bytes, filename)
+    raw_text, extraction_meta = extract_text_with_metadata(file_bytes, filename)
     raw_text = (raw_text or "").replace("\x00", "").strip()
     if len(raw_text) < 20:
         raise ValueError(
@@ -48,90 +647,12 @@ async def parse_resume_llm(
             "If this is a scanned/image PDF, please upload a text-based PDF or a DOCX."
         )
 
-    system_prompt = (
-        "You are an extraction engine for technical resumes. "
-        "Return ONLY a JSON object matching this schema (no extra keys, no comments):\n"
-        "{\n"
-        '  "profile": {\n'
-        '    "name": string or null,\n'
-        '    "contact": {\n'
-        '      "email": string or null,\n'
-        '      "phone": string or null,\n'
-        '      "location": string or null,\n'
-        '      "links": {\n'
-        '        "github": string or null,\n'
-        '        "linkedin": string or null,\n'
-        '        "portfolio": string or null,\n'
-        '        "other": string array\n'
-        "      }\n"
-        "    },\n"
-        '    "summary": string or null,\n'
-        '    "years_experience": number or null,\n'
-        '    "seniority_level": "junior" | "mid" | "senior" | "lead" | "principal" | "unknown",\n'
-        '    "skills": [\n'
-        "      {\n"
-        '        "label": string,\n'
-        '        "items": string array\n'
-        "      }\n"
-        "    ],\n"
-        '    "education": [\n'
-        "      {\n"
-        '        "degree": string or null,\n'
-        '        "field": string or null,\n'
-        '        "minor": string or null,\n'
-        '        "institution": string or null,\n'
-        '        "start_date": string or null,\n'
-        '        "end_date": string or null,\n'
-        '        "cgpa": string or null,\n'
-        '        "location": string or null\n'
-        "      }\n"
-        "    ],\n"
-        '    "work_experience": [\n'
-        "      {\n"
-        '        "title": string or null,\n'
-        '        "company": string or null,\n'
-        '        "location": string or null,\n'
-        '        "start_date": string or null,\n'
-        '        "end_date": string or null,\n'
-        '        "employment_type": "intern" | "full_time" | "part_time" | "contract" | "freelance" | "co_op" | "temporary" | "volunteer" | "other" | null,\n'
-        '        "responsibilities": string array,\n'
-        '        "tech_stack": string array,\n'
-        '        "impact": string array\n'
-        "      }\n"
-        "    ],\n"
-        '    "projects": [\n'
-        "      {\n"
-        '        "name": string or null,\n'
-        '        "description": string or null,\n'
-        '        "tech_stack": string array,\n'
-        '        "role": string or null,\n'
-        '        "scale": string or null,\n'
-        '        "start_date": string or null,\n'
-        '        "end_date": string or null,\n'
-        '        "link": string or null\n'
-        "      }\n"
-        "    ],\n"
-        '    "achievements": [ { "title": string, "description": string or null, "date": string or null } ],\n'
-        '    "publications": [ { "title": string, "venue": string or null, "year": string or null, "link": string or null } ],\n'
-        '    "weak_areas": string array,\n'
-        '    "raw_text": string or null\n'
-        "  },\n"
-        '  "meta": { "uid": string, "source": string, "model": string, "parsed_at": string, "version": string }\n'
-        "}\n\n"
-        "STRICT RULES:\n"
-        "- Only include skills, tools, frameworks, projects, experience entries, achievements, and publications that are EXPLICITLY mentioned in the resume text.\n"
-        "- Do NOT guess or infer technologies or companies that are not clearly present.\n"
-        "- Keep strings concise; do not paraphrase entire paragraphs.\n"
-        "- For each work_experience row, set employment_type to one of the allowed enum values "
-        "when the resume explicitly states it (e.g. in title, company line, or dates). "
-        "Use null when not stated — do not guess.\n"
-    )
+    numbered_text = _build_numbered_resume_prompt(_strip_link_footer(raw_text))
+    pdf_links = extraction_meta.get("pdf_links") or []
+    link_appendix = _build_pdf_links_prompt_appendix(pdf_links)
+    user_prompt = f"Resume text with line numbers (UTF-8):\n\n{numbered_text}{link_appendix}"
 
-    # Keep under Groq on-demand TPM limits when combined with the large system prompt.
-    truncated_text = raw_text[:6000]
-    user_prompt = f"Resume text (UTF-8):\\n\\n{truncated_text}"
-
-    json_str = await get_platform_llm().json_completion(system_prompt, user_prompt)
+    json_str = await get_platform_llm().json_completion(_RESUME_PARSER_SYSTEM_PROMPT, user_prompt)
 
     try:
         payload = json.loads(json_str or "{}")
@@ -139,92 +660,29 @@ async def parse_resume_llm(
         raise ValueError("LLM returned invalid JSON")
 
     profile_data = payload.get("profile") or {}
-    # Attach raw_text so downstream has full context, but we will still use it for validation.
     profile_data.setdefault("raw_text", raw_text)
-    # Some models may emit null for list fields; normalize to empty lists so
-    # pydantic's non-optional List[str] fields validate correctly.
     if profile_data.get("weak_areas") is None:
         profile_data["weak_areas"] = []
+    if profile_data.get("custom_sections") is None:
+        profile_data["custom_sections"] = []
 
     profile = ResumeProfile(**profile_data)
-
-    # Validation / de-hallucination layer
-    def _in_text(value: Optional[str], text_norm: str) -> bool:
-        if not value:
-            return False
-        v = value.strip().lower()
-        if not v:
-            return False
-        return v in text_norm
-
-    text_norm = raw_text.lower()
-
-    # Filter skill groups against resume text grounding
-    def _filter_list(values: List[str]) -> List[str]:
-        return [v for v in values if _in_text(v, text_norm)]
-
-    profile.skills = [
-        SkillGroup(label=group.label, items=_filter_list(group.items))
-        for group in profile.skills
-        if group.label or group.items
-    ]
-
-    sections = split_sections(raw_text)
-
-    # Filter projects: require name or a key phrase from description to appear
-    filtered_projects = []
-    for p in profile.projects:
-        keep = False
-        if _in_text(p.name, text_norm):
-            keep = True
-        elif p.description:
-            snippet = p.description[:64]
-            keep = _in_text(snippet, text_norm)
-        if keep:
-            filtered_projects.append(p)
-    profile.projects = filtered_projects
-
-    _enrich_profile_education(profile, sections)
-    _enrich_profile_projects(profile, sections)
-
-    # Filter work experience: require company or title to appear
-    filtered_experience = []
-    for w in profile.work_experience:
-        if _in_text(w.company, text_norm) or _in_text(w.title, text_norm):
-            filtered_experience.append(w)
-    profile.work_experience = filtered_experience
-
-    fallback_achievements = [AchievementItem(**item) for item in extract_achievements(sections)]
-    profile.achievements = dedupe_achievements([*profile.achievements, *fallback_achievements])
-
-    # Filter achievements and publications by title
-    profile.achievements = [
-        a
-        for a in profile.achievements
-        if _in_text(a.title, text_norm)
-        or (a.description and _in_text(a.description[:64], text_norm))
-    ]
-    profile.publications = [
-        p for p in profile.publications if _in_text(p.title, text_norm)
-    ]
-
-    sanitize_profile_links_and_skills(profile)
-
-    # Normalize years_experience / seniority if clearly invalid
-    if profile.years_experience is not None and profile.years_experience < 0:
-        profile.years_experience = None
-    if profile.seniority_level not in {"junior", "mid", "senior", "lead", "principal", "unknown"}:
-        profile.seniority_level = "unknown"
+    _apply_grounding_and_cleanup(
+        profile,
+        raw_text,
+        pdf_links=pdf_links,
+    )
+    _merge_fallback_achievements(profile, raw_text)
 
     meta = {
         "uid": uid,
         "source": "groq_llm_resume_parser",
         "model": "groq/llama-3.1-8b-instant",
         "parsed_at": datetime.now(timezone.utc).isoformat(),
-        "version": "v1",
+        "version": "v2",
+        "extractor": extraction_meta,
     }
 
-    # Persist to Firestore (best-effort)
     if persist and uid:
         try:
             doc_ref = (
@@ -233,21 +691,18 @@ async def parse_resume_llm(
                 .collection("profiles")
                 .document("resume_parsed")
             )
-            doc_ref.set({"profile": profile.dict(), "meta": meta}, merge=True)
+            doc_ref.set({"profile": profile.model_dump(), "meta": meta}, merge=True)
         except Exception:
-            # Do not fail the request solely due to Firestore issues
             pass
 
     return ParsedResumeResponse(profile=profile, meta=meta)
 
 
 def _element_text(el) -> str:
-    """Collect all text from an XML element and its descendants (e.g. w:r or w:hyperlink)."""
     return "".join((t.text or "") for t in el.iter() if hasattr(t, "text") and (t.text or ""))
 
 
 def _paragraph_text_with_hyperlink_urls(doc: "docx.Document") -> str:
-    """Build paragraph text, replacing hyperlink anchor text with the actual URL."""
     lines = []
     for paragraph in doc.paragraphs:
         parts = []
@@ -275,7 +730,6 @@ def _paragraph_text_with_hyperlink_urls(doc: "docx.Document") -> str:
 
 
 def _pdf_link_uris(reader: "PdfReader") -> List[str]:
-    """Extract all URI links from PDF page annotations."""
     uris: List[str] = []
     for page in reader.pages:
         try:
@@ -311,292 +765,205 @@ def _pdf_link_uris(reader: "PdfReader") -> List[str]:
     return uris
 
 
-def extract_text(file_bytes: bytes, filename: str) -> str:
-    fn = filename.lower()
-    if fn.endswith('.pdf'):
+def _pymupdf_link_uris(doc: Any) -> List[str]:
+    uris: List[str] = []
+    for page in doc:
         try:
-            reader = PdfReader(BytesIO(file_bytes))
-            text = "\n".join([page.extract_text() or "" for page in reader.pages])
-            link_uris = _pdf_link_uris(reader)
-            if link_uris:
-                text = text.rstrip() + "\n\n[Links: " + ", ".join(link_uris) + "]"
-            return text
-        except Exception as exc:
-            raise ValueError(f"Failed to read PDF: {exc}") from exc
+            for link in page.get_links() or []:
+                uri = str(link.get("uri") or "").strip()
+                if uri and uri not in uris:
+                    uris.append(uri)
+        except Exception:
+            continue
+    return uris
 
-    # python-docx supports .docx (not legacy .doc)
-    elif fn.endswith('.docx'):
+
+def _with_link_footer(text: str, link_uris: List[str]) -> str:
+    if not link_uris:
+        return text
+    return text.rstrip() + "\n\n[Links: " + ", ".join(link_uris) + "]"
+
+
+def _pypdf2_pdf_text(file_bytes: bytes) -> Tuple[str, List[str], int]:
+    reader = PdfReader(BytesIO(file_bytes))
+    text = "\n".join([page.extract_text() or "" for page in reader.pages])
+    return text, _pdf_link_uris(reader), len(reader.pages)
+
+
+def _pypdf2_pdf_fallback(
+    file_bytes: bytes,
+    *,
+    warning: str,
+) -> Tuple[str, Dict[str, Any]]:
+    meta: Dict[str, Any] = {
+        "engine": "pypdf2_fallback",
+        "page_count": 0,
+        "likely_multicolumn": False,
+        "text_length": 0,
+        "warnings": [warning],
+    }
+    try:
+        text, link_uris, page_count = _pypdf2_pdf_text(file_bytes)
+    except Exception as exc:
+        raise ValueError(f"Failed to read PDF: {exc}") from exc
+    text = _with_link_footer(text, link_uris)
+    meta["page_count"] = page_count
+    meta["text_length"] = len(text)
+    return text, meta
+
+
+def _clean_pdf_block_text(value: Any) -> str:
+    text = re.sub(r"[ \t]+", " ", str(value or ""))
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return "\n".join(lines)
+
+
+def _pdf_blocks_are_multicolumn(blocks: List[Dict[str, Any]], page_width: float) -> Tuple[bool, Optional[float]]:
+    if page_width <= 0 or len(blocks) < 4:
+        return False, None
+
+    centers = sorted((float(block["x0"]) + float(block["x1"])) / 2 for block in blocks)
+    best_index = -1
+    best_gap = 0.0
+    for index in range(len(centers) - 1):
+        gap = centers[index + 1] - centers[index]
+        if gap > best_gap:
+            best_gap = gap
+            best_index = index
+
+    min_gap = max(45.0, page_width * 0.12)
+    if best_index < 1 or best_index > len(centers) - 3 or best_gap < min_gap:
+        return False, None
+
+    divider = (centers[best_index] + centers[best_index + 1]) / 2
+    left = [block for block in blocks if ((block["x0"] + block["x1"]) / 2) < divider]
+    right = [block for block in blocks if ((block["x0"] + block["x1"]) / 2) >= divider]
+    if len(left) < 2 or len(right) < 2:
+        return False, None
+
+    left_top, left_bottom = min(block["y0"] for block in left), max(block["y1"] for block in left)
+    right_top, right_bottom = min(block["y0"] for block in right), max(block["y1"] for block in right)
+    vertical_overlap = min(left_bottom, right_bottom) - max(left_top, right_top)
+    if vertical_overlap < 40:
+        return False, None
+
+    return True, divider
+
+
+def _order_pdf_text_blocks(blocks: List[Dict[str, Any]], page_width: float) -> Tuple[List[str], bool]:
+    clean_blocks = [
+        {**block, "text": text}
+        for block in blocks
+        if (text := str(block.get("text") or "").strip()) and (block.get("x1", 0) - block.get("x0", 0)) > 4
+    ]
+    is_multicolumn, divider = _pdf_blocks_are_multicolumn(clean_blocks, page_width)
+
+    if is_multicolumn and divider is not None:
+        left = [block for block in clean_blocks if ((block["x0"] + block["x1"]) / 2) < divider]
+        right = [block for block in clean_blocks if ((block["x0"] + block["x1"]) / 2) >= divider]
+        ordered = [
+            *sorted(left, key=lambda block: (block["y0"], block["x0"])),
+            *sorted(right, key=lambda block: (block["y0"], block["x0"])),
+        ]
+    else:
+        ordered = sorted(clean_blocks, key=lambda block: (block["y0"], block["x0"]))
+
+    return [block["text"] for block in ordered], is_multicolumn
+
+
+def _rebuild_lines_from_page_blocks(page: Any) -> List[str]:
+    raw_blocks = page.get_text("blocks") or []
+    blocks: List[Dict[str, Any]] = []
+    for block in raw_blocks:
+        if len(block) < 5:
+            continue
+        blocks.append(
+            {
+                "x0": float(block[0]),
+                "y0": float(block[1]),
+                "x1": float(block[2]),
+                "y1": float(block[3]),
+                "text": block[4],
+            }
+        )
+    ordered_texts, _ = _order_pdf_text_blocks(blocks, float(page.rect.width))
+    return _split_extracted_lines([_clean_pdf_block_text(text) for text in ordered_texts if text])
+
+
+def extract_pdf_text_layout_aware(file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
+    meta: Dict[str, Any] = {
+        "engine": "pymupdf_words",
+        "page_count": 0,
+        "likely_multicolumn": False,
+        "text_length": 0,
+        "warnings": [],
+    }
+
+    if fitz is None:
+        return _pypdf2_pdf_fallback(file_bytes, warning="pymupdf_unavailable")
+
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+    except Exception as exc:
+        raise ValueError(f"Failed to read PDF: {exc}") from exc
+
+    try:
+        meta["page_count"] = len(doc)
+        page_texts: List[str] = []
+        for page in doc:
+            word_lines = _rebuild_lines_from_page_words(page)
+            if not word_lines:
+                meta["warnings"].append("word_extraction_empty_page")
+                word_lines = _rebuild_lines_from_page_blocks(page)
+            if word_lines:
+                page_texts.append("\n".join(word_lines))
+
+        text = "\n\n".join(page_texts)
+        link_uris = _pymupdf_link_uris(doc)
+        text = _with_link_footer(text, link_uris)
+        meta["pdf_links"] = link_uris
+        if not text.strip():
+            meta["warnings"].append("low_text_extraction")
+            meta["engine"] = "pymupdf_blocks_fallback"
+        if len(text.strip()) < 80 and meta["page_count"]:
+            meta["warnings"].append("likely_scanned_pdf")
+        meta["text_length"] = len(text)
+        return text, meta
+    except Exception:
+        return _pypdf2_pdf_fallback(file_bytes, warning="pymupdf_extraction_failed")
+    finally:
+        doc.close()
+
+
+def extract_text_with_metadata(file_bytes: bytes, filename: str) -> Tuple[str, Dict[str, Any]]:
+    fn = filename.lower()
+    if fn.endswith(".pdf"):
+        return extract_pdf_text_layout_aware(file_bytes)
+
+    meta: Dict[str, Any] = {
+        "engine": "python-docx" if fn.endswith(".docx") else "plain_text",
+        "page_count": None,
+        "likely_multicolumn": False,
+        "text_length": 0,
+        "warnings": [],
+    }
+
+    if fn.endswith(".docx"):
         try:
             doc = docx.Document(BytesIO(file_bytes))
-            return _paragraph_text_with_hyperlink_urls(doc)
+            text = _paragraph_text_with_hyperlink_urls(doc)
+            meta["text_length"] = len(text)
+            return text, meta
         except Exception as exc:
             raise ValueError(f"Failed to read DOCX: {exc}") from exc
 
-    elif fn.endswith('.doc'):
+    if fn.endswith(".doc"):
         raise ValueError("Unsupported file type: .doc (please upload .docx)")
-    else:
-        try:
-            return file_bytes.decode("utf-8", errors="ignore")
-        except Exception:
-            return ""
 
-def split_sections(text: str) -> Dict[str, List[str]]:
-    # Map section headers to normalized keys
-    section_map = {
-        'education': ['education', 'coursework'],
-        'projects': ['projects', 'research', 'research projects'],
-        'skills': ['technical skills', 'skills', 'technologies', 'languages', 'libraries & frameworks', 'developer tools'],
-        'achievements': ['achievement', 'achievements', 'awards', 'certifications'],
-        'work': ['experience', 'work experience', 'internship', 'positions', 'employment', 'professional experience'],
-        'summary': ['summary', 'about', 'profile'],
-    }
-    # Parse the text into sections
-    lines = [l.strip() for l in text.splitlines()]
-    sections = {}
-    current = None
-    def _normalize_header(s: str) -> str:
-        # Keep alphanumerics and a few separators; collapse whitespace.
-        s = s.lower().strip()
-        s = re.sub(r"[^a-z0-9&\s]", " ", s)
-        s = re.sub(r"\s+", " ", s).strip(" :")
-        return s
-
-    for ln in lines:
-        ln_norm = _normalize_header(ln)
-        # Detect section header (exact OR prefix match; e.g., "education" or "education and certifications")
-        found = [
-            k
-            for k, hdrs in section_map.items()
-            if any(ln_norm == h or ln_norm.startswith(h + " ") for h in hdrs)
-        ]
-        if found:
-            current = found[0]
-            sections.setdefault(current, [])
-            continue
-        if current:
-            # Group content under the current section
-            if ln:  # Skip empty lines
-                sections[current].append(ln)
-    # fallback if missing
-    if not sections: sections['full'] = lines
-    return sections
-
-def extract_education(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
-    items: List[Dict[str, Any]] = []
-    current: Dict[str, Any] | None = None
-    edu_lines = sections.get("education", []) or []
-
-    def _flush() -> None:
-        nonlocal current
-        if current and any(current.get(key) for key in ("degree", "field", "minor", "institution", "dates", "cgpa")):
-            items.append(normalize_education_record(current))
-        current = None
-
-    for raw_line in edu_lines:
-        if not raw_line:
-            continue
-        line = raw_line.strip()
-        lower = line.lower()
-        has_degree = bool(re.search(r"(bachelor|master|ph\.?d|b\.?e\.?|b\.?tech|m\.?tech|degree)", lower))
-        has_institution = bool(re.search(r"\b(university|institute|college|school)\b", lower))
-        has_year = bool(re.search(r"(20\d{2}|19\d{2})", line))
-        has_cgpa = bool(re.search(r"(cgpa|gpa)\s*[:\-]?\s*[\d\.]+", line, re.I))
-
-        if current and has_cgpa and not current.get("cgpa"):
-            cgpa_match = re.search(r"((?:cgpa|gpa)\s*[:\-]?\s*[\d\.]+(?:/\d+(?:\.\d+)?)?)", line, re.I)
-            if cgpa_match:
-                current["cgpa"] = cgpa_match.group(1)
-            continue
-
-        if current and has_year and not (has_degree or has_institution):
-            date_match = re.findall(r"(20\d{2}|19\d{2}|present|current)", line, re.I)
-            if date_match:
-                current["dates"] = " - ".join(date_match[:2]) if len(date_match) > 1 else date_match[0]
-            continue
-
-        if has_institution and not has_degree and " in " not in lower:
-            _flush()
-            parts = [part.strip() for part in line.split(",")]
-            head = parts[0]
-            institution_match = re.search(
-                r"([A-Z][A-Za-z&\-\.\s]+(?:University|Institute|College|School)(?:\s+of\s+[A-Za-z&\-\.\s]+)?(?:\s+and\s+[A-Za-z&\-\.\s]+)?)",
-                head,
-            )
-            current = {
-                "degree": "",
-                "field": "",
-                "minor": "",
-                "institution": institution_match.group(1).strip(" ,.-") if institution_match else head,
-                "dates": "",
-                "cgpa": "",
-                "location": parts[1] if len(parts) > 1 else "",
-            }
-            continue
-
-        if has_degree or " in " in lower:
-            degree, field, minor = parse_degree_field_minor(line)
-            if current is None:
-                current = {
-                    "degree": "",
-                    "field": "",
-                    "minor": "",
-                    "institution": "",
-                    "dates": "",
-                    "cgpa": "",
-                    "location": "",
-                }
-            current["degree"] = degree
-            current["field"] = field
-            current["minor"] = minor
-            date_match = re.findall(r"(20\d{2}|19\d{2}|present|current)", line, re.I)
-            if date_match and not current.get("dates"):
-                current["dates"] = " - ".join(date_match[:2]) if len(date_match) > 1 else date_match[0]
-            cgpa_match = re.search(r"((?:cgpa|gpa)\s*[:\-]?\s*[\d\.]+(?:/\d+(?:\.\d+)?)?)", line, re.I)
-            if cgpa_match and not current.get("cgpa"):
-                current["cgpa"] = cgpa_match.group(1)
-            continue
-
-    _flush()
-    return merge_education_entries(items)
-
-def extract_projects(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
-    projects = []
-    lines = sections.get('projects', []) or []
-    curr: Dict[str, Any] | None = None
-
-    def _flush() -> None:
-        nonlocal curr
-        if curr and any(curr.get(key) for key in ("name", "description", "link", "tech_stack")):
-            curr["description"] = str(curr.get("description") or "").strip()
-            curr["tech_stack"] = list(dict.fromkeys(curr.get("tech_stack") or []))
-            projects.append(curr)
-        curr = None
-
-    def _looks_like_project_title(line: str) -> bool:
-        if line.startswith(("•", "-")):
-            return False
-        if re.search(r"\b(link|live link|source code)\b", line, re.I):
-            return True
-        if len(line) > 120:
-            return False
-        titleish = re.match(r"^[A-Za-z0-9][A-Za-z0-9\s&+:/().,'-]{3,}$", line)
-        return bool(titleish)
-
-    tech_pattern = re.compile(
-        r"\b(C\+\+|Python|JavaScript|TypeScript|SQL|FastAPI|Node\.js|Express\.js|ReactJS|React|Next\.js|MongoDB|Redis|Firebase|SQLite|GCP|AWS|Docker|LangChain|TensorFlow|PyTorch|scikit-learn|Gemini|Ollama|Vertex AI|Bedrock|WebSockets?)\b",
-        re.I,
-    )
-
-    for l in lines:
-        line = l.strip()
-        if not line:
-            continue
-        url_match = re.search(r"(https?://\S+|www\.\S+)", line, re.I)
-        if _looks_like_project_title(line) and (curr is None or curr.get("description") or curr.get("link")):
-            _flush()
-            curr = {
-                "name": "",
-                "description": "",
-                "tech_stack": [],
-                "role": "",
-                "scale": "",
-                "start_date": "",
-                "end_date": "",
-                "link": "",
-            }
-
-        if curr is None:
-            curr = {
-                "name": "",
-                "description": "",
-                "tech_stack": [],
-                "role": "",
-                "scale": "",
-                "start_date": "",
-                "end_date": "",
-                "link": "",
-            }
-
-        if not curr["name"]:
-            title_line = re.sub(r"\b(Link|Live Link|Source Code)\b.*$", "", line, flags=re.I).strip(" -|")
-            curr["name"] = title_line or line
-
-        if url_match and not curr.get("link"):
-            curr["link"] = url_match.group(1).rstrip(").,")
-
-        for tech in tech_pattern.findall(line):
-            cleaned = tech.strip()
-            if cleaned and cleaned not in curr["tech_stack"]:
-                curr["tech_stack"].append(cleaned)
-
-        if line.startswith(("•", "-")):
-            desc = line.lstrip("•- ").strip()
-            curr["description"] = f"{curr.get('description', '')} {desc}".strip()
-        elif curr.get("name") and line != curr.get("name"):
-            curr["description"] = f"{curr.get('description', '')} {line}".strip()
-
-    _flush()
-    return projects
-
-def extract_achievements(sections: Dict[str, List[str]]) -> List[Dict[str, Any]]:
-    achieves = []
-    for l in sections.get("achievements", []):
-        if not l:
-            continue
-        line = l.lstrip("•- ").strip()
-        if not line:
-            continue
-        date_match = re.search(r"(20\d{2}|19\d{2})", line)
-        title, description = line, ""
-        if ":" in line:
-            title, description = [part.strip() for part in line.split(":", 1)]
-        elif " - " in line and len(line.split(" - ", 1)[0]) < 80:
-            title, description = [part.strip() for part in line.split(" - ", 1)]
-        achieves.append({
-            "title": title,
-            "description": description,
-            "date": date_match.group(1) if date_match else "",
-        })
-    return achieves
-
-def _enrich_profile_education(profile: ResumeProfile, sections: Dict[str, List[str]]) -> None:
-    """Merge LLM education rows with deterministic section extraction."""
-    fallback = extract_education(sections)
-    if not profile.education:
-        profile.education = [EducationRecord(**item) for item in fallback]
-        return
-
-    normalized: List[EducationRecord] = []
-    for index, record in enumerate(profile.education):
-        merged = {**record.model_dump(), **(fallback[index] if index < len(fallback) else {})}
-        normalized.append(EducationRecord(**normalize_education_record(merged)))
-
-    if len(fallback) > len(normalized):
-        normalized.extend(EducationRecord(**item) for item in fallback[len(normalized):])
-
-    merged_rows = merge_education_entries(item.model_dump() for item in normalized)
-    profile.education = [EducationRecord(**row) for row in merged_rows]
-
-
-def _enrich_profile_projects(profile: ResumeProfile, sections: Dict[str, List[str]]) -> None:
-    """Backfill project fields missing from the LLM output."""
-    fallback = extract_projects(sections)
-    if not profile.projects:
-        profile.projects = [ProjectItem(**item) for item in fallback]
-        return
-
-    enriched: List[ProjectItem] = []
-    for index, project in enumerate(profile.projects):
-        fb = fallback[index] if index < len(fallback) else {}
-        enriched.append(
-            ProjectItem(
-                **{
-                    **project.model_dump(),
-                    "description": project.description or fb.get("description"),
-                    "link": project.link or fb.get("link"),
-                    "tech_stack": project.tech_stack or fb.get("tech_stack", []),
-                }
-            )
-        )
-    profile.projects = enriched
-
+    try:
+        text = file_bytes.decode("utf-8", errors="ignore")
+        meta["text_length"] = len(text)
+        return text, meta
+    except Exception:
+        meta["warnings"].append("text_decode_failed")
+        return "", meta

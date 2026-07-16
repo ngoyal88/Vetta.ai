@@ -12,6 +12,7 @@ import { ResumeContextSection } from '../components/ResumeContextSection';
 import { RoleTargetedLaunchFooter } from '../components/RoleTargetedLaunchFooter';
 import { TargetRoleSection } from '../components/TargetRoleSection';
 import { useRoleTargetedSetup } from '../hooks/useRoleTargetedSetup';
+import { JD_FILE_ACCEPT } from 'shared/utils/jdInputUtils';
 
 const RoleTargetedPage: React.FC = () => {
   const reduceMotion = useReducedMotion();
@@ -98,6 +99,7 @@ const RoleTargetedPage: React.FC = () => {
           onJobDescriptionChange={setup.setJobDescription}
           onClear={setup.clearJobDescription}
           onUploadClick={setup.handleUploadClick}
+          uploading={setup.jdUploading}
           onExtractInsights={handleExtractInsights}
           canExtractInsights={canExtractInsights}
         />
@@ -127,9 +129,9 @@ const RoleTargetedPage: React.FC = () => {
       <input
         ref={setup.fileInputRef}
         type="file"
-        accept=".txt,.md,.text/plain"
+        accept={JD_FILE_ACCEPT}
         className="hidden"
-        onChange={setup.handleUploadFile}
+        onChange={(event) => void setup.handleUploadFile(event)}
       />
     </div>
   );
