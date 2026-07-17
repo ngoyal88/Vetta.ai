@@ -11,20 +11,9 @@ _MAX_HIGHLIGHT_TEXT_LEN = 500
 
 
 def _sanitize_optional_contact_url(value: Any, *, other: bool = False) -> Optional[str]:
-    if value is None:
-        return None
-    from services.resume.contact_link_utils import (
-        is_contact_other_candidate,
-        is_plausible_resume_url,
-        normalize_resume_url,
-    )
+    from services.resume.contact_validators import sanitize_optional_contact_url
 
-    normalized = normalize_resume_url(str(value))
-    if not normalized:
-        return None
-    if other:
-        return normalized if is_contact_other_candidate(normalized) else None
-    return normalized if is_plausible_resume_url(normalized) else None
+    return sanitize_optional_contact_url(value, other=other)
 
 
 class ContactLinks(BaseModel):

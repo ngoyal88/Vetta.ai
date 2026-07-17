@@ -2,7 +2,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from services.interview.llm_engine import get_platform_llm
+from services.platform.llm import get_platform_llm
 from services.interview.prompt_contracts import extract_json_dict
 from utils.logger import get_logger
 

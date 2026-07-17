@@ -1,11 +1,15 @@
 # --- Environment & secrets ---
+scripts/
 .env
 .env.*
 !.env.example
 backend/.env
 backend/serviceAccount.json
-test_*
-*/__tests__/
+backend/tests/
+*/__tests__/*
+*/__tests__
+**/__tests__/**
+
 # --- Python ---
 __pycache__/
 *.py[cod]
@@ -31,6 +35,7 @@ venv/
 env/
 ENV/
 backend/venv
+backend/.fontconfig-cache/
 backend/.venv/
 
 # --- Node / frontend ---
@@ -79,6 +84,8 @@ backend/routes/llm.py
 frontend/public/avatars/interviewer.glb
 
 /graphify_out/
+dogfood-output/
+resume-builder-*.png
 cursor_context/
 .github/
 graphify-out

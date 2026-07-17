@@ -1,6 +1,5 @@
-# DEPRECATED: Manual WebSocket interview handler (STT/LLM/TTS in FastAPI).
-# Superseded by services/interview/agent.py (livekit-agents AgentSession pipeline).
-# The /ws/interview endpoint is no longer the active code path. Can be deleted.
+# WebSocket fallback when LiveKit is unavailable. Primary path: services/interview/agent/ (LiveKit).
+# Uses session_engine.py — frozen; do not extend. SessionStore migration tracked separately.
 """
 WebSocket handler for real-time interview (audio, STT, TTS, LLM).
 """
@@ -206,9 +205,9 @@ class InterviewWebSocketHandler:
         elif msg_type == "ping":
             await self.send_message({"type": "pong"})
 
-        elif msg_type == "dsa_next_question":
+        elif msg_type in ("dsa_next_question", "coding_next_question"):
             if eng:
-                await eng.on_dsa_next_question()
+                await eng.on_coding_next_question()
 
         elif msg_type == "code_update":
             if eng:

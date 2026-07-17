@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from config import get_settings
 from services.interview.contracts.mode_contexts import JdFitContext
 from services.interview.jd_context_service import JDContextService
-from services.interview.llm_engine import get_platform_llm
+from services.platform.llm import get_platform_llm
 from services.jd_fit.action_builder import build_ranked_actions
 from services.jd_fit.ats_format_checks import compute_ats_format_warnings
 from services.jd_fit.candidate_graph import build_candidate_graph

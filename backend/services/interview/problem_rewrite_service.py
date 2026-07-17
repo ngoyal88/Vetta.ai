@@ -13,7 +13,7 @@ Function signature schema:
 import json
 from typing import Any, Dict, List
 
-from services.interview.llm_engine import get_platform_llm
+from services.platform.llm import get_platform_llm
 from utils.logger import get_logger
 
 logger = get_logger("ProblemRewriteService")

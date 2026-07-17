@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from services.interview.llm_engine import get_platform_llm
+from services.platform.llm import get_platform_llm
 from services.interview.prompt_contracts import extract_json_dict
 from services.jd_fit.jd_fit_models import (
     EvidenceChunk,
