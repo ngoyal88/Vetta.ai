@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from config import get_settings
 from routes import contact, jd_fit, livekit, resume_builder, vault
+from routes.websocket_routes import router as websocket_fallback_router
 from routes.interview import router as interview_router
 from services.interview import InterviewService
 from utils.cors import apply_cors_headers
@@ -68,6 +69,14 @@ async def lifespan(app: FastAPI):
             "LiveKit agent not embedded in API process — run separately: "
             "python run_livekit_agent.py dev"
         )
+
+    if settings.interview_websocket_fallback_enabled:
+        log.info(
+            "WebSocket interview fallback enabled at /ws/interview/{session_id} "
+            "(requires DEEPGRAM_API_KEY)"
+        )
+    else:
+        log.info("WebSocket interview fallback disabled (interview_websocket_fallback_enabled=false)")
 
     if settings.resume_builder_enabled:
         log.info(
@@ -201,6 +210,9 @@ app.include_router(resume_builder.router)
 app.include_router(contact.router)
 app.include_router(interview_router)
 
+if settings.interview_websocket_fallback_enabled:
+    app.include_router(websocket_fallback_router)
+
 
 @app.get("/")
 async def root():
@@ -235,6 +247,7 @@ async def health_check():
         "firebase": firebase_ok,
         "livekit": livekit_configured,
         "agent": agent_running,
+        "websocket_fallback": settings.interview_websocket_fallback_enabled and bool(settings.deepgram_api_key),
     }
 
     required = {k: v for k, v in services.items() if k not in {"elevenlabs", "judge0", "agent"}}

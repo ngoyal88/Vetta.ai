@@ -36,6 +36,7 @@ from services.interview.completion_guard import try_begin_completion
 from services.interview.session_conductor import SessionConductor
 from services.interview.transcript_service import attach_transcript_to_session, extract_assistant_transcript_text
 from utils.feedback_parser import parse_scores_from_feedback
+from services.interview.modes.registry import is_coding_interview_type
 from utils.logger import get_logger
 from services.interview.session_store import SessionStore, deep_merge_session_conductor
 from utils.session_errors import SessionConflictError
@@ -565,7 +566,7 @@ async def _silence_watchdog(
             continue
 
         conductor = SessionConductor.load(session_data.get("session_conductor"))
-        if conductor.session_phase == "dsa" and conductor.last_code_change_at:
+        if conductor.session_phase in {"dsa", "coding"} and conductor.last_code_change_at:
             if (time.time() - conductor.last_code_change_at) < 30:
                 last_user_speech_at[0] = time.monotonic()
                 tier = 0
@@ -661,6 +662,9 @@ async def _handle_control_message(
         await _send_control(ctx.room, {"type": "pong"})
         return
     if msg_type == "code_update":
+        if not is_coding_interview_type(session_data.get("interview_type")):
+            log.debug("Ignoring code_update on non-coding session %s", session_id)
+            return
         code = str(message.get("code") or "")[:CODE_PAYLOAD_MAX_LENGTH]
         language = str(message.get("language") or "python")
         conductor.update_code(code, language=language, changed_at=time.time())
@@ -668,6 +672,9 @@ async def _handle_control_message(
         await _update_session(session_key, session_data)
         return
     if msg_type == "execution_result":
+        if not is_coding_interview_type(session_data.get("interview_type")):
+            log.debug("Ignoring execution_result on non-coding session %s", session_id)
+            return
         conductor.update_execution(
             str(message.get("output") or ""), bool(message.get("has_errors"))
         )
@@ -691,7 +698,7 @@ async def _handle_control_message(
             ctx, session, session_id, interview_service, completion_reason="user_ended"
         )
         return
-    if msg_type in {"skip_question", "dsa_next_question"}:
+    if msg_type in {"skip_question", "dsa_next_question", "coding_next_question"}:
         await _handle_skip_question(ctx, session, session_id, interview_service)
         return
     if msg_type == "text_answer":
@@ -727,17 +734,19 @@ async def _handle_skip_question(
         })
 
     try:
-        interview_type = InterviewType(session_data.get("interview_type", "dsa"))
+        interview_type = InterviewType(session_data.get("interview_type", "role_targeted"))
     except Exception:
-        interview_type = InterviewType.DSA
+        interview_type = InterviewType.ROLE_TARGETED
     try:
         difficulty = DifficultyLevel(session_data.get("difficulty", "medium"))
     except Exception:
         difficulty = DifficultyLevel.MEDIUM
 
-    if interview_type == InterviewType.DSA:
+    if is_coding_interview_type(interview_type):
+        track = str(session_data.get("track") or "dsa").strip().lower() or "dsa"
+        focus = (session_data.get("session_focus") or "").strip()
         context = interview_service._build_context(
-            InterviewType.DSA,
+            interview_type,
             session_data.get("resume_data"),
             session_data.get("custom_role"),
             session_data.get("years_experience"),
@@ -746,11 +755,19 @@ async def _handle_skip_question(
                 "target_role": session_data.get("target_role"),
                 "job_description": session_data.get("job_description"),
                 "interview_focus": session_data.get("interview_focus"),
+                "session_focus": focus or None,
+                "track": track,
                 "jd_fit_context": session_data.get("jd_fit_context"),
                 "resume_probe_context": session_data.get("resume_probe_context"),
             },
         )
-        next_question_raw = await interview_service._generate_dsa_question(difficulty, context)
+        if focus:
+            context = f"{context}\nSession focus topics: {focus}"
+        next_question_raw = await interview_service.generate_coding_question(
+            track=track,
+            difficulty=difficulty,
+            context=context,
+        )
         next_question_obj = {
             "question": next_question_raw,
             "type": "coding",
@@ -763,11 +780,12 @@ async def _handle_skip_question(
         session_data["last_updated"] = datetime.now(timezone.utc).isoformat()
         await _update_session(session_key, session_data)
         inner = _get_dsa_inner(next_question_obj) or next_question_obj
-        await _send_control(ctx.room, {"type": "phase_change", "phase": "dsa"})
+        # ponytail: also emit "dsa" alias until older clients drain — primary is "coding"
+        await _send_control(ctx.room, {"type": "phase_change", "phase": "coding"})
         await _send_control(ctx.room, {
             "type": "question",
             "question": inner,
-            "phase": "dsa",
+            "phase": "coding",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         return
@@ -1344,17 +1362,20 @@ async def entrypoint(ctx: JobContext) -> None:
     asyncio.create_task(_duration_watchdog(session, session_id, ctx, started_at, interview_service))
 
     # Greet the candidate
-    if str(session_data.get("interview_type", "")).lower() == "dsa":
+    if is_coding_interview_type(session_data.get("interview_type")):
         first_question = (session_data.get("questions") or [{}])[0]
         inner = _get_dsa_inner(first_question) or first_question
-        await _send_control(ctx.room, {"type": "phase_change", "phase": "dsa"})
+        await _send_control(ctx.room, {"type": "phase_change", "phase": "coding"})
         await _send_control(ctx.room, {
             "type": "question",
             "question": inner,
-            "phase": "dsa",
+            "phase": "coding",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        await session.say("Let's start with this coding problem. Walk me through your approach.")
+        await session.say(
+            "I'll pair with you on this coding problem. Talk through your approach, "
+            "then we'll implement and refine together."
+        )
     else:
         candidate_name = (
             session_data.get("candidate_name")
