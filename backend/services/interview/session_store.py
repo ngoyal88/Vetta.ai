@@ -76,3 +76,21 @@ class SessionStore:
     async def apply(self, mutator: Callable[[dict], dict]) -> dict:
         """Alias for update(); preferred name for read-modify-write mutations."""
         return await self.update(mutator)
+
+
+async def persist_ws_session_blob(
+    session_key: str,
+    blob: dict[str, Any],
+    *,
+    session_ttl: int,
+    redis_client: Optional[Any] = None,
+) -> dict[str, Any]:
+    """WS fallback write path — merge blob into current session via SessionStore."""
+    store = SessionStore(session_key, redis_client=redis_client, ttl=session_ttl)
+    incoming = dict(blob)
+
+    def mutator(current: dict[str, Any]) -> dict[str, Any]:
+        base = dict(current) if isinstance(current, dict) else {}
+        return deep_merge_session_conductor(base, incoming)
+
+    return await store.update(mutator)

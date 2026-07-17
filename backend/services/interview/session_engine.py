@@ -1,4 +1,4 @@
-"""Transport-agnostic interview state machine."""
+"""Transport-agnostic interview state machine (WebSocket fallback — frozen)."""
 from __future__ import annotations
 
 import asyncio
@@ -11,6 +11,7 @@ from firebase_admin import firestore
 
 from firebase_config import db
 from models.interview import DifficultyLevel, InterviewType
+from services.interview.modes.registry import is_coding_interview_type
 from services.interview.session_conductor import SessionConductor
 from services.interview.contracts.session_events import (
     InterviewEndedEvent,
@@ -23,7 +24,8 @@ from services.interview.contracts.session_events import (
 from services.interview.transcript_service import attach_transcript_to_session
 from utils.feedback_parser import parse_scores_from_feedback
 from utils.logger import get_logger
-from utils.redis_client import get_session, redis as redis_client, update_session
+from services.interview.session_store import persist_ws_session_blob
+from utils.redis_client import get_session, redis as redis_client
 
 if TYPE_CHECKING:
     from config import Settings
@@ -163,9 +165,9 @@ class InterviewSessionEngine:
             static_context = ""
             if session_data:
                 try:
-                    interview_type = InterviewType(session_data.get("interview_type", "dsa"))
+                    interview_type = InterviewType(session_data.get("interview_type", "role_targeted"))
                 except Exception:
-                    interview_type = InterviewType.DSA
+                    interview_type = InterviewType.ROLE_TARGETED
                 static_context = self.interview_service._build_context(
                     interview_type,
                     session_data.get("resume_data"),
@@ -219,10 +221,16 @@ class InterviewSessionEngine:
         await self._finalize_current_answer()
 
     async def on_code_update(self, code: str, language: str, changed_at: float) -> None:
+        session_data = await get_session(self.session_key)
+        if not session_data or not is_coding_interview_type(session_data.get("interview_type")):
+            return
         self.conductor.update_code(code, language=language, changed_at=changed_at)
         await self._persist_conductor()
 
     async def on_execution_result(self, output: str, has_errors: bool) -> None:
+        session_data = await get_session(self.session_key)
+        if not session_data or not is_coding_interview_type(session_data.get("interview_type")):
+            return
         self.conductor.update_execution(output, has_errors)
         await self._persist_conductor()
 
@@ -236,9 +244,9 @@ class InterviewSessionEngine:
             questions = session_data.get("questions", []) or []
             current_q_index = int(session_data.get("current_question_index", 0))
             try:
-                interview_type = InterviewType(session_data.get("interview_type", "dsa"))
+                interview_type = InterviewType(session_data.get("interview_type", "role_targeted"))
             except Exception:
-                interview_type = InterviewType.DSA
+                interview_type = InterviewType.ROLE_TARGETED
             try:
                 difficulty = DifficultyLevel(session_data.get("difficulty", "medium"))
             except Exception:
@@ -257,7 +265,9 @@ class InterviewSessionEngine:
                     }
                 )
 
-            if interview_type == InterviewType.DSA:
+            if is_coding_interview_type(interview_type):
+                track = str(session_data.get("track") or "dsa").strip().lower() or "dsa"
+                focus = (session_data.get("session_focus") or "").strip()
                 context = self.interview_service._build_context(
                     interview_type,
                     session_data.get("resume_data"),
@@ -268,11 +278,19 @@ class InterviewSessionEngine:
                         "target_role": session_data.get("target_role"),
                         "job_description": session_data.get("job_description"),
                         "interview_focus": session_data.get("interview_focus"),
+                        "session_focus": focus or None,
+                        "track": track,
                         "jd_fit_context": session_data.get("jd_fit_context"),
                         "resume_probe_context": session_data.get("resume_probe_context"),
                     },
                 )
-                next_question_raw = await self.interview_service._generate_dsa_question(difficulty, context)
+                if focus:
+                    context = f"{context}\nSession focus topics: {focus}"
+                next_question_raw = await self.interview_service.generate_coding_question(
+                    track=track,
+                    difficulty=difficulty,
+                    context=context,
+                )
                 next_question_obj = {
                     "question": next_question_raw,
                     "type": "coding",
@@ -310,19 +328,19 @@ class InterviewSessionEngine:
             session_data["current_question_index"] = current_q_index + 1
             session_data["last_updated"] = datetime.now(timezone.utc).isoformat()
             session_data["session_conductor"] = self.conductor.serialize()
-            await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+            await persist_ws_session_blob(self.session_key, session_data, session_ttl=self.session_ttl)
 
             if next_question_obj.get("type") == "coding":
                 self.current_phase = InterviewPhase.DSA_CODING.value
-                self._set_conductor_phase_str(self.current_phase)
+                self._set_conductor_phase_str("coding")
                 self.conductor.append_turn("interviewer", self._extract_speakable_text(next_question_obj))
-                await self.transport.send_message({"type": "phase_change", "phase": "dsa"})
+                await self.transport.send_message({"type": "phase_change", "phase": "coding"})
                 inner = _get_dsa_inner_question(next_question_obj) or next_question_obj
                 await self.transport.send_message(
                     {
                         "type": "question",
                         "question": inner,
-                        "phase": "dsa",
+                        "phase": "coding",
                         "audio": None,
                         "spoken_text": None,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -337,10 +355,17 @@ class InterviewSessionEngine:
             await self.transport.send_error("Failed to skip question")
 
     async def on_dsa_next_question(self) -> None:
+        """Alias for coding next-question (legacy message name)."""
+        await self.on_coding_next_question()
+
+    async def on_coding_next_question(self) -> None:
         try:
             session_data = await get_session(self.session_key)
             if not session_data:
                 await self.transport.send_error("Session not found")
+                return
+            if not is_coding_interview_type(session_data.get("interview_type")):
+                await self.transport.send_error("Coding next-question is only for coding sessions")
                 return
             questions = session_data.get("questions", []) or []
             current_q_index = int(session_data.get("current_question_index", 0))
@@ -348,8 +373,14 @@ class InterviewSessionEngine:
                 difficulty = DifficultyLevel(session_data.get("difficulty", "medium"))
             except Exception:
                 difficulty = DifficultyLevel.MEDIUM
+            try:
+                interview_type = InterviewType(session_data.get("interview_type", "pair_programming"))
+            except Exception:
+                interview_type = InterviewType.PAIR_PROGRAMMING
+            track = str(session_data.get("track") or "dsa").strip().lower() or "dsa"
+            focus = (session_data.get("session_focus") or "").strip()
             context = self.interview_service._build_context(
-                InterviewType.DSA,
+                interview_type,
                 session_data.get("resume_data"),
                 session_data.get("custom_role"),
                 session_data.get("years_experience"),
@@ -358,11 +389,19 @@ class InterviewSessionEngine:
                     "target_role": session_data.get("target_role"),
                     "job_description": session_data.get("job_description"),
                     "interview_focus": session_data.get("interview_focus"),
+                    "session_focus": focus or None,
+                    "track": track,
                     "jd_fit_context": session_data.get("jd_fit_context"),
                     "resume_probe_context": session_data.get("resume_probe_context"),
                 },
             )
-            next_question_raw = await self.interview_service._generate_dsa_question(difficulty, context)
+            if focus:
+                context = f"{context}\nSession focus topics: {focus}"
+            next_question_raw = await self.interview_service.generate_coding_question(
+                track=track,
+                difficulty=difficulty,
+                context=context,
+            )
             next_question_obj = {
                 "question": next_question_raw,
                 "type": "coding",
@@ -373,22 +412,22 @@ class InterviewSessionEngine:
             session_data["current_question_index"] = current_q_index + 1
             session_data["last_updated"] = datetime.now(timezone.utc).isoformat()
             session_data["session_conductor"] = self.conductor.serialize()
-            await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+            await persist_ws_session_blob(self.session_key, session_data, session_ttl=self.session_ttl)
             self.current_phase = InterviewPhase.DSA_CODING.value
-            self._set_conductor_phase_str(self.current_phase)
+            self._set_conductor_phase_str("coding")
             self.conductor.append_turn("interviewer", self._extract_speakable_text(next_question_raw))
-            await self.transport.send_message({"type": "phase_change", "phase": "dsa"})
+            await self.transport.send_message({"type": "phase_change", "phase": "coding"})
             await self.transport.send_message(
                 {
                     "type": "question",
                     "question": next_question_raw,
-                    "phase": "dsa",
+                    "phase": "coding",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
             await self._persist_conductor(session_data)
         except Exception as e:
-            logger.error("dsa_next_question error: %s", e, exc_info=True)
+            logger.error("coding_next_question error: %s", e, exc_info=True)
             await self.transport.send_error("Failed to load next question")
 
     async def on_candidate_away(self) -> None:
@@ -398,7 +437,7 @@ class InterviewSessionEngine:
         session_data["candidate_away_since"] = time.time()
         session_data["silence_paused"] = True
         self._silence_tier = 0
-        await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+        await persist_ws_session_blob(self.session_key, session_data, session_ttl=self.session_ttl)
 
     async def on_candidate_back(self) -> None:
         session_data = await get_session(self.session_key)
@@ -408,7 +447,7 @@ class InterviewSessionEngine:
         session_data.pop("candidate_away_since", None)
         self._last_user_speech_at = time.monotonic()
         self._silence_tier = 0
-        await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+        await persist_ws_session_blob(self.session_key, session_data, session_ttl=self.session_ttl)
         await self._emit_session_status(session_data)
 
     async def _emit_session_status(self, session_data: Dict[str, Any]) -> None:
@@ -515,7 +554,7 @@ class InterviewSessionEngine:
             session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
             session_data["live_transcription"] = session_data.get("live_transcription", [])
             session_data["session_conductor"] = self.conductor.serialize()
-            await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+            await persist_ws_session_blob(self.session_key, session_data, session_ttl=self.session_ttl)
 
             try:
                 db.collection("interviews").document(self.session_id).set(
@@ -627,7 +666,7 @@ class InterviewSessionEngine:
             session_data["questions_answered"] = len(session_data.get("responses", []))
             session_data["code_problems_attempted"] = len(session_data.get("code_submissions", []))
             session_data["live_transcription"] = session_data.get("live_transcription", [])
-            await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+            await persist_ws_session_blob(self.session_key, session_data, session_ttl=self.session_ttl)
 
             try:
                 scores = parse_scores_from_feedback(
@@ -716,7 +755,7 @@ class InterviewSessionEngine:
                 continue
 
             conductor = SessionConductor.load(session_data.get("session_conductor"))
-            if conductor.session_phase == "dsa" and conductor.last_code_change_at:
+            if conductor.session_phase in {"dsa", "coding"} and conductor.last_code_change_at:
                 if (time.time() - conductor.last_code_change_at) < 30:
                     self._last_user_speech_at = time.monotonic()
                     self._silence_tier = 0
@@ -780,12 +819,15 @@ class InterviewSessionEngine:
             parts.append(interim)
         return " ".join([p for p in parts if p]).strip()
 
-    def _is_dsa_session(self, session_data: dict) -> bool:
-        it = session_data.get("interview_type") or ""
-        return str(it).lower() == "dsa"
+    def _is_coding_session(self, session_data: dict) -> bool:
+        return is_coding_interview_type(session_data.get("interview_type"))
 
     def _set_conductor_phase_str(self, phase: str) -> None:
-        self.conductor.session_phase = "dsa" if phase == InterviewPhase.DSA_CODING.value else phase
+        # ponytail: keep conductor "coding" (legacy sessions may still store "dsa")
+        if phase in {InterviewPhase.DSA_CODING.value, "coding", "dsa"}:
+            self.conductor.session_phase = "coding"
+        else:
+            self.conductor.session_phase = phase
 
     def _extract_speakable_text(self, response: Any) -> str:
         if isinstance(response, str):
@@ -812,7 +854,7 @@ class InterviewSessionEngine:
         if not snapshot:
             return
         snapshot["session_conductor"] = self.conductor.serialize()
-        await update_session(self.session_key, snapshot, expire_seconds=self.session_ttl)
+        await persist_ws_session_blob(self.session_key, snapshot, session_ttl=self.session_ttl)
 
     async def persist_conductor(self, session_data: Optional[Dict[str, Any]] = None) -> None:
         await self._persist_conductor(session_data)
@@ -836,7 +878,7 @@ class InterviewSessionEngine:
                 await self.transport.send_error("No questions available")
                 return
 
-            if self._is_dsa_session(session_data):
+            if self._is_coding_session(session_data):
                 inner = _get_dsa_inner_question(first_question) or first_question
                 test_cases = inner.get("test_cases") if isinstance(inner, dict) else []
                 if not test_cases or not isinstance(test_cases, list):
@@ -844,18 +886,23 @@ class InterviewSessionEngine:
                     return
                 self._first_question = first_question
                 self.current_phase = InterviewPhase.DSA_CODING.value
-                self._set_conductor_phase_str(self.current_phase)
+                self._set_conductor_phase_str("coding")
                 self.conductor.append_turn("interviewer", self._extract_speakable_text(inner))
-                await self.transport.send_message({"type": "phase_change", "phase": "dsa"})
+                await self.transport.send_message({"type": "phase_change", "phase": "coding"})
                 await self.transport.send_message(
                     {
                         "type": "question",
                         "question": inner,
-                        "phase": "dsa",
+                        "phase": "coding",
                         "audio": None,
                         "spoken_text": None,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+                )
+                await self.transport.speak(
+                    "I'll pair with you on this coding problem. Talk through your approach, "
+                    "then we'll implement and refine together.",
+                    {},
                 )
                 await self._persist_conductor(session_data)
                 return
@@ -883,9 +930,9 @@ class InterviewSessionEngine:
         speak_text = self._extract_speakable_text(response)
         if isinstance(response, dict) and response.get("type") == "coding":
             if self.current_phase != InterviewPhase.DSA_CODING.value:
-                await self.transport.send_message({"type": "phase_change", "phase": "dsa"})
+                await self.transport.send_message({"type": "phase_change", "phase": "coding"})
             self.current_phase = InterviewPhase.DSA_CODING.value
-            self._set_conductor_phase_str(self.current_phase)
+            self._set_conductor_phase_str("coding")
         elif self.current_phase == InterviewPhase.DSA_CODING.value:
             self.current_phase = InterviewPhase.BEHAVIORAL.value
             self._set_conductor_phase_str(self.current_phase)
@@ -959,7 +1006,7 @@ class InterviewSessionEngine:
             if session_data is not None:
                 session_data["candidate_intro"] = complete_text
                 session_data["session_conductor"] = self.conductor.serialize()
-                await update_session(self.session_key, session_data, expire_seconds=self.session_ttl)
+                await persist_ws_session_blob(self.session_key, session_data, session_ttl=self.session_ttl)
 
             first_question = self._first_question
             if first_question is None and session_data:
