@@ -88,7 +88,6 @@ class Settings(BaseSettings):
 
     vpm_enabled: bool = True
     jd_fit_enabled: bool = True
-    jd_fit_semantic_alignment_enabled: bool = True
     resume_builder_enabled: bool = False
     vpm_max_accepted_claims: int = 50
     vpm_max_raw_extract: int = 8

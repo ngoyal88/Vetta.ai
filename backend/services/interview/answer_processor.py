@@ -80,7 +80,9 @@ class AnswerProcessor:
                 },
             }
 
-        interview_type = parse_interview_type(session_data.get("interview_type", "dsa"))
+        interview_type = parse_interview_type(
+            session_data.get("interview_type", "role_targeted")
+        )
         normalized_current_question = _normalize_question_entry(
             questions[current_q_index],
             default_type=interview_type.value,

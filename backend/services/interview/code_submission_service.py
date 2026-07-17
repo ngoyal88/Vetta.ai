@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from models.interview import CodeSubmission, InterviewSession, TestCase
 from services.interview.session_store import SessionStore, deep_merge_session_conductor
 from utils.logger import get_logger
-from utils.redis_client import get_session, update_session
+from utils.redis_client import get_session
 
 logger = get_logger(__name__)
 
@@ -65,10 +65,6 @@ def _append_submission_fields(session_data: dict[str, Any], session: InterviewSe
     return merged
 
 
-async def _persist_blind(session_key: str, blob: dict[str, Any], *, session_ttl: int) -> None:
-    await update_session(session_key, blob, expire_seconds=session_ttl)
-
-
 async def _persist_mutator(
     session_key: str,
     mutator,
@@ -94,7 +90,6 @@ async def submit_code(
     uid: str,
     code_service: CodeExecutor,
     session_ttl: int,
-    use_session_store: bool = True,
 ) -> dict[str, Any]:
     session_key = f"interview:{session_id}"
     session_data = await get_session(session_key)
@@ -138,31 +133,19 @@ async def submit_code(
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    if use_session_store:
+    def _first_write(current: dict[str, Any]) -> dict[str, Any]:
+        return _append_submission_fields(current, session)
 
-        def _first_write(current: dict[str, Any]) -> dict[str, Any]:
-            return _append_submission_fields(current, session)
+    await _persist_mutator(session_key, _first_write, session_ttl=session_ttl)
 
-        await _persist_mutator(session_key, _first_write, session_ttl=session_ttl)
+    def _append_result(current: dict[str, Any]) -> dict[str, Any]:
+        base = dict(current)
+        code_results = list(base.get("code_results", []) or [])
+        code_results.append(code_result_entry)
+        base["code_results"] = code_results
+        return base
 
-        def _append_result(current: dict[str, Any]) -> dict[str, Any]:
-            base = dict(current)
-            code_results = list(base.get("code_results", []) or [])
-            code_results.append(code_result_entry)
-            base["code_results"] = code_results
-            return base
-
-        await _persist_mutator(session_key, _append_result, session_ttl=session_ttl)
-    else:
-        first_blob = session.model_dump(mode="json")
-        await _persist_blind(session_key, first_blob, session_ttl=session_ttl)
-
-        updated = await get_session(session_key)
-        if updated:
-            code_results = updated.get("code_results", []) or []
-            code_results.append(code_result_entry)
-            updated["code_results"] = code_results
-            await _persist_blind(session_key, updated, session_ttl=session_ttl)
+    await _persist_mutator(session_key, _append_result, session_ttl=session_ttl)
 
     logger.info(
         "code_executed",

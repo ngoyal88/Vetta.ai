@@ -42,7 +42,6 @@ async def submit_code_route(
             uid=uid,
             code_service=code_service,
             session_ttl=SESSION_TTL,
-            use_session_store=True,
         )
 
     except HTTPException:

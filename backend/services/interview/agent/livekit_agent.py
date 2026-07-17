@@ -157,14 +157,6 @@ async def _mutate_session(
     return None
 
 
-async def _update_session(session_key: str, data: Dict[str, Any], ttl: int = SESSION_TTL) -> None:
-    """Full-blob replace — retained for legacy DSA control paths only."""
-    try:
-        await (await _session_store(session_key, ttl=ttl)).replace(data)
-    except Exception as e:
-        log.error("Error updating session %s: %s", session_key, e, exc_info=True)
-
-
 def _extract_resume_name(resume_data: Any) -> Optional[str]:
     if not isinstance(resume_data, dict):
         return None
@@ -656,7 +648,6 @@ async def _handle_control_message(
     session_data = await _get_session(session_key)
     if not session_data:
         return
-    conductor = SessionConductor.load(session_data.get("session_conductor"))
 
     if msg_type == "ping":
         await _send_control(ctx.room, {"type": "pong"})
@@ -667,31 +658,56 @@ async def _handle_control_message(
             return
         code = str(message.get("code") or "")[:CODE_PAYLOAD_MAX_LENGTH]
         language = str(message.get("language") or "python")
-        conductor.update_code(code, language=language, changed_at=time.time())
-        session_data["session_conductor"] = conductor.serialize()
-        await _update_session(session_key, session_data)
+        changed_at = time.time()
+
+        def _patch_code(current: Dict[str, Any]) -> Dict[str, Any]:
+            base = dict(current) if isinstance(current, dict) else {}
+            conductor = SessionConductor.load(base.get("session_conductor"))
+            conductor.update_code(code, language=language, changed_at=changed_at)
+            base["session_conductor"] = conductor.serialize()
+            return base
+
+        await _mutate_session(session_key, _patch_code)
         return
     if msg_type == "execution_result":
         if not is_coding_interview_type(session_data.get("interview_type")):
             log.debug("Ignoring execution_result on non-coding session %s", session_id)
             return
-        conductor.update_execution(
-            str(message.get("output") or ""), bool(message.get("has_errors"))
-        )
-        session_data["session_conductor"] = conductor.serialize()
-        await _update_session(session_key, session_data)
+        output = str(message.get("output") or "")
+        has_errors = bool(message.get("has_errors"))
+
+        def _patch_execution(current: Dict[str, Any]) -> Dict[str, Any]:
+            base = dict(current) if isinstance(current, dict) else {}
+            conductor = SessionConductor.load(base.get("session_conductor"))
+            conductor.update_execution(output, has_errors)
+            base["session_conductor"] = conductor.serialize()
+            return base
+
+        await _mutate_session(session_key, _patch_execution)
         return
     if msg_type == "candidate_away":
-        session_data["candidate_away_since"] = time.time()
-        session_data["silence_paused"] = True
-        await _update_session(session_key, session_data)
+
+        def _patch_away(current: Dict[str, Any]) -> Dict[str, Any]:
+            base = dict(current) if isinstance(current, dict) else {}
+            base["candidate_away_since"] = time.time()
+            base["silence_paused"] = True
+            return base
+
+        await _mutate_session(session_key, _patch_away)
         return
     if msg_type == "candidate_back":
-        session_data["silence_paused"] = False
-        session_data.pop("candidate_away_since", None)
+
+        def _patch_back(current: Dict[str, Any]) -> Dict[str, Any]:
+            base = dict(current) if isinstance(current, dict) else {}
+            base["silence_paused"] = False
+            base.pop("candidate_away_since", None)
+            return base
+
+        await _mutate_session(session_key, _patch_back)
         last_user_speech_at[0] = time.monotonic()
-        await _update_session(session_key, session_data)
-        await _emit_session_status(ctx, session_data)
+        refreshed = await _get_session(session_key)
+        if refreshed:
+            await _emit_session_status(ctx, refreshed)
         return
     if msg_type == "end_interview":
         await _handle_end_interview(
@@ -778,7 +794,18 @@ async def _handle_skip_question(
         session_data["responses"] = responses
         session_data["current_question_index"] = current_q_index + 1
         session_data["last_updated"] = datetime.now(timezone.utc).isoformat()
-        await _update_session(session_key, session_data)
+
+        def _apply_coding_skip(current: Dict[str, Any]) -> Dict[str, Any]:
+            base = dict(current) if isinstance(current, dict) else {}
+            base.update({
+                "questions": questions,
+                "responses": responses,
+                "current_question_index": current_q_index + 1,
+                "last_updated": session_data["last_updated"],
+            })
+            return base
+
+        await _mutate_session(session_key, _apply_coding_skip)
         inner = _get_dsa_inner(next_question_obj) or next_question_obj
         # ponytail: also emit "dsa" alias until older clients drain — primary is "coding"
         await _send_control(ctx.room, {"type": "phase_change", "phase": "coding"})
