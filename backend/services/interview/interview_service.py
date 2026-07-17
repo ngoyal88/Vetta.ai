@@ -9,7 +9,7 @@ from services.interview.answer_evaluator import AnswerEvaluator
 from services.interview.answer_processor import AnswerProcessor
 from services.interview.feedback_service import FeedbackService
 from services.interview.jd_context_service import JDContextService
-from services.interview.llm_engine import LLMEngine
+from services.platform.llm import LLMEngine
 from services.interview.modes.registry import ModeStrategyRegistry
 from services.interview.prompt_engine import PromptEngine
 from services.interview.question_service import QuestionService
@@ -18,25 +18,6 @@ from services.interview.contracts.mode_contexts import JdFitContext, ResumeProbe
 from utils.logger import get_logger
 
 logger = get_logger("InterviewService")
-
-
-def _parse_interview_type(val: Optional[str]) -> InterviewType:
-    """Parse InterviewType from string, case-insensitive. Defaults to DSA on failure."""
-    if not val:
-        return InterviewType.DSA
-    try:
-        return InterviewType(val)
-    except Exception:
-        pass
-    v = val.strip().lower()
-    for it in InterviewType:
-        try:
-            if it.name.lower() == v or str(it.value).lower() == v:
-                return it
-        except Exception:
-            continue
-    logger.warning("Unknown InterviewType %r, defaulting to DSA", val)
-    return InterviewType.DSA
 
 
 def _normalize_question_entry(q: Union[str, Dict], default_type: str = "behavioral") -> Dict:
@@ -180,24 +161,16 @@ class InterviewService:
         interview_type: InterviewType,
         difficulty: DifficultyLevel,
         resume_data: Dict[str, Any],
-        custom_role: Optional[str],
         years_experience: Optional[int],
-        target_company: Optional[str],
-        target_role: Optional[str],
-        job_description: Optional[str],
-        interview_focus: Optional[str],
+        config: Any,
     ) -> Dict[str, Any]:
         strategy = self._mode_registry.get(interview_type)
         result = await strategy.prepare_start(
             interview_service=self,
             difficulty=difficulty,
             resume_data=resume_data,
-            custom_role=custom_role,
             years_experience=years_experience,
-            target_company=target_company,
-            target_role=target_role,
-            job_description=job_description,
-            interview_focus=interview_focus,
+            config=config,
         )
         return {
             "target_context": result.target_context,
@@ -223,6 +196,19 @@ class InterviewService:
 
     async def _generate_dsa_question(self, difficulty: DifficultyLevel, context: str) -> Dict[str, Any]:
         return await self._questions._generate_dsa_question(difficulty, context)
+
+    async def generate_coding_question(
+        self,
+        *,
+        track: str,
+        difficulty: DifficultyLevel,
+        context: str,
+    ) -> Dict[str, Any]:
+        return await self._questions.generate_coding_question(
+            track=track,
+            difficulty=difficulty,
+            context=context,
+        )
 
     async def generate_follow_up(
         self,

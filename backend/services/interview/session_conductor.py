@@ -219,7 +219,7 @@ class SessionConductor:
         draft_line = f"LATEST CANDIDATE ANSWER DRAFT: {draft_answer}\n\n" if draft_answer else ""
 
         code_block = ""
-        if self.session_phase == "dsa":
+        if self.session_phase in {"dsa", "coding"}:
             age_seconds = max(0, int(_now() - self.last_code_change_at)) if self.last_code_change_at else 0
             preview = self.current_code[:150] + ("..." if len(self.current_code) > 150 else "")
             code_block = (
