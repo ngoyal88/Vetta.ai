@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 
 import { useAuth } from 'shared/context/AuthContext';
 import { api } from 'shared/services/api';
-import { getSkipPrecheck, setSkipPrecheck } from 'features/interview/utils/precheckStorage';
+import { getSkipPrecheck, setSkipPrecheck } from 'features/interview/preflight/precheckStorage';
 import { fetchUserSettings, persistUserSettings } from '../services/userSettingsService';
 
 export function useSettingsPage() {

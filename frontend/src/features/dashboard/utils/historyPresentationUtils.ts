@@ -1,8 +1,12 @@
 import type { InterviewHistoryItem } from 'shared/services/api';
 
+import {
+  getModeLabel,
+  type HistoryFilterTab,
+} from 'features/interview/domain/modeContract';
 import { getInterviewId, getInterviewStartedAt } from './interviewHistoryUtils';
 
-export type HistoryFilterTab = 'all' | 'role_targeted' | 'resume';
+export type { HistoryFilterTab } from 'features/interview/domain/modeContract';
 export type HistoryDateRange = '7d' | '14d' | '30d' | 'all';
 
 export type ScoreVerdict = {
@@ -42,12 +46,7 @@ export function getSessionCardTitle(interview: InterviewHistoryItem): string {
 
 export function getSessionCardSubtitle(interview: InterviewHistoryItem): string {
   const type = String(interview.interview_type || 'interview');
-  const modeLabel =
-    type === 'role_targeted'
-      ? 'Role-Targeted Mock'
-      : type === 'resume'
-        ? 'Resume Deep-Dive'
-        : type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const modeLabel = getModeLabel(type);
   const company = interview.target_company ? String(interview.target_company) : null;
   const focus = interview.interview_focus
     ? String(interview.interview_focus).replace(/_/g, ' ')

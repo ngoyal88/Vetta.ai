@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import {
   AI_INTERVIEW_HISTORY_PATH,
   AI_INTERVIEW_HUB_PATH,
-} from 'core/constants/interviewModes';
+} from 'features/interview/domain/modeContract';
 import { fadeUpWithDelay, getHeaderMotion } from 'features/modes/shared/utils/motion';
 
 import { useInterviewHistory } from '../hooks/useInterviewHistory';

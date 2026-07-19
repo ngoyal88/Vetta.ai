@@ -1,3 +1,5 @@
+import { getModeRoute } from 'features/interview/domain/modeContract';
+
 export type LayerVerdict = 'pass' | 'at_risk' | 'fail';
 export type BottleneckStage = 'ats_filter' | 'recruiter_screen' | 'hm_review' | 'none';
 export type FitBand = 'strong' | 'competitive' | 'stretch' | 'long_shot';
@@ -265,7 +267,7 @@ export function practiceInterviewHref(snapshotId: string, targetRole: string): s
     jd_fit_snapshot_id: snapshotId,
     target_role: targetRole,
   });
-  return `/ai-interview/role-targeted?${params.toString()}`;
+  return `${getModeRoute('role_targeted')}?${params.toString()}`;
 }
 
 export function canOpenBuilderFromReport(report: Pick<ComputeResponse, 'resume_id'>): boolean {

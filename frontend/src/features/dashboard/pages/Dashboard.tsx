@@ -22,6 +22,27 @@ import {
 } from '../utils/interviewHistoryUtils';
 import { useVaultLibrary } from 'features/vault/hooks/useVaultLibrary';
 
+import {
+  getModeByApiType,
+  getModeRoute,
+  QUICK_LAUNCH_MODES,
+  supportsReplay,
+} from 'features/interview/domain/modeContract';
+import type { ModeSlug } from 'features/interview/domain/modeContract';
+
+function getQuickLaunchIcon(slug: ModeSlug): React.ElementType {
+  switch (slug) {
+    case 'resume_deep_dive':
+      return FileSearch;
+    case 'pair_programming':
+      return Code2;
+    case 'pressure':
+      return Gauge;
+    default:
+      return Target;
+  }
+}
+
 type QuickLaunchItem = {
   id: string;
   title: string;
@@ -34,44 +55,17 @@ type QuickLaunchItem = {
   requiresResume?: boolean;
 };
 
-const QUICK_LAUNCH_ITEMS: QuickLaunchItem[] = [
-  {
-    id: 'role-targeted',
-    title: 'Role-Targeted',
-    description: 'Simulate interviews tailored to your saved job descriptions.',
-    icon: Target,
-    accent: 'primary',
-    href: '/ai-interview/role-targeted',
-    badge: 'Recommended',
-    status: 'active',
-  },
-  {
-    id: 'resume-deep-dive',
-    title: 'Resume Deep-Dive',
-    description: 'Defend your experience point-by-point against AI scrutiny.',
-    icon: FileSearch,
-    accent: 'secondary',
-    href: '/ai-interview/resume-deep-dive',
-    status: 'active',
-    requiresResume: true,
-  },
-  {
-    id: 'pressure-testing',
-    title: 'Pressure Testing',
-    description: 'Stress test decisions with timed constraints and curveballs.',
-    icon: Gauge,
-    accent: 'tertiary',
-    status: 'soon',
-  },
-  {
-    id: 'pair-programming',
-    title: 'Pair Programming AI',
-    description: 'Collaborate on live coding sessions with real-time feedback.',
-    icon: Code2,
-    accent: 'tertiary',
-    status: 'soon',
-  },
-];
+const QUICK_LAUNCH_ITEMS: QuickLaunchItem[] = QUICK_LAUNCH_MODES.map((mode) => ({
+  id: mode.catalogSlug,
+  title: mode.title,
+  description: mode.description,
+  icon: getQuickLaunchIcon(mode.catalogSlug),
+  accent: mode.accent,
+  href: mode.status === 'active' ? mode.href : undefined,
+  badge: mode.badge,
+  status: mode.status,
+  requiresResume: mode.requiresResume,
+}));
 
 function RadarIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -330,12 +324,10 @@ const Dashboard: React.FC = () => {
 
       const score = normalizeScore(item.scores?.overall ?? null);
       const type = String(item.interview_type || '');
-      const canReplay = type === 'role_targeted' || type === 'resume';
-      const actionHref = type === 'resume'
-        ? '/ai-interview/resume-deep-dive'
-        : type === 'role_targeted'
-          ? '/ai-interview/role-targeted'
-          : '/ai-interview/history';
+      const canReplay = supportsReplay(type);
+      const mode = getModeByApiType(type);
+      const actionHref =
+        canReplay && mode?.catalogSlug ? getModeRoute(mode.catalogSlug) : '/ai-interview/history';
       const actionLabel = canReplay ? 'Practice Again' : 'View Details';
 
       return {
