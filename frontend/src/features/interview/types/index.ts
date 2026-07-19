@@ -1,5 +1,8 @@
 import type { Room } from "livekit-client";
 import type React from "react";
+import type { CodeEditorHandle } from "features/interview/coding/CodeEditor";
+
+export type { CodeEditorHandle };
 
 export type BannerHandler = (type: string, message: string, autoDismissMs?: number | null) => number | null;
 
@@ -7,13 +10,6 @@ export type BannerOptions = {
   addBanner?: BannerHandler;
   removeBanner?: (id: number) => void;
   removeBannerByType?: (type: string) => void;
-};
-
-export type CodeEditorHandle = {
-  getValue?: () => string;
-  setValue?: (value: string) => void;
-  getLanguage?: () => string;
-  setLanguage?: (lang: string) => void;
 };
 
 export type LiveKitOptions = BannerOptions & {

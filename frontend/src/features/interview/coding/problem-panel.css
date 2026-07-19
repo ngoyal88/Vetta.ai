@@ -1,0 +1,351 @@
+/* Coding problem panel — standalone + embedded in Pair Programming room */
+
+.pq-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pq-root--card {
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-low) 70%, transparent);
+}
+
+.pq-header {
+  flex: none;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 1rem 1rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-low) 92%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.pq-root--embedded .pq-header {
+  padding: 0 0 0;
+  background: transparent;
+  backdrop-filter: none;
+  border-bottom: none;
+}
+
+.pq-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.pq-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-on-surface);
+  text-wrap: balance;
+}
+
+.pq-difficulty {
+  flex-shrink: 0;
+  padding: 0.1875rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.pq-difficulty--easy {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+.pq-difficulty--medium {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+}
+
+.pq-difficulty--hard {
+  color: var(--color-error);
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+}
+
+.pq-difficulty--unknown {
+  color: var(--color-outline);
+  border-color: color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container) 50%, transparent);
+}
+
+.pq-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 0.75rem;
+}
+
+.pq-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-lowest) 60%, transparent);
+}
+
+.pq-tabs {
+  display: flex;
+  gap: 0.125rem;
+  margin: 0 -0.25rem;
+}
+
+.pq-tab {
+  position: relative;
+  padding: 0.5rem 0.875rem;
+  border: none;
+  border-radius: 0.375rem 0.375rem 0 0;
+  background: transparent;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.pq-tab:hover {
+  color: var(--color-on-surface-variant);
+  background: color-mix(in srgb, var(--color-surface-container) 35%, transparent);
+}
+
+.pq-tab--active {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.pq-tab--active::after {
+  content: "";
+  position: absolute;
+  left: 0.625rem;
+  right: 0.625rem;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--color-primary);
+}
+
+.pq-tab__count {
+  margin-left: 0.25rem;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.pq-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.pq-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.pq-root--embedded .pq-scroll {
+  padding: 0.75rem 0 0;
+}
+
+.pq-body {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: var(--color-on-surface-variant);
+}
+
+.pq-body .lc-content {
+  color: var(--color-on-surface);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.pq-body .lc-content p {
+  margin: 0 0 0.75rem;
+}
+
+.pq-body .lc-content code {
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: var(--color-surface-container-lowest);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.8125rem;
+  color: var(--color-secondary);
+}
+
+.pq-empty {
+  margin: 0;
+  padding: 2rem 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--color-outline);
+  font-style: italic;
+}
+
+.pq-section-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+}
+
+.pq-constraints {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pq-constraint {
+  padding: 0.4375rem 0.625rem;
+  border-left: 2px solid var(--color-primary);
+  border-radius: 0 0.375rem 0.375rem 0;
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.8125rem;
+  color: var(--color-on-surface);
+}
+
+.pq-complexity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  color: var(--color-outline);
+}
+
+.pq-inline-code {
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: var(--color-surface-container-lowest);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--color-secondary);
+}
+
+.pq-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.pq-example {
+  border-radius: 0.625rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-surface-container-low) 55%, transparent);
+}
+
+.pq-example__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4375rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container) 35%, transparent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+}
+
+.pq-example__body {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.pq-io-field + .pq-io-field {
+  margin-top: 0.125rem;
+}
+
+.pq-io-pre {
+  margin: 0.25rem 0 0;
+  padding: 0.5625rem 0.6875rem;
+  border-radius: 0.4375rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+  background: var(--color-surface-container-lowest);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-on-surface);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.pq-io-pre--output {
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+  color: color-mix(in srgb, var(--color-success) 88%, white);
+}
+
+.pq-explanation {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--color-on-surface-variant);
+}
+
+.pq-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.pq-hint {
+  display: flex;
+  gap: 0.625rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.5625rem;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 32%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 9%, transparent);
+}
+
+.pq-hint__icon {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+  color: var(--color-warning);
+}
+
+.pq-hint__text {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--color-warning) 82%, white);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pq-tab {
+    transition: none;
+  }
+}

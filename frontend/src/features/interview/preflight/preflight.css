@@ -1,0 +1,88 @@
+/* Pre-flight diagnostic — local styles only */
+
+.preflight-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-luminous);
+}
+
+.preflight-section {
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  transition:
+    border-color var(--duration) var(--ease-out),
+    opacity var(--duration) var(--ease-out);
+}
+
+.preflight-section--active {
+  border-color: rgba(173, 198, 255, 0.22);
+}
+
+.preflight-section--done {
+  opacity: 0.88;
+}
+
+.preflight-section__body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms var(--ease-out);
+}
+
+.preflight-section__body--open {
+  grid-template-rows: 1fr;
+}
+
+.preflight-section__body-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.preflight-wave-bar {
+  transform-origin: center bottom;
+  transition: height 75ms linear;
+}
+
+.preflight-wave-bar--idle {
+  animation: preflight-wave 1.4s ease-in-out infinite alternate;
+}
+
+.preflight-pulse-dot {
+  animation: preflight-dot 2s ease-in-out infinite;
+}
+
+@keyframes preflight-wave {
+  0% {
+    transform: scaleY(0.35);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes preflight-dot {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preflight-wave-bar--idle,
+  .preflight-pulse-dot {
+    animation: none;
+  }
+
+  .preflight-section__body {
+    transition: none;
+  }
+}

@@ -1,12 +1,11 @@
 import { Suspense, lazy } from 'react';
-import { Outlet, Route, useSearchParams } from 'react-router-dom';
+import { Outlet, Route } from 'react-router-dom';
 
 import VaultLayout from 'features/vault/layout/VaultLayout';
 import AppShell from 'shared/layout/AppShell';
 import ErrorBoundary from 'shared/components/ErrorBoundary';
 import PageLoadingState from 'shared/components/PageLoadingState';
 import PrivateRoute from 'shared/components/PrivateRoute';
-import { useBackendHealth } from 'shared/context/BackendHealthContext';
 
 const Dashboard = lazy(() => import('features/dashboard/pages/Dashboard'));
 const SettingsPage = lazy(() => import('features/dashboard/pages/SettingsPage'));
@@ -29,23 +28,7 @@ const VaultVersionsPage = lazy(() => import('features/vault/pages/VaultVersionsP
 const VaultVersionDetailPage = lazy(() => import('features/vault/pages/VaultVersionDetailPage'));
 const ResumeBuilderPage = lazy(() => import('features/resume-builder/pages/ResumeBuilderPage'));
 
-const InterviewRoom = lazy(() => import('features/interview/pages/InterviewRoom'));
-const InterviewRoomLiveKit = lazy(() => import('features/interview/pages/InterviewRoomLiveKit'));
-
-function useInterviewTransport() {
-  const [searchParams] = useSearchParams();
-  const { livekitAvailable, healthLoading } = useBackendHealth();
-  const envForce = import.meta.env.VITE_USE_LIVEKIT;
-  if (envForce === 'true') return true;
-  if (envForce === 'false') return false;
-  if (searchParams.get('transport') === 'ws') return false;
-  try {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('force_ws')) return false;
-  } catch {
-    /* ignore */
-  }
-  return !healthLoading && livekitAvailable;
-}
+const InterviewRoom = lazy(() => import('features/interview/session/InterviewRoom'));
 
 function RouteFallback() {
   return <PageLoadingState variant="shell" minHeightClassName="min-h-[40vh]" />;
@@ -60,8 +43,7 @@ function LazyPage({ children }: { children: React.ReactNode }) {
 }
 
 function InterviewRoute() {
-  const useLiveKit = useInterviewTransport();
-  return useLiveKit ? <InterviewRoomLiveKit /> : <InterviewRoom />;
+  return <InterviewRoom />;
 }
 
 function PrivateAppShell() {

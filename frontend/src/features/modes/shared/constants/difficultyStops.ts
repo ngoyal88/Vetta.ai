@@ -13,6 +13,12 @@ export const ROLE_TARGETED_DIFFICULTY_STOPS: readonly DifficultyStop[] = [
   { value: 3, stopLabel: 'Brutal', badge: 'Hard (FAANG)', api: 'hard' },
 ] as const;
 
+export const PAIR_PROGRAMMING_DIFFICULTY_STOPS: readonly DifficultyStop[] = [
+  { value: 1, stopLabel: 'Easy', badge: 'Easy', api: 'easy' },
+  { value: 2, stopLabel: 'Medium', badge: 'Medium', api: 'medium' },
+  { value: 3, stopLabel: 'Hard', badge: 'Hard', api: 'hard' },
+] as const;
+
 export const RESUME_SCAN_DEPTH_STOPS: readonly DifficultyStop[] = [
   { value: 1, stopLabel: 'Surface (Fast)', badge: 'Surface (Fast)', api: 'easy' },
   { value: 2, stopLabel: 'Balanced', badge: 'Balanced', api: 'medium' },
