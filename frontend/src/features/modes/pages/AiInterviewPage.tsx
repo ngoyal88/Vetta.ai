@@ -5,7 +5,7 @@ import { BarChart3, Clock, Lock, Sparkles } from "lucide-react";
 import {
   AI_INTERVIEW_ANALYTICS_PATH,
   AI_INTERVIEW_HISTORY_PATH,
-} from "core/constants/interviewModes";
+} from "features/interview/domain/modeContract";
 
 import {
   ACTIVE_MODES,

@@ -2,7 +2,7 @@ import React from 'react';
 import { ChevronRight, Folder, FolderOpen, History, LineChart } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-import { AI_INTERVIEW_HISTORY_PATH } from 'core/constants/interviewModes';
+import { AI_INTERVIEW_HISTORY_PATH } from 'features/interview/domain/modeContract';
 import { SettingsSection } from './SettingsSection';
 
 const DATA_LINKS = [

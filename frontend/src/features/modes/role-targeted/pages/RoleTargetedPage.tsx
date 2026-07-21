@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
+import { PreSessionCheckerWithBrowserCheck } from 'features/interview/preflight/PreSessionChecker';
 import { SetupProgressSteps } from 'features/modes/shared/components/SetupProgressSteps';
 import { getCardMotion, getHeaderMotion } from 'features/modes/shared/utils/motion';
 import { CalibrationSection } from '../components/CalibrationSection';

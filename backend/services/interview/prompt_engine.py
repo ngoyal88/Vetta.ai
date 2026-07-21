@@ -3,7 +3,7 @@ from typing import Any, AsyncGenerator, Optional, List, Dict
 
 from utils.logger import get_logger
 from models.interview import InterviewType
-from services.interview.llm_engine import LLMEngine
+from services.platform.llm import LLMEngine
 from services.interview.prompt_contracts import build_follow_up_prompt
 from services.resume.skills_normalizer import flatten_skills_from_profile
 

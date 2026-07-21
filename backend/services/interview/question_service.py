@@ -1,7 +1,7 @@
 from utils.logger import get_logger
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
-from services.interview.llm_engine import LLMEngine
+from services.platform.llm import LLMEngine
 from models.interview import InterviewType, DifficultyLevel
 from services.interview.leetcode_service import DSA_EXCLUDE_TOPICS, LeetCodeService
 from services.interview.problem_rewrite_service import rewrite_to_story, generate_starter_code
@@ -32,18 +32,29 @@ class QuestionService:
     ) -> Dict[str, Any]:
         """Generate contextual first question (context is pre-built by the facade)."""
 
-        if interview_type == InterviewType.DSA:
+        from services.interview.modes.registry import is_coding_interview_type
+
+        if is_coding_interview_type(interview_type):
             q = await self._generate_dsa_question(difficulty, context)
             return {"question": q, "type": "coding", "timestamp": datetime.now(timezone.utc).isoformat()}
-        elif interview_type == InterviewType.CUSTOM:
-            q = await self._generate_custom_role_question(custom_role, difficulty, context)
-            return {"question": q, "type": "custom_role", "timestamp": datetime.now(timezone.utc).isoformat()}
-        elif interview_type == InterviewType.ROLE_TARGETED:
+        if interview_type == InterviewType.ROLE_TARGETED:
             q = await self._generate_role_targeted_question(difficulty, context)
             return {"question": q, "type": "role_targeted", "timestamp": datetime.now(timezone.utc).isoformat()}
-        else:
-            q = await self._generate_general_question(interview_type, difficulty, context)
-            return {"question": q, "type": interview_type.value, "timestamp": datetime.now(timezone.utc).isoformat()}
+        q = await self._generate_general_question(interview_type, difficulty, context)
+        return {"question": q, "type": interview_type.value, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    async def generate_coding_question(
+        self,
+        *,
+        track: str,
+        difficulty: DifficultyLevel,
+        context: str,
+    ) -> Dict[str, Any]:
+        """Track-aware coding question. DSA reuses the existing problem pipeline."""
+        track_id = (track or "dsa").strip().lower() or "dsa"
+        if track_id != "dsa":
+            raise ValueError(f"Coding track '{track_id}' is not implemented")
+        return await self._generate_dsa_question(difficulty, context)
 
     async def generate_resume_deep_dive_questions(
         self,
@@ -326,43 +337,6 @@ starter_code is optional."""
             logger.error(f"❌ Failed to parse DSA question JSON: {e}", exc_info=True)
             return self._get_fallback_dsa_question(difficulty)
 
-    async def _generate_custom_role_question(
-        self,
-        role: str,
-        difficulty: DifficultyLevel,
-        context: str
-    ) -> Dict[str, Any]:
-        """Generate question for custom role"""
-        prompt = f"""You are interviewing for: {role}
-Difficulty: {difficulty.value}
-{context}
-
-Generate ONE technical question for this role. Make it specific and relevant.
-
-Return ONLY valid JSON:
-{{
-    "question": "Your question here",
-    "evaluation_criteria": "Key points to look for in the answer"
-}}"""
-
-        contract = await execute_json_contract(
-            template_id="first_question_custom_role",
-            engine=self._engine,
-            prompt=prompt,
-            temperature=0.7,
-            fallback=normalize_question_payload({}, fallback_question="Tell me about a difficult technical decision you made recently.", difficulty=difficulty, q_type="custom_role"),
-            normalizer=lambda p: normalize_question_payload(
-                p,
-                fallback_question="Tell me about a difficult technical decision you made recently.",
-                difficulty=difficulty,
-                q_type="custom_role",
-            ),
-            empty_fallback="{}",
-        )
-        payload = contract.value
-        payload["role"] = role
-        return payload
-
     async def _generate_role_targeted_question(
         self,
         difficulty: DifficultyLevel,
@@ -416,11 +390,7 @@ Return ONLY valid JSON:
     ) -> Dict[str, Any]:
         """Generate general technical/behavioral question"""
         type_prompts = {
-            InterviewType.FRONTEND: "frontend development (React, JavaScript, CSS, performance)",
-            InterviewType.BACKEND: "backend development (APIs, databases, scalability)",
-            InterviewType.CORE_CS: "computer science fundamentals (OS, Networks, DBMS)",
-            InterviewType.BEHAVIORAL: "behavioral scenarios (teamwork, problem-solving, conflict resolution)",
-            InterviewType.RESUME_BASED: f"their resume and experience{context}"
+            InterviewType.RESUME_BASED: f"their resume and experience{context}",
         }
 
         topic = type_prompts.get(interview_type, "software engineering")

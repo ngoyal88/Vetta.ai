@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 
 from config import get_settings
 from utils.logger import get_logger
-from utils.redis_client import get_session, update_session
+from services.interview.session_store import persist_ws_session_blob
+from utils.redis_client import get_session
 from services.interview.prompt_engine import PromptEngine
 from services.interview.contracts.session_events import SessionEvent, SessionEventType
 from services.interview.contracts.session_events import SessionEvent, SessionStateMachine
@@ -50,10 +51,8 @@ class AnswerProcessor:
 
     async def prepare_followup(self, session_id: str, user_answer: str) -> Dict[str, Any]:
         """Store the current answer and return context for generating the next question."""
-        from services.interview.interview_service import (
-            _normalize_question_entry,
-            _parse_interview_type,
-        )
+        from services.interview.interview_service import _normalize_question_entry
+        from services.interview.modes.registry import parse_interview_type
 
         session_key = f"interview:{session_id}"
         session_data = await get_session(session_key)
@@ -81,7 +80,9 @@ class AnswerProcessor:
                 },
             }
 
-        interview_type = _parse_interview_type(session_data.get("interview_type", "dsa"))
+        interview_type = parse_interview_type(
+            session_data.get("interview_type", "role_targeted")
+        )
         normalized_current_question = _normalize_question_entry(
             questions[current_q_index],
             default_type=interview_type.value,
@@ -104,7 +105,7 @@ class AnswerProcessor:
         if len(responses) >= max_questions:
             session_data["responses"] = responses
             session_data["current_question_index"] = current_q_index + 1
-            await update_session(session_key, session_data, expire_seconds=self._session_ttl)
+            await persist_ws_session_blob(session_key, session_data, session_ttl=self._session_ttl)
             logger.info(f"Max questions ({max_questions}) reached for {session_id}")
             return {
                 "done": True,
@@ -138,10 +139,10 @@ class AnswerProcessor:
         prepared["session_data"]["questions"] = prepared["questions"]
         prepared["session_data"]["responses"] = prepared["responses"]
         prepared["session_data"]["current_question_index"] = prepared["current_q_index"] + 1
-        await update_session(
+        await persist_ws_session_blob(
             prepared["session_key"],
             prepared["session_data"],
-            expire_seconds=self._session_ttl,
+            session_ttl=self._session_ttl,
         )
         logger.info(
             "✅ Stored response for Q%s and generated next question.",

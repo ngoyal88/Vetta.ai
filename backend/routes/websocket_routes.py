@@ -1,13 +1,13 @@
-# DEPRECATED: WebSocket interview routes backed by interview_websocket.py.
-# The /ws/interview endpoint is superseded by the LiveKit agent pipeline.
-# The /ws/stt endpoint is a dev-only debug tool.
-# This file is not mounted in main.py and can be deleted.
+# LiveKit-failure fallback: /ws/interview/{session_id} (frozen — do not extend).
+# Primary interview transport is services/interview/agent/ (LiveKit).
+# Mount controlled by interview_websocket_fallback_enabled in config.py.
 """
-WebSocket routes for real-time interview.
+WebSocket routes for interview fallback when LiveKit is unavailable.
 """
 import asyncio
 import contextlib
 import json
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, WebSocket
 from firebase_admin import auth as firebase_auth
@@ -16,30 +16,40 @@ from config import get_settings
 from services.integrations import DeepgramSTTService
 from services.interview import InterviewWebSocketHandler
 from utils.logger import get_logger
+from utils.redis_client import get_session
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
-# Legacy/no-prefix router for backwards compatibility with clients that connect to
-# /interview/{session_id} instead of /ws/interview/{session_id}.
-legacy_router = APIRouter(tags=["WebSocket"])
 logger = get_logger("WebSocketRoutes")
 settings = get_settings()
 
 
+def session_authorized_for_ws(session_data: Optional[Dict[str, Any]], uid: str) -> bool:
+    """Fail-closed ownership check for WS fallback (mirrors require_session_owner)."""
+    if not session_data:
+        return False
+    owner = session_data.get("user_id") or session_data.get("uid")
+    if not owner:
+        return False
+    return str(owner) == str(uid)
+
+
+async def _reject_websocket(websocket: WebSocket, message: str, code: int = 1008) -> None:
+    await websocket.accept()
+    await websocket.send_json({"type": "error", "message": message})
+    await websocket.close(code=code)
+
+
 async def _handle_interview_websocket(websocket: WebSocket, session_id: str) -> None:
     """
-    WebSocket endpoint for real-time interview
-    
-    Client sends:
-    - Audio chunks (bytes)
-    - Control messages (JSON)
-    
-    Server sends:
-    - Questions with audio
-    - Transcripts
-    - Status updates
-    - Feedback
+    WebSocket fallback endpoint for real-time interview when LiveKit is unavailable.
+
+    Client sends audio chunks (bytes) and control messages (JSON).
+    Server sends questions, transcripts, status, and feedback.
     """
-    # Auth: try Firebase ID token via Authorization header; fallback to API_TOKEN query/header
+    if not settings.interview_websocket_fallback_enabled:
+        await _reject_websocket(websocket, "WebSocket fallback is disabled")
+        return
+
     expected_api_token = settings.api_token or None
     auth_header = websocket.headers.get("authorization") or ""
     header_parts = auth_header.split()
@@ -47,7 +57,6 @@ async def _handle_interview_websocket(websocket: WebSocket, session_id: str) -> 
     query_token = websocket.query_params.get("token")
 
     uid = None
-    # Prefer Firebase token if present (header first, then query param)
     if header_token:
         try:
             decoded = firebase_auth.verify_id_token(header_token)
@@ -62,15 +71,21 @@ async def _handle_interview_websocket(websocket: WebSocket, session_id: str) -> 
         except Exception:
             uid = None
 
-    # Fallback to API token (for testing tools)
     if uid is None and expected_api_token:
         if header_token == expected_api_token or query_token == expected_api_token:
             uid = "api_token_user"
 
     if not uid:
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "message": "Unauthorized"})
-        await websocket.close(code=1008)
+        await _reject_websocket(websocket, "Unauthorized")
+        return
+
+    session_data = await get_session(f"interview:{session_id}")
+    if not session_authorized_for_ws(session_data, uid):
+        await _reject_websocket(websocket, "Session not found or not authorized", code=1008)
+        return
+
+    if not settings.deepgram_api_key:
+        await _reject_websocket(websocket, "Speech service not configured", code=1011)
         return
 
     handler = InterviewWebSocketHandler(websocket, session_id, user_id=uid)
@@ -82,28 +97,9 @@ async def interview_websocket(websocket: WebSocket, session_id: str):
     await _handle_interview_websocket(websocket, session_id)
 
 
-@legacy_router.websocket("/interview/{session_id}")
-async def interview_websocket_legacy(websocket: WebSocket, session_id: str):
-    await _handle_interview_websocket(websocket, session_id)
-
-
 @router.websocket("/stt")
 async def stt_websocket(websocket: WebSocket):
-    """Minimal STT-only websocket for debugging Deepgram.
-
-    Client sends:
-    - Binary frames: raw PCM16 audio bytes (16kHz, mono)
-    - Text frames (JSON): {"type":"ping"|"stop"}
-
-    Server sends (JSON):
-    - {"type":"transcript","text":...,"is_final":...}
-    - {"type":"status","status":...}
-    - {"type":"error","message":...}
-    """
-    # Auth: browsers can't set custom headers for WebSocket.
-    # Accept either:
-    # - Authorization: Bearer <api_token>
-    # - Query string: /ws/stt?token=<api_token>
+    """Minimal STT-only websocket for debugging Deepgram."""
     expected_token = settings.api_token or None
     got_header = websocket.headers.get("authorization")
     got_query = websocket.query_params.get("token")
@@ -125,7 +121,6 @@ async def stt_websocket(websocket: WebSocket):
             pass
 
     def on_transcript(text: str, is_final: bool):
-        # Deepgram callback is sync; schedule async send.
         async def _send():
             await websocket.send_json({"type": "transcript", "text": text, "is_final": is_final})
 
@@ -155,7 +150,6 @@ async def stt_websocket(websocket: WebSocket):
             try:
                 msg = json.loads(text_payload)
             except Exception:
-                # Allow plain-text stop/ping for convenience
                 msg = {"type": (text_payload or "").strip()}
 
             msg_type = (msg.get("type") or "").strip().lower()
@@ -164,7 +158,6 @@ async def stt_websocket(websocket: WebSocket):
             elif msg_type in ("stop", "stop_recording", "answer_complete"):
                 await send_status("finalizing")
                 await stt.finalize()
-                # Give Deepgram a brief window to emit final transcript(s)
                 await asyncio.sleep(0.5)
                 await send_status("done")
                 break
@@ -172,7 +165,7 @@ async def stt_websocket(websocket: WebSocket):
                 break
 
     except Exception as e:
-        logger.error(f"❌ STT websocket error: {e}", exc_info=True)
+        logger.error(f"STT websocket error: {e}", exc_info=True)
         with contextlib.suppress(Exception):
             await websocket.send_json({"type": "error", "message": "STT websocket error"})
     finally:

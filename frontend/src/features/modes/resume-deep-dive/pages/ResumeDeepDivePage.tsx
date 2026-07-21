@@ -4,10 +4,11 @@ import { ArrowLeft, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Link, useNavigate } from 'react-router-dom';
 
+import { apiTypeFromCatalogSlug } from 'features/interview/domain/modeContract';
 import { useAuth } from 'shared/context/AuthContext';
 import { api } from 'shared/services/api';
-import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
-import { getSkipPrecheck } from 'features/interview/utils/precheckStorage';
+import { PreSessionCheckerWithBrowserCheck } from 'features/interview/preflight/PreSessionChecker';
+import { getSkipPrecheck } from 'features/interview/preflight/precheckStorage';
 import { AnalysisParametersSection } from '../components/AnalysisParametersSection';
 import { IntelligenceSettingsSection } from '../components/IntelligenceSettingsSection';
 import { LaunchFooter } from '../components/LaunchFooter';
@@ -116,19 +117,17 @@ const ResumeDeepDivePage: React.FC = () => {
           ? profile.years_experience
           : null;
 
-      const response = await api.startInterview(
-        currentUser.uid,
-        'resume',
+      const response = await api.startInterview({
+        interviewType: apiTypeFromCatalogSlug('resume_deep_dive'),
         difficulty,
-        profile,
-        roleValue,
-        resumeDisplayName(profile) || currentUser.displayName || 'Candidate',
-        yearsValue,
-        { targetRole: roleValue, interviewFocus: 'mixed' },
-      );
+        resumeData: profile,
+        candidateName: resumeDisplayName(profile) || currentUser.displayName || 'Candidate',
+        yearsExperience: yearsValue,
+        config: {},
+      });
 
       const sessionId = response.session_id;
-      sessionStorage.setItem(`interview_type_${sessionId}`, 'resume');
+      sessionStorage.setItem(`interview_type_${sessionId}`, apiTypeFromCatalogSlug('resume_deep_dive'));
       try {
         window.localStorage.removeItem('interviewConfig');
       } catch {

@@ -4,7 +4,8 @@ import toast from 'react-hot-toast';
 
 import { api } from 'shared/services/api';
 import { useAuth } from 'shared/context/AuthContext';
-import { getSkipPrecheck } from 'features/interview/utils/precheckStorage';
+import { getSkipPrecheck } from 'features/interview/preflight/precheckStorage';
+import { supportsReplay } from 'features/interview/domain/modeContract';
 import { getInterviewId } from '../utils/interviewHistoryUtils';
 import {
   filterHistoryItems,
@@ -101,7 +102,7 @@ export function useHistoryPageState() {
     async (sessionId: string) => {
       const source = items.find((item) => getInterviewId(item) === sessionId);
       if (!source) return;
-      if (source.interview_type !== 'role_targeted' && source.interview_type !== 'resume') return;
+      if (!supportsReplay(source.interview_type)) return;
       if (!currentUser) {
         toast.error('Please sign in again');
         return;
@@ -110,22 +111,19 @@ export function useHistoryPageState() {
       const isRoleTargeted = source.interview_type === 'role_targeted';
       try {
         setStartingPracticeId(sessionId);
-        const response = await api.startInterview(
-          currentUser.uid,
-          isRoleTargeted ? 'role_targeted' : 'resume',
-          String(source.difficulty || 'medium'),
-          undefined,
-          isRoleTargeted ? String(source.target_role || source.custom_role || '') : null,
-          String(source.candidate_name || currentUser.displayName || 'Candidate'),
-          typeof source.years_experience === 'number' ? source.years_experience : null,
-          isRoleTargeted
+        const response = await api.startInterview({
+          interviewType: isRoleTargeted ? 'role_targeted' : 'resume',
+          difficulty: String(source.difficulty || 'medium'),
+          candidateName: String(source.candidate_name || currentUser.displayName || 'Candidate'),
+          yearsExperience: typeof source.years_experience === 'number' ? source.years_experience : null,
+          config: isRoleTargeted
             ? {
-                targetCompany: source.target_company ? String(source.target_company) : null,
-                targetRole: String(source.target_role || source.custom_role || ''),
-                interviewFocus: source.interview_focus ? String(source.interview_focus) : 'mixed',
+                target_role: String(source.target_role || source.custom_role || ''),
+                target_company: source.target_company ? String(source.target_company) : null,
+                interview_focus: source.interview_focus ? String(source.interview_focus) : 'mixed',
               }
             : {},
-        );
+        });
 
         const newSessionId = response.session_id;
         sessionStorage.setItem(`interview_type_${newSessionId}`, isRoleTargeted ? 'role_targeted' : 'resume');
@@ -158,9 +156,7 @@ export function useHistoryPageState() {
     if (id) navigate(`/interview/${id}`);
   };
 
-  const canPracticeAgain =
-    selectedInterview?.interview_type === 'role_targeted' ||
-    selectedInterview?.interview_type === 'resume';
+  const canPracticeAgain = supportsReplay(selectedInterview?.interview_type);
 
   const isPracticing = Boolean(selectedId && startingPracticeId === selectedId);
   const isDeleting = Boolean(selectedId && deletingId === selectedId);

@@ -1,0 +1,557 @@
+/* Pair Programming / coding room — Monaco workspace */
+
+.ce-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+  background: var(--color-surface-container-lowest, #060e20);
+  overflow: hidden;
+}
+
+.ce-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-low) 85%, transparent);
+  flex-wrap: wrap;
+}
+
+.ce-toolbar__left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ce-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.375rem;
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  background: color-mix(in srgb, var(--color-surface-container) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+  white-space: nowrap;
+}
+
+.ce-file-chip__dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: var(--color-tertiary);
+  flex-shrink: 0;
+}
+
+.ce-lang-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.125rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-lowest) 60%, transparent);
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.ce-lang-btn {
+  flex-shrink: 0;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 0.375rem;
+  border: 1px solid transparent;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+  background: transparent;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+}
+
+.ce-lang-btn:hover:not(:disabled) {
+  color: var(--color-on-surface-variant);
+  background: color-mix(in srgb, var(--color-surface-container-high) 50%, transparent);
+}
+
+.ce-lang-btn--active {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+.ce-lang-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.ce-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.ce-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 45%, transparent);
+  background: transparent;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  cursor: pointer;
+}
+
+.ce-btn-ghost:hover:not(:disabled) {
+  color: var(--color-on-surface);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.ce-btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ce-btn-ghost:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.ce-btn-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.875rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-tertiary) 45%, transparent);
+  background: color-mix(in srgb, var(--color-tertiary) 18%, transparent);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-tertiary);
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  cursor: pointer;
+}
+
+.ce-btn-run:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-tertiary) 28%, transparent);
+  border-color: color-mix(in srgb, var(--color-tertiary) 60%, transparent);
+}
+
+.ce-btn-run:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ce-btn-run:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-tertiary) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.ce-editor-pane {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.ce-editor-pane .monaco-editor,
+.ce-editor-pane .monaco-editor-background {
+  background: var(--color-surface-container-lowest, #060e20) !important;
+}
+
+.ce-output {
+  flex: none;
+  border-top: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-low) 90%, transparent);
+  max-height: min(40vh, 14rem);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ce-output__tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+  flex-shrink: 0;
+}
+
+.ce-output__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.ce-output__tab:hover {
+  color: var(--color-on-surface-variant);
+  background: color-mix(in srgb, var(--color-surface-container) 40%, transparent);
+}
+
+.ce-output__tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+
+.ce-output__tab--pass {
+  color: var(--color-success);
+}
+
+.ce-output__tab--pass.ce-output__tab--active {
+  border-bottom-color: var(--color-success);
+}
+
+.ce-output__tab--fail {
+  color: var(--color-error);
+}
+
+.ce-output__tab--fail.ce-output__tab--active {
+  border-bottom-color: var(--color-error);
+}
+
+.ce-output__tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: -2px;
+}
+
+.ce-output__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.ce-io-block {
+  margin-bottom: 0.75rem;
+}
+
+.ce-io-label {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+}
+
+.ce-io-pre {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+  background: var(--color-surface-container-lowest, #060e20);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-on-surface);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.ce-io-pre--muted {
+  color: var(--color-on-surface-variant);
+  font-style: italic;
+}
+
+.ce-io-pre--pass {
+  border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+  color: color-mix(in srgb, var(--color-success) 85%, white);
+}
+
+.ce-io-pre--fail {
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  color: var(--color-error);
+}
+
+.ce-error-card {
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+}
+
+.ce-error-card__title {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-error);
+}
+
+.ce-error-card__body {
+  margin: 0;
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-error) 90%, white);
+  white-space: pre-wrap;
+}
+
+.ce-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.ce-summary--pass {
+  border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  color: color-mix(in srgb, var(--color-success) 90%, white);
+}
+
+.ce-summary--fail {
+  border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  color: var(--color-error);
+}
+
+.ce-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ce-result-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.ce-result-chip--pass {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+.ce-result-chip--fail {
+  color: var(--color-error);
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+}
+
+.ce-result-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+}
+
+.ce-result-row--pass {
+  color: var(--color-success);
+}
+
+.ce-result-row--fail {
+  color: var(--color-error);
+}
+
+.ce-result-row__time {
+  margin-left: auto;
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  color: var(--color-outline);
+  font-variant-numeric: tabular-nums;
+}
+
+.ce-empty-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-outline);
+  font-style: italic;
+}
+
+@media (max-width: 768px) {
+  .ce-file-chip {
+    display: none;
+  }
+
+  .ce-lang-btn {
+    padding: 0.3125rem 0.5rem;
+    font-size: 0.625rem;
+  }
+
+  .ce-btn-ghost span,
+  .ce-btn-run span {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ce-lang-btn,
+  .ce-btn-ghost,
+  .ce-btn-run,
+  .ce-output__tab {
+    transition: none;
+  }
+}
+
+/* Problem panel (embedded in coding room) */
+
+.pq-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.pq-tab {
+  padding: 0.375rem 0.75rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0.375rem 0.375rem 0 0;
+  background: transparent;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.pq-tab:hover {
+  color: var(--color-on-surface-variant);
+  background: color-mix(in srgb, var(--color-surface-container) 35%, transparent);
+}
+
+.pq-tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+
+.pq-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.pq-body {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--color-on-surface-variant);
+}
+
+.pq-body .lc-content {
+  color: var(--color-on-surface);
+}
+
+.pq-inline-code {
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: var(--color-surface-container-lowest);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--color-secondary);
+}
+
+.pq-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  color: var(--color-outline);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-low) 50%, transparent);
+}
+
+.pq-example {
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-surface-container-low) 40%, transparent);
+}
+
+.pq-example__head {
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+}
+
+.pq-example__pre {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.375rem;
+  background: var(--color-surface-container-lowest);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--color-on-surface);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.pq-example__pre--out {
+  color: var(--color-success);
+}
+
+.pq-hint {
+  display: flex;
+  gap: 0.625rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  color: color-mix(in srgb, var(--color-warning) 85%, white);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.pq-constraint {
+  padding: 0.375rem 0.625rem;
+  border-left: 2px solid var(--color-primary);
+  border-radius: 0 0.25rem 0.25rem 0;
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.8125rem;
+  color: var(--color-on-surface-variant);
+}

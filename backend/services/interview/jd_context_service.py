@@ -2,17 +2,15 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from services.interview.llm_engine import LLMEngine
+from services.platform.llm.engine import LLMEngine
 from services.interview.prompt_contracts import extract_json_dict
+from services.interview.modes.constants import INTERVIEW_FOCUS_VALUES
 from services.jd_fit.jd_fit_weights import MIN_JD_CHARS
 from services.resume.skills_normalizer import flatten_skills_from_profile
 from utils.logger import get_logger
 
 logger = get_logger("JDContextService")
 
-INTERVIEW_FOCUS_VALUES = {"mixed", "technical", "behavioral", "system_design", "dsa"}
-
-# Backward-compatible alias for interview callers.
 MIN_JD_CHARS_FOR_LLM = MIN_JD_CHARS
 
 # Match whole skill tokens only — substring "go" must not hit "good" / "growth".

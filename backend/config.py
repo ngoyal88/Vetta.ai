@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Embedding the agent inside uvicorn corrupts the async Redis pool on Windows.
     livekit_agent_embedded: bool = False
 
+    # When True, mount /ws/interview/* for LiveKit-failure fallback (frozen path — do not extend).
+    interview_websocket_fallback_enabled: bool = True
+
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-2"
     deepgram_endpointing_ms: int = 500
@@ -85,7 +88,6 @@ class Settings(BaseSettings):
 
     vpm_enabled: bool = True
     jd_fit_enabled: bool = True
-    jd_fit_semantic_alignment_enabled: bool = True
     resume_builder_enabled: bool = False
     vpm_max_accepted_claims: int = 50
     vpm_max_raw_extract: int = 8

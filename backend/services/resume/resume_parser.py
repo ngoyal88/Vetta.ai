@@ -23,7 +23,7 @@ from models.resume import (
     ResumeProfile,
     SkillGroup,
 )
-from services.interview.llm_engine import get_platform_llm
+from services.platform.llm import get_platform_llm
 from services.resume.contact_link_utils import unique_plausible_urls
 from services.resume.resume_postprocess import (
     dedupe_achievements,

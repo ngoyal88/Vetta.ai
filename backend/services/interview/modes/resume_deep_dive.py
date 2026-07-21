@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from models.interview import InterviewType
 from services.interview.modes.base import InterviewModeStrategy, ModeStartResult
+from services.interview.modes.start_configs import ModeStartConfig
 
 
 class ResumeDeepDiveModeStrategy(InterviewModeStrategy):
@@ -15,12 +16,8 @@ class ResumeDeepDiveModeStrategy(InterviewModeStrategy):
         interview_service: Any,
         difficulty,
         resume_data: Dict[str, Any],
-        custom_role: Optional[str],
         years_experience: Optional[int],
-        target_company: Optional[str],
-        target_role: Optional[str],
-        job_description: Optional[str],
-        interview_focus: Optional[str],
+        config: ModeStartConfig,
     ) -> ModeStartResult:
         resume_probe_context = interview_service.build_resume_probe_context(
             resume_data=resume_data,
@@ -32,7 +29,7 @@ class ResumeDeepDiveModeStrategy(InterviewModeStrategy):
         context = interview_service._build_context(
             self.mode,
             resume_data,
-            custom_role,
+            None,
             years_experience,
             target_context=target_context,
         )

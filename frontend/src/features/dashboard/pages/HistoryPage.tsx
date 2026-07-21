@@ -10,11 +10,11 @@ import { HistoryToolbar } from '../components/history/HistoryToolbar';
 import { TranscriptOverlay } from '../components/history/TranscriptOverlay';
 import { useHistoryPageState } from '../hooks/useHistoryPageState';
 import PageLoadingState from 'shared/components/PageLoadingState';
-import { PreSessionCheckerWithBrowserCheck } from 'features/interview/components/PreSessionChecker';
+import { PreSessionCheckerWithBrowserCheck } from 'features/interview/preflight/PreSessionChecker';
 import {
   AI_INTERVIEW_ANALYTICS_PATH,
   AI_INTERVIEW_HUB_PATH,
-} from 'core/constants/interviewModes';
+} from 'features/interview/domain/modeContract';
 
 const HistoryPage: React.FC = () => {
   const reduceMotion = useReducedMotion();

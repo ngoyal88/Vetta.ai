@@ -1,13 +1,8 @@
 import React from 'react';
 import { Calendar, RefreshCw } from 'lucide-react';
 
+import { HISTORY_FILTER_TABS } from 'features/interview/domain/modeContract';
 import type { HistoryDateRange, HistoryFilterTab } from '../../utils/historyPresentationUtils';
-
-const FILTER_TABS: { id: HistoryFilterTab; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'role_targeted', label: 'Role Targeted' },
-  { id: 'resume', label: 'Resume Deep Dive' },
-];
 
 const DATE_RANGE_OPTIONS: { id: HistoryDateRange; label: string }[] = [
   { id: 'all', label: 'All time' },
@@ -43,7 +38,7 @@ export function HistoryToolbar({
           className="min-w-[10.5rem] bg-transparent text-sm text-[var(--color-on-surface)] outline-none"
           aria-label="Filter by interview mode"
         >
-          {FILTER_TABS.map((tab) => (
+          {HISTORY_FILTER_TABS.map((tab) => (
             <option key={tab.id} value={tab.id} className="bg-[var(--color-surface)] text-[var(--color-on-surface)]">
               {tab.label}
             </option>

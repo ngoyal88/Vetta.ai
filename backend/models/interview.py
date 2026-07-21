@@ -6,17 +6,13 @@ from pydantic import BaseModel, Field
 
 
 class InterviewType(str, Enum):
-    DSA = "dsa"
-    FRONTEND = "frontend"
-    BACKEND = "backend"
-    CORE_CS = "core"
-    BEHAVIORAL = "behavioral"
-    RESUME_BASED = "resume"
-    CUSTOM = "custom"
+    """Live + coming-soon product modes only. No history tombstones."""
+
     ROLE_TARGETED = "role_targeted"
+    RESUME_BASED = "resume"
+    PAIR_PROGRAMMING = "pair_programming"
     PRESSURE = "pressure"
     BLIND = "blind"
-    PAIR_PROGRAMMING = "pair_programming"
 
 
 class DifficultyLevel(str, Enum):
@@ -78,6 +74,9 @@ class InterviewSession(BaseModel):
     target_role: Optional[str] = None
     job_description: Optional[str] = None
     interview_focus: Optional[str] = None
+    # Pair Programming (and future coding modes): track id e.g. dsa | lld | bugfix
+    track: Optional[str] = None
+    session_focus: Optional[str] = None
     jd_fit_context: Dict[str, Any] = Field(default_factory=dict)
     resume_probe_context: Dict[str, Any] = Field(default_factory=dict)
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM

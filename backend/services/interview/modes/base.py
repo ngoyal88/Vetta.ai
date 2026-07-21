@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from models.interview import DifficultyLevel, InterviewType
+from services.interview.modes.start_configs import ModeStartConfig
 
 
 @dataclass
@@ -23,12 +24,8 @@ class InterviewModeStrategy:
         interview_service: Any,
         difficulty: DifficultyLevel,
         resume_data: Dict[str, Any],
-        custom_role: Optional[str],
         years_experience: Optional[int],
-        target_company: Optional[str],
-        target_role: Optional[str],
-        job_description: Optional[str],
-        interview_focus: Optional[str],
+        config: ModeStartConfig,
     ) -> ModeStartResult:
         return ModeStartResult(
             target_context=None,

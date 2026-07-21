@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 from utils.logger import get_logger
-from services.interview.llm_engine import LLMEngine
+from services.platform.llm import LLMEngine
 from services.interview.transcript_service import extract_live_transcription
 from services.interview.prompt_contracts import (
     execute_json_contract,

@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 
 import { useAuth } from 'shared/context/AuthContext';
 import { api } from 'shared/services/api';
-import { getSkipPrecheck } from 'features/interview/utils/precheckStorage';
+import { getSkipPrecheck } from 'features/interview/preflight/precheckStorage';
 import { useActiveVaultResume } from 'features/modes/resume-deep-dive/hooks/useActiveVaultResume';
 import { useJobDescriptionFileUpload } from 'shared/hooks/useJobDescriptionFileUpload';
 import { applyJdTargetHints, extractJdTargetHints } from 'shared/utils/jdInputUtils';
@@ -13,6 +13,7 @@ import {
   difficultyProgressPercent,
   findDifficultyStop,
 } from 'features/modes/shared/constants/difficultyStops';
+import { apiTypeFromCatalogSlug } from 'features/interview/domain/modeContract';
 import { resumeDisplayName } from 'features/modes/shared/utils/resumeDisplayName';
 
 export function useRoleTargetedSetup() {
@@ -73,10 +74,6 @@ export function useRoleTargetedSetup() {
 
   const yoeProgress = useMemo(() => `${(yoeValue / 15) * 100}%`, [yoeValue]);
 
-  const canLaunch =
-    Boolean(roleValue) && focusSelections.length > 0 && !starting && !jdUploading;
-  const activeResumeName = useMemo(() => resumeDisplayName(parsedResume), [parsedResume]);
-
   const onJdTextLoaded = useCallback(
     (text: string) => {
       setJobDescription(text);
@@ -95,6 +92,9 @@ export function useRoleTargetedSetup() {
     handleUploadClick,
     handleFileChange: handleUploadFile,
   } = useJobDescriptionFileUpload({ onTextLoaded: onJdTextLoaded });
+
+  const canLaunch = Boolean(roleValue) && focusSelections.length > 0 && !starting && !jdUploading;
+  const activeResumeName = useMemo(() => resumeDisplayName(parsedResume), [parsedResume]);
 
   const toggleFocus = useCallback((value: string) => {
     setFocusSelections((prev) => {
@@ -139,25 +139,23 @@ export function useRoleTargetedSetup() {
         currentUser.email?.split('@')[0] ||
         'Candidate';
 
-      const response = await api.startInterview(
-        currentUser.uid,
-        'role_targeted',
+      const response = await api.startInterview({
+        interviewType: apiTypeFromCatalogSlug('role_targeted'),
         difficulty,
-        parsedResume,
-        roleValue,
+        resumeData: parsedResume,
         candidateName,
-        yoeValue > 0 ? yoeValue : null,
-        {
-          targetCompany: companyValue || null,
-          targetRole: roleValue,
-          jobDescription: jdText || null,
-          interviewFocus: focusValue,
-          jdFitSnapshotId,
+        yearsExperience: yoeValue > 0 ? yoeValue : null,
+        config: {
+          target_role: roleValue,
+          target_company: companyValue || null,
+          job_description: jdText || null,
+          interview_focus: focusValue,
+          jd_fit_snapshot_id: jdFitSnapshotId,
         },
-      );
+      });
 
       const sessionId = response.session_id;
-      sessionStorage.setItem(`interview_type_${sessionId}`, 'role_targeted');
+      sessionStorage.setItem(`interview_type_${sessionId}`, apiTypeFromCatalogSlug('role_targeted'));
       try {
         window.localStorage.removeItem('interviewConfig');
       } catch {

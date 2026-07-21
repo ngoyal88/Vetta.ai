@@ -1,18 +1,22 @@
 """LiveKit HTTP routes: token generation and agent-worker attach."""
-import json
-from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from config import get_settings
+from services.livekit.token_service import (
+    agent_name,
+    dispatch_metadata,
+    livekit_api,
+    livekit_token_ttl,
+    resolve_owned_session,
+)
 from utils.auth import verify_firebase_token
 from utils.http_errors import raise_internal_error
 from utils.logger import get_logger
 from utils.rate_limit import check_rate_limit
 from utils.redis_client import get_session
-from utils.session_access import require_session_owner
 
 router = APIRouter(prefix="/livekit", tags=["LiveKit"])
 log = get_logger(__name__)
@@ -25,11 +29,6 @@ def _require_livekit() -> None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LiveKit is not configured",
         )
-
-
-def _livekit_api():
-    from livekit import api as lk_api
-    return lk_api
 
 
 class LiveKitTokenRequest(BaseModel):
@@ -57,20 +56,7 @@ async def _resolve_session(session_id: str, uid: str) -> Dict[str, Any]:
             status_code=status.HTTP_410_GONE,
             detail="Interview session expired. Please start a new interview.",
         )
-    return require_session_owner(session_data, uid)
-
-
-def _livekit_token_ttl() -> timedelta:
-    session_seconds = int(getattr(settings, "interview_session_ttl_seconds", 7200))
-    return timedelta(seconds=session_seconds + 300)
-
-
-def _agent_name() -> str:
-    return (getattr(settings, "livekit_agent_name", "") or "vetta-interviewer").strip()
-
-
-def _dispatch_metadata(session_id: str, uid: str) -> str:
-    return json.dumps({"session_id": session_id, "user_id": uid})
+    return resolve_owned_session(session_data, uid)
 
 
 @router.post("/token", response_model=LiveKitTokenResponse)
@@ -91,20 +77,20 @@ async def create_livekit_token(
     try:
         await _resolve_session(room_name, uid)
 
-        lk_api = _livekit_api()
+        lk_api = livekit_api()
         token = (
             lk_api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
             .with_identity(uid)
             .with_grants(lk_api.VideoGrants(room_join=True, room=room_name))
-            .with_ttl(_livekit_token_ttl())
+            .with_ttl(livekit_token_ttl())
         )
         if body.dispatch_agent:
             token = token.with_room_config(
                 lk_api.RoomConfiguration(
                     agents=[
                         lk_api.RoomAgentDispatch(
-                            agent_name=_agent_name(),
-                            metadata=_dispatch_metadata(room_name, uid),
+                            agent_name=agent_name(),
+                            metadata=dispatch_metadata(room_name, uid),
                         )
                     ]
                 )
@@ -133,8 +119,8 @@ async def livekit_attach(
 
     await _resolve_session(session_id, uid)
 
-    lk_api = _livekit_api()
-    agent_name = _agent_name()
+    lk_api = livekit_api()
+    worker_agent = agent_name()
     async with lk_api.LiveKitAPI(
         settings.livekit_url,
         settings.livekit_api_key,
@@ -142,19 +128,19 @@ async def livekit_attach(
     ) as client:
         existing = await client.agent_dispatch.list_dispatch(session_id)
         for dispatch in existing:
-            if getattr(dispatch, "agent_name", "") == agent_name:
+            if getattr(dispatch, "agent_name", "") == worker_agent:
                 return {
                     "status": "ok",
                     "message": "Agent worker already dispatched",
                     "dispatch_id": getattr(dispatch, "id", ""),
-                    "agent_name": agent_name,
+                    "agent_name": worker_agent,
                 }
 
         dispatch = await client.agent_dispatch.create_dispatch(
             lk_api.CreateAgentDispatchRequest(
-                agent_name=agent_name,
+                agent_name=worker_agent,
                 room=session_id,
-                metadata=_dispatch_metadata(session_id, uid),
+                metadata=dispatch_metadata(session_id, uid),
             )
         )
 
@@ -162,7 +148,7 @@ async def livekit_attach(
         "status": "ok",
         "message": "Agent worker dispatched",
         "dispatch_id": getattr(dispatch, "id", ""),
-        "agent_name": agent_name,
+        "agent_name": worker_agent,
     }
 
 
