@@ -1,80 +1,39 @@
-import { ArrowRight } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import '../resume-builder.css';
 import BuilderToolbar from '../components/BuilderToolbar';
-import NavigationBlockModal from '../components/NavigationBlockModal';
 import PreviewPanel from '../components/PreviewPanel';
 import PublishModal from '../components/PublishModal';
 import SectionAccordion from '../components/SectionAccordion';
 import SaveDraftModal from '../components/SaveDraftModal';
-import TemplateGallery from '../components/TemplateGallery';
+import BuilderLandingView from '../components/landing/BuilderLandingView';
 import PageLoadingState from 'shared/components/PageLoadingState';
+import { useVaultLibraryContext } from 'features/vault/context/VaultLibraryContext';
+import { useBuilderLanding } from '../hooks/useBuilderLanding';
 import { useResumeBuilder } from '../hooks/useResumeBuilder';
 import { getDraftDisplayName, getTemplateLabel, resolveTemplateLabel } from '../utils/draftNames';
+import { useEffect, useState } from 'react';
 
-function formatDraftTimestamp(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return 'Recently updated';
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(parsed);
-}
-
-function BuilderLandingHeader({
-  profileReady,
-  saving,
-  catalogLoading,
-  focusRingClass,
-  onCreateDraft,
-}: {
-  profileReady: boolean;
-  saving: boolean;
-  catalogLoading: boolean;
-  focusRingClass: string;
-  onCreateDraft: () => void;
-}) {
-  return (
-    <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-      <div className="max-w-3xl min-w-0">
-        <p className="type-label-sm uppercase tracking-[0.24em] text-[var(--color-secondary)]">
-          Resume Vault / Builder
-        </p>
-        <h1 className="type-display-lg mt-2 text-[var(--color-on-surface)]">Resume Builder</h1>
-        <p className="type-body-lg mt-4 text-[var(--color-on-surface-variant)]">
-          Pick a layout, create a draft, and publish to Vault when it is ready.
-        </p>
-      </div>
-
-      <div className="flex shrink-0 flex-wrap gap-3">
-        {!profileReady ? (
-          <Link
-            to="/profile"
-            className={`inline-flex items-center rounded-xl border border-[var(--border-strong)] px-4 py-3 text-sm font-semibold text-[var(--color-on-surface)] transition-colors hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-surface-container)] ${focusRingClass}`}
-          >
-            Complete profile
-          </Link>
-        ) : null}
-
-        <button
-          type="button"
-          onClick={() => void onCreateDraft()}
-          disabled={saving || !profileReady || catalogLoading}
-          className={`inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] px-5 py-3 text-sm font-semibold text-[var(--color-on-primary)] transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60 ${focusRingClass}`}
-        >
-          {saving ? 'Creating…' : 'Create New Resume'}
-          <ArrowRight className="h-4 w-4" aria-hidden />
-        </button>
-      </div>
-    </header>
-  );
-}
+type EditorTab = 'sections' | 'readiness' | 'template';
 
 export default function ResumeBuilderPage() {
+  const landing = useBuilderLanding();
   const builder = useResumeBuilder();
+  const { entries } = useVaultLibraryContext();
+  const [requestedEditorTab, setRequestedEditorTab] = useState<EditorTab | null>(null);
+  const [showTemplateHint, setShowTemplateHint] = useState(false);
+
   const showWorkspace = Boolean(builder.draft) || builder.workspaceLoading;
 
-  if (!builder.builderEnabled && !builder.catalogLoading) {
+  useEffect(() => {
+    if (!showWorkspace || typeof window === 'undefined') return;
+    if (window.sessionStorage.getItem('builder_show_template_hint') === '1') {
+      window.sessionStorage.removeItem('builder_show_template_hint');
+      if (window.sessionStorage.getItem('builder_template_hint_dismissed') !== '1') {
+        setShowTemplateHint(true);
+      }
+    }
+  }, [showWorkspace]);
+
+  if (!builder.builderEnabled && !builder.catalogLoading && !landing.catalogLoading) {
     return (
       <section className="glass-panel rounded-[1.5rem] border border-[var(--border-subtle)] p-6 shadow-[0_18px_48px_rgba(2,6,23,0.18)]">
         <p className="type-label-sm uppercase tracking-[0.18em] text-[var(--color-primary)]">Resume Vault</p>
@@ -86,78 +45,18 @@ export default function ResumeBuilderPage() {
     );
   }
 
-  if (builder.error && !builder.catalogLoading && !builder.workspaceLoading && !builder.draft) {
+  if ((builder.error || landing.error) && !showWorkspace && !landing.catalogLoading) {
     return (
       <section className="glass-panel rounded-[1.5rem] border border-[var(--color-error)]/20 bg-[var(--color-error)]/8 p-6 shadow-[0_18px_48px_rgba(2,6,23,0.18)]">
         <p className="type-label-sm uppercase tracking-[0.18em] text-[var(--color-error)]">Resume Builder Error</p>
         <h1 className="type-headline-md mt-2 text-[var(--color-on-surface)]">We could not load the builder workspace.</h1>
-        <p className="type-body-md mt-2 text-[var(--color-on-surface-variant)]">{builder.error}</p>
+        <p className="type-body-md mt-2 text-[var(--color-on-surface-variant)]">{builder.error || landing.error}</p>
       </section>
     );
   }
 
   if (!showWorkspace) {
-    return (
-      <div className="space-y-10">
-        <p className="sr-only" aria-live="polite">{builder.statusMessage}</p>
-
-        <BuilderLandingHeader
-          profileReady={builder.profileReady}
-          saving={builder.saving}
-          catalogLoading={builder.catalogLoading}
-          focusRingClass={builder.focusRingClass}
-          onCreateDraft={builder.createDraft}
-        />
-
-        {!builder.profileReady ? (
-          <p className="type-body-md text-[var(--color-on-surface-variant)]">
-            Add your name in Profile before creating a draft.
-          </p>
-        ) : null}
-
-        <TemplateGallery
-          templates={builder.templates}
-          selectedTemplateId={builder.selectedTemplateId}
-          previewUrls={builder.templatePreviewUrls}
-          catalogLoading={builder.catalogLoading}
-          previewsLoading={builder.previewsLoading}
-          onSelect={builder.setSelectedTemplateId}
-        />
-
-        <section>
-          <h2 className="type-headline-md mb-3 text-[var(--color-on-surface)]">Saved drafts</h2>
-          {builder.catalogLoading ? (
-            <PageLoadingState variant="list" minHeightClassName="py-2" />
-          ) : builder.savedDrafts.length ? (
-            <ul className="divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">
-              {builder.savedDrafts.map((savedDraft) => (
-                <li key={savedDraft.id}>
-                  <button
-                    type="button"
-                    onClick={() => builder.openDraft(savedDraft.id)}
-                    className={`flex w-full items-center justify-between gap-4 py-4 text-left transition-colors hover:bg-[var(--color-surface-container)]/40 ${builder.focusRingClass}`}
-                  >
-                    <div className="min-w-0">
-                      <p className="type-body-md truncate font-semibold text-[var(--color-on-surface)]">
-                        {getDraftDisplayName(savedDraft)}
-                      </p>
-                      <p className="type-label-sm mt-0.5 text-[var(--color-on-surface-variant)]">
-                        {resolveTemplateLabel(savedDraft.template_id, builder.templates)}
-                        {' · '}
-                        Updated {formatDraftTimestamp(savedDraft.updated_at)}
-                      </p>
-                    </div>
-                    <ArrowRight className="h-4 w-4 shrink-0 text-[var(--color-on-surface-variant)]" aria-hidden />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="type-body-md text-[var(--color-on-surface-variant)]">No saved drafts yet.</p>
-          )}
-        </section>
-      </div>
-    );
+    return <BuilderLandingView landing={landing} vaultEntryCount={entries.length} />;
   }
 
   const templateLabel = builder.activeTemplate
@@ -193,7 +92,38 @@ export default function ResumeBuilderPage() {
         onRefreshLatex={builder.refreshLatex}
         onOpenPublish={builder.openPublishModal}
         onDeleteDraft={builder.deleteCurrentDraft}
+        onOpenTemplateTab={() => setRequestedEditorTab('template')}
       />
+
+      {showTemplateHint ? (
+        <section className="rounded-xl border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/8 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="type-body-md text-[var(--color-on-surface)]">
+              Add content, then open the <strong>Template</strong> tab to compare layouts.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowTemplateHint(false);
+                if (typeof window !== 'undefined') {
+                  window.sessionStorage.setItem('builder_template_hint_dismissed', '1');
+                }
+              }}
+              className="type-label-sm font-semibold text-[var(--color-primary)]"
+            >
+              Dismiss
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {builder.previewStale ? (
+        <section className="rounded-xl border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/8 px-4 py-3">
+          <p className="type-body-md text-[var(--color-on-surface)]">
+            Template changed — refresh preview to see updates.
+          </p>
+        </section>
+      ) : null}
 
       {builder.error && !builder.workspaceLoading ? (
         <section className="rounded-xl border border-[var(--color-error)]/25 bg-[var(--color-error)]/8 px-4 py-3">
@@ -205,7 +135,11 @@ export default function ResumeBuilderPage() {
         <PageLoadingState variant="builder-workspace" minHeightClassName="py-4" />
       ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr),minmax(0,0.95fr)]">
-          <SectionAccordion builder={builder} />
+          <SectionAccordion
+            builder={builder}
+            requestedTab={requestedEditorTab}
+            onTabRequestConsumed={() => setRequestedEditorTab(null)}
+          />
 
           <div className="xl:sticky xl:top-6 xl:self-start">
             <PreviewPanel
@@ -247,12 +181,6 @@ export default function ResumeBuilderPage() {
         onSubmit={() => {
           void builder.publishCurrentDraft();
         }}
-      />
-
-      <NavigationBlockModal
-        open={builder.navigationBlockOpen}
-        onStay={builder.stayOnBuilder}
-        onLeave={builder.leaveBuilder}
       />
     </div>
   );

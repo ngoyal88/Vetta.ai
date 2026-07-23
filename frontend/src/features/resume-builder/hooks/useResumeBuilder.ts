@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 
 import { useConfirmDialog } from 'shared/context/ConfirmDialogContext';
 import { useAuth } from 'shared/context/AuthContext';
-import { fetchUserSettings } from 'features/dashboard/services/userSettingsService';
+import { useUserSettingsQuery } from 'features/dashboard/queries/useUserSettingsQuery';
 
 import type {
   ResumeAchievementItem,
@@ -19,12 +19,19 @@ import { createEmptySkillGroup, ensureBuilderSkillGroups, type BuilderSkillGroup
 import { sanitizeBuilderProfileForSave } from '../utils/sanitizeBuilderProfile';
 
 import { computeBuilderReadiness, type BuilderReadinessIssue } from '../utils/builderReadiness';
+import { resolveBuilderIdentity, isValidIdentityEmail, type BuilderIdentity } from '../utils/builderIdentity';
+import { computeTemplateFieldWarnings } from '../utils/templateFieldWarnings';
 import { getDraftDisplayName, nextResumeDraftName } from '../utils/draftNames';
 import { applyDraftSnapshot, captureDraftSnapshot } from '../utils/draftSnapshot';
 import type { HistoryMode } from './draftHistoryStack';
 import type { SaveState } from './draftAutosave';
 import { useDraftAutosave } from './useDraftAutosave';
 import { useDraftHistory } from './useDraftHistory';
+import { useBuilderDraftMutations } from '../mutations/useBuilderDraftMutations';
+import {
+  useBuilderHealthQuery,
+  useBuilderTemplatesQuery,
+} from '../queries/useBuilderCatalogQueries';
 import { ResumeBuilderApiError, resumeBuilderApi } from '../services/resumeBuilderApi';
 import type {
   BuilderCustomSection,
@@ -38,11 +45,6 @@ import type {
 const BUILDER_ENABLED = import.meta.env.VITE_RESUME_BUILDER_ENABLED === 'true';
 const DEFAULT_TEMPLATE_ID = 'professional_v1';
 const FOCUS_RING_CLASS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--teal-2)]';
-
-type BuilderIdentity = {
-  name: string;
-  email: string;
-};
 
 const buildDraftFingerprint = (draft: ResumeBuilderDraft | null): string =>
   JSON.stringify(
@@ -136,19 +138,6 @@ function buildDefaultResumeName(profile: ResumeProfile): string {
   return 'Vetta Resume';
 }
 
-function buildInitialProfile(identity: BuilderIdentity): ResumeProfile {
-  return {
-    name: identity.name,
-    contact: {
-      email: identity.email,
-      phone: '',
-      location: '',
-      links: { github: '', linkedin: '', portfolio: '', other: [] },
-    },
-    summary: '',
-  };
-}
-
 function mapPublishApiErrorToIssue(error: ResumeBuilderApiError): BuilderReadinessIssue | null {
   switch (error.code) {
     case 'identity_name_missing':
@@ -188,23 +177,6 @@ function mapPublishApiErrorToIssue(error: ResumeBuilderApiError): BuilderReadine
   }
 }
 
-function isValidIdentityEmail(value: string | null | undefined): boolean {
-  if (typeof value !== 'string') return false;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function resolveBuilderIdentity(
-  settingsDoc: { name?: string; email?: string } | null,
-  currentUser: { displayName?: string | null; email?: string | null } | null,
-): BuilderIdentity | null {
-  const name = settingsDoc?.name?.trim() || currentUser?.displayName?.trim() || '';
-  const settingsEmail = settingsDoc?.email?.trim() || '';
-  const authEmail = currentUser?.email?.trim() || '';
-  const email = isValidIdentityEmail(settingsEmail) ? settingsEmail : authEmail;
-
-  return name || email ? { name, email } : null;
-}
-
 function buildLegacyDraftIdentityRepair(
   nextDraft: ResumeBuilderDraft,
   identity: BuilderIdentity | null,
@@ -230,18 +202,41 @@ function buildLegacyDraftIdentityRepair(
   };
 }
 
-function isModifiedNavigation(event: MouseEvent): boolean {
-  return event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
-}
-
 export function useResumeBuilder() {
   const navigate = useNavigate();
   const { draftId } = useParams<{ draftId: string }>();
   const [searchParams] = useSearchParams();
   const { confirmDialog } = useConfirmDialog();
   const { currentUser } = useAuth();
+  const draftMutations = useBuilderDraftMutations();
+  const draftMutationsRef = useRef(draftMutations);
+  draftMutationsRef.current = draftMutations;
 
-  const [templates, setTemplates] = useState<TemplateMetadata[]>([]);
+  const { health } = useBuilderHealthQuery();
+  const { templates, loading: templatesQueryLoading } = useBuilderTemplatesQuery();
+  const { settings: settingsDoc, loading: settingsQueryLoading } = useUserSettingsQuery();
+
+  const healthRef = useRef(health);
+  healthRef.current = health;
+  const templatesRef = useRef(templates);
+  templatesRef.current = templates;
+  const settingsDocRef = useRef(settingsDoc);
+  settingsDocRef.current = settingsDoc;
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+
+  const initialResumeId = searchParams.get('resumeId') || undefined;
+  const initialVersionId = searchParams.get('versionId') || undefined;
+  const catalogReady = !templatesQueryLoading && !settingsQueryLoading;
+  const workspaceBootstrapKey = draftId
+    ? `draft:${draftId}`
+    : initialResumeId || initialVersionId
+      ? `create:${initialResumeId ?? ''}:${initialVersionId ?? ''}`
+      : 'landing';
+
+  const loadedBootstrapKeyRef = useRef<string | null>(null);
+  const bootstrapGenRef = useRef(0);
+
   const [draft, setDraft] = useState<ResumeBuilderDraft | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -255,9 +250,7 @@ export function useResumeBuilder() {
   const [pageCount, setPageCount] = useState(0);
   const [latex, setLatex] = useState('');
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
-  const [selectedTemplateId, setSelectedTemplateId] = useState(DEFAULT_TEMPLATE_ID);
-  const [savedDrafts, setSavedDrafts] = useState<ResumeBuilderDraft[]>([]);
-  const [profileIdentity, setProfileIdentity] = useState<BuilderIdentity | null>(null);
+  const [previewStale, setPreviewStale] = useState(false);
   const [savedFingerprint, setSavedFingerprint] = useState<string>(buildDraftFingerprint(null));
   const [statusMessage, setStatusMessage] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
@@ -267,17 +260,27 @@ export function useResumeBuilder() {
   const [publishUserNote, setPublishUserNote] = useState('');
   const [publishTags, setPublishTags] = useState('');
   const [publishSetActive, setPublishSetActive] = useState(true);
-  const [navigationBlockOpen, setNavigationBlockOpen] = useState(false);
-  const [pendingNavigationHref, setPendingNavigationHref] = useState<string | null>(null);
   const [saveDraftOpen, setSaveDraftOpen] = useState(false);
   const [saveDraftName, setSaveDraftName] = useState('Resume(1)');
   const [templatePreviewUrls, setTemplatePreviewUrls] = useState<Record<string, string>>({});
   const [publishServerIssue, setPublishServerIssue] = useState<BuilderReadinessIssue | null>(null);
 
   const draftFingerprint = useMemo(() => buildDraftFingerprint(draft), [draft]);
-  const dirty = draftFingerprint !== savedFingerprint;
+  const dirty = Boolean(draft?.id) && draftFingerprint !== savedFingerprint;
   const hasExistingPublishTarget = Boolean(draft?.target_resume_id || draft?.source_resume_id);
+  const profileIdentity = useMemo(
+    () => resolveBuilderIdentity(settingsDoc, currentUser),
+    [currentUser, settingsDoc],
+  );
   const profileReady = Boolean(profileIdentity?.name.trim() && profileIdentity?.email.trim());
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const cleanupPreviewUrl = useCallback(() => {
     setPreviewUrl((current) => {
@@ -296,18 +299,8 @@ export function useResumeBuilder() {
     if (currentDraft?.name?.trim()) {
       return currentDraft.name.trim();
     }
-    const otherNames = savedDrafts
-      .filter((savedDraft) => savedDraft.id !== currentDraft?.id)
-      .map((savedDraft) => getDraftDisplayName(savedDraft));
-    return nextResumeDraftName(otherNames);
-  }, [savedDrafts]);
-
-  useEffect(() => {
-    if (!dirty) {
-      setNavigationBlockOpen(false);
-      setPendingNavigationHref(null);
-    }
-  }, [dirty]);
+    return nextResumeDraftName([]);
+  }, []);
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -317,39 +310,6 @@ export function useResumeBuilder() {
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [dirty]);
-
-  useEffect(() => {
-    if (!dirty) return undefined;
-
-    const handleDocumentClick = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || isModifiedNavigation(event)) return;
-
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-
-      const anchor = target.closest('a[href]');
-      if (!(anchor instanceof HTMLAnchorElement)) return;
-      if (anchor.target && anchor.target !== '_self') return;
-      if (anchor.hasAttribute('download')) return;
-
-      const href = anchor.getAttribute('href');
-      if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
-
-      const nextUrl = new URL(anchor.href, window.location.origin);
-      if (nextUrl.origin !== window.location.origin) return;
-
-      const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
-      if (currentPath === nextPath) return;
-
-      event.preventDefault();
-      setPendingNavigationHref(nextPath);
-      setNavigationBlockOpen(true);
-    };
-
-    document.addEventListener('click', handleDocumentClick, true);
-    return () => document.removeEventListener('click', handleDocumentClick, true);
   }, [dirty]);
 
   const announce = useCallback((message: string) => {
@@ -373,7 +333,6 @@ export function useResumeBuilder() {
       setDraft(nextDraft);
       setSavedFingerprint(buildDraftFingerprint(nextDraft));
       setPublishServerIssue(null);
-      setSelectedTemplateId(nextDraft.template_id);
       if (!preserveUi) {
         setSelectedSectionId(null);
         setPublishMode(nextDraft.target_resume_id || nextDraft.source_resume_id ? 'existing' : 'new');
@@ -382,7 +341,7 @@ export function useResumeBuilder() {
         setPublishTags('');
         setPublishSetActive(true);
       }
-      if (replaceRoute) {
+      if (replaceRoute && mountedRef.current) {
         const jdFitSnapshotId = searchParams.get('jd_fit_snapshot_id')?.trim();
         const path = `/resume-vault/builder/${nextDraft.id}`;
         navigate(
@@ -395,6 +354,9 @@ export function useResumeBuilder() {
     },
     [navigate, searchParams],
   );
+
+  const applyDraftStateRef = useRef(applyDraftState);
+  applyDraftStateRef.current = applyDraftState;
 
   const updateDraft = useCallback(
     (
@@ -443,149 +405,138 @@ export function useResumeBuilder() {
     }
   }, []);
 
-  const loadDraftWorkspace = useCallback(
-    async (targetDraftId: string, identity: BuilderIdentity) => {
-      setWorkspaceLoading(true);
-      try {
-        const draftResponse = await resumeBuilderApi.getDraft(targetDraftId);
-        let nextDraft = draftResponse.draft;
-        const repairPayload = buildLegacyDraftIdentityRepair(nextDraft, identity);
-        if (repairPayload) {
-          const repairedResponse = await resumeBuilderApi.saveDraft(targetDraftId, repairPayload);
-          nextDraft = repairedResponse.draft;
-        }
-        historyRef.current.clear();
-        applyDraftState(nextDraft, { replaceRoute: false });
-        const latexResponse = await resumeBuilderApi.getLatex(targetDraftId);
-        setLatex(latexResponse.tex);
-        setPreviewStatus('idle');
-      } finally {
+  const loadDraftWorkspace = useCallback(async (targetDraftId: string, identity: BuilderIdentity) => {
+    if (!mountedRef.current) return;
+    setWorkspaceLoading(true);
+    try {
+      const draftResponse = await resumeBuilderApi.getDraft(targetDraftId);
+      if (!mountedRef.current) return;
+      let nextDraft = draftResponse.draft;
+      const repairPayload = buildLegacyDraftIdentityRepair(nextDraft, identity);
+      if (repairPayload) {
+        const repairedResponse = await draftMutationsRef.current.saveDraft(targetDraftId, repairPayload);
+        if (!mountedRef.current) return;
+        nextDraft = repairedResponse.draft;
+      }
+      historyRef.current.clear();
+      applyDraftStateRef.current(nextDraft, { replaceRoute: false });
+      const latexResponse = await resumeBuilderApi.getLatex(targetDraftId);
+      if (!mountedRef.current) return;
+      setLatex(latexResponse.tex);
+      setPreviewStatus('idle');
+    } finally {
+      if (mountedRef.current) {
         setWorkspaceLoading(false);
       }
-    },
-    [applyDraftState],
-  );
+    }
+  }, []);
 
-  const loadInitial = useCallback(async () => {
+  useEffect(() => {
+    const runKey = workspaceBootstrapKey;
+    const generation = ++bootstrapGenRef.current;
+
+    if (!mountedRef.current) return;
+
     if (!BUILDER_ENABLED) {
       setError('Resume Builder is disabled.');
       setCatalogLoading(false);
       return;
     }
 
-    setCatalogLoading(true);
-    setError(null);
-    const initialResumeId = searchParams.get('resumeId') || undefined;
-    const initialVersionId = searchParams.get('versionId') || undefined;
-    const shouldOpenWorkspace = Boolean(draftId || initialResumeId || initialVersionId);
-    if (shouldOpenWorkspace) {
-      setWorkspaceLoading(true);
-    }
+    const isWorkspaceRoute = runKey !== 'landing';
 
-    try {
-      const [health, templateResponse, draftsResponse, settingsDoc] = await Promise.all([
-        resumeBuilderApi.getHealth(),
-        resumeBuilderApi.listTemplates(),
-        resumeBuilderApi.listDrafts(),
-        currentUser ? fetchUserSettings(currentUser.uid).catch(() => null) : Promise.resolve(null),
-      ]);
-      if (!health.enabled) {
-        throw new Error('Resume Builder is disabled.');
-      }
-
-      setTemplates(templateResponse.templates);
-      setSavedDrafts(draftsResponse.drafts);
-      setTemplatePreviewUrls((current) => {
-        Object.values(current).forEach((url) => URL.revokeObjectURL(url));
-        return {};
-      });
-      void loadTemplatePreviews(templateResponse.templates);
-
-      const nextIdentity = resolveBuilderIdentity(settingsDoc, currentUser);
-      setProfileIdentity(nextIdentity);
-
-      const liveTemplate = templateResponse.templates.find((template) => template.status === 'live');
-      if (liveTemplate) {
-        setSelectedTemplateId(liveTemplate.id);
-      }
-
-      setCatalogLoading(false);
-
-      if (draftId) {
-        await loadDraftWorkspace(draftId, nextIdentity);
-      } else if (initialResumeId || initialVersionId) {
-        try {
-          const draftResponse = await resumeBuilderApi.createDraft({
-            template_id: liveTemplate?.id || DEFAULT_TEMPLATE_ID,
-            resume_id: initialResumeId,
-            version_id: initialVersionId,
-          });
-          applyDraftState(draftResponse.draft);
-          historyRef.current.clear();
-          announce('Draft created from your existing resume.');
-        } finally {
-          setWorkspaceLoading(false);
-        }
-      } else {
-        setWorkspaceLoading(false);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load Resume Builder';
-      setError(message);
-      toast.error(message);
-      setCatalogLoading(false);
-      setWorkspaceLoading(false);
-    }
-  }, [
-    announce,
-    applyDraftState,
-    currentUser,
-    draftId,
-    loadDraftWorkspace,
-    loadTemplatePreviews,
-    searchParams,
-  ]);
-
-  useEffect(() => {
-    void loadInitial();
-  }, [loadInitial]);
-
-  const createDraft = useCallback(async (templateId?: string) => {
-    const trimmedName = profileIdentity?.name.trim() || '';
-    const trimmedEmail = profileIdentity?.email.trim() || '';
-    if (!trimmedName || !trimmedEmail) {
-      const message = !trimmedName
-        ? 'Add your name in Profile before creating a Builder draft.'
-        : 'Add your email in Profile before creating a Builder draft.';
-      toast.error(message);
-      announce(message);
-      return;
-    }
-    try {
-      setSaving(true);
-      const response = await resumeBuilderApi.createDraft({
-        template_id: templateId || selectedTemplateId,
-        resume_id: searchParams.get('resumeId') || undefined,
-        version_id: searchParams.get('versionId') || undefined,
-        profile: buildInitialProfile({ name: trimmedName, email: trimmedEmail }),
-      });
-      applyDraftState(response.draft);
-      historyRef.current.clear();
-      setSavedDrafts((current) => [response.draft, ...current.filter((item) => item.id !== response.draft.id)]);
+    if (!isWorkspaceRoute) {
+      loadedBootstrapKeyRef.current = null;
+      setDraft(null);
+      setSavedFingerprint(buildDraftFingerprint(null));
+      cleanupPreviewUrl();
       setLatex('');
       setPreviewStatus('idle');
-      announce('Draft created.');
-      toast.success('Draft created');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create draft');
-    } finally {
-      setSaving(false);
+      setPreviewStale(false);
+      setPageCount(0);
+      historyRef.current.clear();
+      setCatalogLoading(false);
+      setWorkspaceLoading(false);
+      return;
     }
-  }, [announce, applyDraftState, profileIdentity, searchParams, selectedTemplateId]);
 
-  const openDraft = useCallback((nextDraftId: string) => {
-    navigate(`/resume-vault/builder/${nextDraftId}`);
-  }, [navigate]);
+    if (!catalogReady) {
+      setCatalogLoading(true);
+      setWorkspaceLoading(true);
+      return;
+    }
+
+    if (loadedBootstrapKeyRef.current === runKey && draftRef.current) {
+      setCatalogLoading(false);
+      setWorkspaceLoading(false);
+      return;
+    }
+
+    setCatalogLoading(false);
+    setWorkspaceLoading(true);
+    setError(null);
+
+    void (async () => {
+      try {
+        const healthSnapshot = healthRef.current;
+        if (healthSnapshot && !healthSnapshot.enabled) {
+          throw new Error('Resume Builder is disabled.');
+        }
+
+        if (generation !== bootstrapGenRef.current) return;
+
+        setTemplatePreviewUrls((current) => {
+          Object.values(current).forEach((url) => URL.revokeObjectURL(url));
+          return {};
+        });
+        void loadTemplatePreviews(templatesRef.current);
+
+        const nextIdentity = resolveBuilderIdentity(settingsDocRef.current, currentUserRef.current);
+        const liveTemplate = templatesRef.current.find((template) => template.status === 'live');
+
+        if (runKey.startsWith('draft:')) {
+          const targetDraftId = runKey.slice('draft:'.length);
+          await loadDraftWorkspace(targetDraftId, nextIdentity);
+          if (generation !== bootstrapGenRef.current || !mountedRef.current) return;
+          loadedBootstrapKeyRef.current = runKey;
+        } else if (runKey.startsWith('create:')) {
+          try {
+            const draftResponse = await draftMutationsRef.current.createDraft({
+              template_id: liveTemplate?.id || DEFAULT_TEMPLATE_ID,
+              resume_id: initialResumeId,
+              version_id: initialVersionId,
+            });
+            if (generation !== bootstrapGenRef.current || !mountedRef.current) return;
+            loadedBootstrapKeyRef.current = `draft:${draftResponse.draft.id}`;
+            applyDraftStateRef.current(draftResponse.draft);
+            historyRef.current.clear();
+            announce('Draft created from your existing resume.');
+          } finally {
+            if (generation === bootstrapGenRef.current && mountedRef.current) {
+              setWorkspaceLoading(false);
+            }
+          }
+        } else if (mountedRef.current && generation === bootstrapGenRef.current) {
+          setWorkspaceLoading(false);
+        }
+      } catch (err) {
+        if (generation !== bootstrapGenRef.current || !mountedRef.current) return;
+        const message = err instanceof Error ? err.message : 'Failed to load Resume Builder';
+        setError(message);
+        toast.error(message);
+        setWorkspaceLoading(false);
+      }
+    })();
+  }, [
+    announce,
+    catalogReady,
+    cleanupPreviewUrl,
+    initialResumeId,
+    initialVersionId,
+    loadDraftWorkspace,
+    loadTemplatePreviews,
+    workspaceBootstrapKey,
+  ]);
 
   const setDraftProfile = useCallback(
     (updater: (profile: ResumeProfile) => ResumeProfile, history: HistoryMode = 'debounced') => {
@@ -1002,7 +953,7 @@ export function useResumeBuilder() {
       }
       try {
         if (!silent) setSaving(true);
-        const response = await resumeBuilderApi.saveDraft(current.id, {
+        const response = await draftMutations.saveDraft(current.id, {
           name: trimmedName,
           profile: profileForPersistence(current.profile),
           section_layout: current.section_layout,
@@ -1020,7 +971,6 @@ export function useResumeBuilder() {
           setDraft((prev) => (prev ? { ...prev, name: trimmedName } : prev));
         }
         setSavedFingerprint(buildDraftFingerprint(savedSnapshot));
-        setSavedDrafts((list) => [response.draft, ...list.filter((item) => item.id !== response.draft.id)]);
         if (!silent) {
           announce('Draft saved.');
           toast.success('Draft saved');
@@ -1045,7 +995,47 @@ export function useResumeBuilder() {
     onSave: () => persistDraft({ silent: true }),
   });
 
+  const flushAutosaveRef = useRef(flushAutosave);
+  flushAutosaveRef.current = flushAutosave;
+
+  useEffect(
+    () => () => {
+      void flushAutosaveRef.current();
+    },
+    [],
+  );
+
   const saveState: SaveState = saving || autosaveState === 'saving' ? 'saving' : autosaveState;
+
+  const setTemplateId = useCallback(
+    async (templateId: string) => {
+      if (!draft || draft.template_id === templateId) return;
+      const nextTemplate = templates.find((template) => template.id === templateId);
+      if (!nextTemplate || nextTemplate.status !== 'live') return;
+
+      try {
+        setSaving(true);
+        const saved = await flushAutosave();
+        if (!saved) return;
+        const response = await draftMutations.patchDraft(draft.id, { template_id: templateId });
+        setDraft(response.draft);
+        setSavedFingerprint(buildDraftFingerprint(response.draft));
+        setPreviewStale(true);
+        setPreviewStatus('idle');
+        const warnings = computeTemplateFieldWarnings(response.draft.profile, nextTemplate);
+        if (warnings.length) {
+          toast(warnings[0], { icon: 'ℹ️' });
+        } else {
+          toast.success('Template updated — refresh preview to see changes.');
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to change template');
+      } finally {
+        setSaving(false);
+      }
+    },
+    [draft, flushAutosave, templates],
+  );
 
   const saveCurrentDraft = useCallback(
     async (draftName?: string) => {
@@ -1102,6 +1092,7 @@ export function useResumeBuilder() {
       setPreviewUrl(URL.createObjectURL(response.blob));
       setPageCount(response.pageCount);
       setPreviewStatus('ready');
+      setPreviewStale(false);
       const latexResponse = await resumeBuilderApi.getLatex(draft.id);
       setLatex(latexResponse.tex);
       announce(`Preview refreshed. ${response.pageCount || 0} page${response.pageCount === 1 ? '' : 's'}.`);
@@ -1141,20 +1132,6 @@ export function useResumeBuilder() {
     setPublishOpen(false);
   }, []);
 
-  const stayOnBuilder = useCallback(() => {
-    setNavigationBlockOpen(false);
-    setPendingNavigationHref(null);
-  }, []);
-
-  const leaveBuilder = useCallback(() => {
-    const nextPath = pendingNavigationHref;
-    setNavigationBlockOpen(false);
-    setPendingNavigationHref(null);
-    if (nextPath) {
-      navigate(nextPath);
-    }
-  }, [navigate, pendingNavigationHref]);
-
   const publishCurrentDraft = useCallback(async (): Promise<PublishDraftResponse | null> => {
     if (!draft) return null;
     if (!canPublish) {
@@ -1178,7 +1155,7 @@ export function useResumeBuilder() {
       setPublishServerIssue(null);
       const saved = await flushAutosave();
       if (!saved) return null;
-      const response = await resumeBuilderApi.publishDraft(draft.id, {
+      const response = await draftMutations.publishDraft(draft.id, {
         user_note: publishUserNote.trim(),
         target_resume_id: targetResumeId,
         resume_name: publishMode === 'new' ? trimmedResumeName : null,
@@ -1279,7 +1256,7 @@ export function useResumeBuilder() {
       destructive: true,
       onConfirm: async () => {
         try {
-          await resumeBuilderApi.deleteDraft(draft.id);
+          await draftMutations.deleteDraft(draft.id);
           cleanupPreviewUrl();
           historyRef.current.clear();
           setDraft(null);
@@ -1298,8 +1275,8 @@ export function useResumeBuilder() {
   }, [announce, cleanupPreviewUrl, confirmDialog, draft, navigate]);
 
   const activeTemplate = useMemo(
-    () => templates.find((template) => template.id === (draft?.template_id || selectedTemplateId)) ?? null,
-    [draft?.template_id, selectedTemplateId, templates],
+    () => templates.find((template) => template.id === draft?.template_id) ?? null,
+    [draft?.template_id, templates],
   );
 
   return {
@@ -1318,11 +1295,11 @@ export function useResumeBuilder() {
     templates,
     activeTemplate,
     draft,
-    savedDrafts,
     profileIdentity,
     profileReady,
     previewUrl,
     previewStatus,
+    previewStale,
     pageCount,
     latex,
     dirty,
@@ -1332,27 +1309,23 @@ export function useResumeBuilder() {
     statusMessage,
     overflowWarnings,
     selectedSectionId,
-    selectedTemplateId,
     publishOpen,
     publishMode,
     publishResumeName,
     publishUserNote,
     publishTags,
     publishSetActive,
-    navigationBlockOpen,
     hasExistingPublishTarget,
     templatePreviewUrls,
     saveDraftOpen,
     saveDraftName,
     setSelectedSectionId,
-    setSelectedTemplateId,
     setPublishMode,
     setPublishResumeName,
     setPublishUserNote,
     setPublishTags,
     setPublishSetActive,
-    createDraft,
-    openDraft,
+    setTemplateId,
     setProfileName,
     setProfileEmail,
     setProfilePhone,
@@ -1398,8 +1371,6 @@ export function useResumeBuilder() {
     refreshLatex,
     openPublishModal,
     closePublishModal,
-    stayOnBuilder,
-    leaveBuilder,
     publishCurrentDraft,
     deleteCurrentDraft,
   };

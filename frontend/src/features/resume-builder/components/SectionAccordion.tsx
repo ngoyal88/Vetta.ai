@@ -1,19 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ClipboardCheck, GripVertical, Layers, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ClipboardCheck, GripVertical, Layers, LayoutTemplate, Plus, Trash2 } from 'lucide-react';
 
 import type { useResumeBuilder } from '../hooks/useResumeBuilder';
 import { getSectionIcon } from '../utils/sectionIcons';
 
 import BuilderReadinessCard from './BuilderReadinessCard';
 import { SectionFormContent } from './SectionFormContent';
+import TemplateGallery from './TemplateGallery';
 
-type EditorTab = 'sections' | 'readiness';
+export type EditorTab = 'sections' | 'readiness' | 'template';
 
 type SectionAccordionProps = {
   builder: ReturnType<typeof useResumeBuilder>;
+  requestedTab?: EditorTab | null;
+  onTabRequestConsumed?: () => void;
 };
 
-export default function SectionAccordion({ builder }: SectionAccordionProps) {
+export default function SectionAccordion({
+  builder,
+  requestedTab = null,
+  onTabRequestConsumed,
+}: SectionAccordionProps) {
   const draft = builder.draft;
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState('');
@@ -26,6 +33,12 @@ export default function SectionAccordion({ builder }: SectionAccordionProps) {
     setEditingSectionId(null);
     setDraftLabel('');
   }, [builder.selectedSectionId]);
+
+  useEffect(() => {
+    if (!requestedTab) return;
+    setEditorTab(requestedTab);
+    onTabRequestConsumed?.();
+  }, [onTabRequestConsumed, requestedTab]);
 
   useEffect(() => {
     if (!addMenuOpen) return undefined;
@@ -48,6 +61,8 @@ export default function SectionAccordion({ builder }: SectionAccordionProps) {
   const editorSubtitle =
     editorTab === 'sections'
       ? `${visibleSections.length} active${hiddenSections.length ? ` · ${hiddenSections.length} hidden` : ''} · Click a name to rename`
+      : editorTab === 'template'
+        ? 'Compare layouts with your content — refresh preview after switching'
       : readiness.status === 'blocked'
         ? `${readiness.blocking.length} blocking issue${readiness.blocking.length === 1 ? '' : 's'} before publish`
         : reviewCount > 0
@@ -100,6 +115,16 @@ export default function SectionAccordion({ builder }: SectionAccordionProps) {
             {readiness.blocking.length > 0 ? (
               <span className="rb-segmented__badge">{readiness.blocking.length}</span>
             ) : null}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={editorTab === 'template'}
+            onClick={() => setEditorTab('template')}
+            className={['rb-segmented__btn', editorTab === 'template' ? 'rb-segmented__btn--active' : ''].join(' ')}
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" aria-hidden />
+            Template
           </button>
         </div>
 
@@ -158,6 +183,20 @@ export default function SectionAccordion({ builder }: SectionAccordionProps) {
 
       {editorTab === 'readiness' ? (
         <BuilderReadinessCard readiness={readiness} embedded />
+      ) : editorTab === 'template' ? (
+        <div className="rb-panel__body px-3 pb-4 pt-1">
+          <TemplateGallery
+            variant="workspace"
+            templates={builder.templates}
+            selectedTemplateId={builder.draft?.template_id ?? ''}
+            previewUrls={builder.templatePreviewUrls}
+            catalogLoading={builder.catalogLoading}
+            previewsLoading={builder.previewsLoading}
+            onSelect={(templateId) => {
+              void builder.setTemplateId(templateId);
+            }}
+          />
+        </div>
       ) : (
       <ul className="rb-section-list">
         {visibleSections.map((section) => {

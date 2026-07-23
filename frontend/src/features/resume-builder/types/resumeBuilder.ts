@@ -38,6 +38,7 @@ export interface ResumeBuilderDraft {
   target_resume_id?: string | null;
   source_resume_id?: string | null;
   source_version_id?: string | null;
+  source_kind?: 'blank' | 'vault_fork';
   status: 'draft';
 }
 
@@ -91,6 +92,11 @@ export interface SaveDraftPayload {
   section_layout: BuilderSection[];
   custom_sections: BuilderCustomSection[];
   target_resume_id?: string | null;
+}
+
+export interface DraftPatchPayload {
+  name?: string;
+  template_id?: string;
 }
 
 export interface PublishDraftPayload {

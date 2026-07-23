@@ -6,6 +6,9 @@ type SaveDraftModalProps = {
   open: boolean;
   saving: boolean;
   defaultName: string;
+  title?: string;
+  description?: string;
+  submitLabel?: string;
   onClose: () => void;
   onSubmit: (name: string) => void | Promise<void>;
 };
@@ -17,6 +20,9 @@ export default function SaveDraftModal({
   open,
   saving,
   defaultName,
+  title = 'Save Draft',
+  description = 'Name this draft so you can find it on the Builder landing page.',
+  submitLabel = 'Save Draft',
   onClose,
   onSubmit,
 }: SaveDraftModalProps) {
@@ -29,11 +35,9 @@ export default function SaveDraftModal({
   }, [defaultName, open]);
 
   return (
-    <Modal open={open} onClose={onClose} title="Save Draft">
+    <Modal open={open} onClose={onClose} title={title}>
       <div className="space-y-4 text-[var(--color-on-surface)]">
-        <p className="type-body-md text-[var(--color-on-surface-variant)]">
-          Name this draft so you can find it on the Builder landing page.
-        </p>
+        <p className="type-body-md text-[var(--color-on-surface-variant)]">{description}</p>
 
         <label className="block text-sm">
           <span className="type-label-sm uppercase tracking-[0.12em] text-[var(--color-on-surface-variant)]">
@@ -70,7 +74,7 @@ export default function SaveDraftModal({
             disabled={saving || !name.trim()}
             className="inline-flex items-center justify-center rounded-xl bg-[var(--color-primary)] px-4 py-2.5 text-sm font-semibold text-[var(--color-on-primary)] transition-[background-color,box-shadow,opacity] duration-150 hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? 'Saving…' : 'Save Draft'}
+            {saving ? 'Saving…' : submitLabel}
           </button>
         </div>
       </div>
