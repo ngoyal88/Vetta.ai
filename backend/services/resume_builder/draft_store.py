@@ -72,6 +72,7 @@ async def create_draft(
             section_layout = default_section_layout()
             custom_sections = []
 
+        source_kind = "vault_fork" if request.resume_id else "blank"
         payload = {
             "name": draft_name,
             "created_at": now,
@@ -84,6 +85,7 @@ async def create_draft(
             "target_resume_id": request.resume_id,
             "source_resume_id": request.resume_id,
             "source_version_id": request.version_id,
+            "source_kind": source_kind,
             "status": "draft",
         }
         _collection(uid).document(draft_id).set(payload)
@@ -136,19 +138,99 @@ async def save_draft(uid: str, draft_id: str, request: DraftUpdateRequest) -> Re
     return await asyncio.to_thread(_save)
 
 
-async def patch_draft(uid: str, draft_id: str, request: DraftPatchRequest) -> ResumeBuilderDraft:
+async def patch_draft(
+    uid: str,
+    draft_id: str,
+    request: DraftPatchRequest,
+    *,
+    template_version: Optional[str] = None,
+) -> ResumeBuilderDraft:
     current = await get_draft(uid, draft_id)
     if current is None:
         raise ValueError("draft_not_found")
 
-    update_request = DraftUpdateRequest(
-        name=request.name if request.name is not None else current.name,
-        profile=request.profile or current.profile,
-        section_layout=request.section_layout or current.section_layout,
-        custom_sections=request.custom_sections if request.custom_sections is not None else current.custom_sections,
-        target_resume_id=request.target_resume_id if request.target_resume_id is not None else current.target_resume_id,
+    has_content_patch = any(
+        field is not None
+        for field in (
+            request.name,
+            request.profile,
+            request.section_layout,
+            request.custom_sections,
+            request.target_resume_id,
+        )
     )
-    return await save_draft(uid, draft_id, update_request)
+
+    if has_content_patch:
+        update_request = DraftUpdateRequest(
+            name=request.name if request.name is not None else current.name,
+            profile=request.profile or current.profile,
+            section_layout=request.section_layout or current.section_layout,
+            custom_sections=(
+                request.custom_sections if request.custom_sections is not None else current.custom_sections
+            ),
+            target_resume_id=(
+                request.target_resume_id if request.target_resume_id is not None else current.target_resume_id
+            ),
+        )
+        draft = await save_draft(uid, draft_id, update_request)
+    else:
+        draft = current
+
+    if request.template_id is None:
+        return draft
+
+    if template_version is None:
+        raise ValueError("template_version_required")
+
+    def _patch_template() -> ResumeBuilderDraft:
+        doc = _collection(uid).document(draft_id)
+        snap = doc.get()
+        if not snap.exists:
+            raise ValueError("draft_not_found")
+        payload = {
+            **(snap.to_dict() or {}),
+            "updated_at": _now(),
+            "template_id": request.template_id,
+            "template_version": template_version,
+        }
+        doc.set(payload, merge=True)
+        return _hydrate(draft_id, uid, payload)
+
+    return await asyncio.to_thread(_patch_template)
+
+
+async def duplicate_draft(uid: str, draft_id: str) -> ResumeBuilderDraft:
+    source = await get_draft(uid, draft_id)
+    if source is None:
+        raise ValueError("draft_not_found")
+
+    def _duplicate() -> ResumeBuilderDraft:
+        new_id = f"draft_{uuid.uuid4().hex[:12]}"
+        now = _now()
+        existing_names = [
+            str((snap.to_dict() or {}).get("name") or "").strip()
+            for snap in _collection(uid).stream()
+        ]
+        draft_name = next_resume_draft_name(existing_names)
+        payload = {
+            "name": draft_name,
+            "created_at": now,
+            "updated_at": now,
+            "template_id": source.template_id,
+            "template_version": source.template_version,
+            "profile": profile_snapshot_dict(source.profile.model_dump()),
+            "section_layout": [section.model_dump() for section in source.section_layout],
+            "custom_sections": [section.model_dump() for section in source.custom_sections],
+            "target_resume_id": None,
+            "source_resume_id": source.source_resume_id,
+            "source_version_id": source.source_version_id,
+            "source_kind": source.source_kind or ("vault_fork" if source.source_resume_id else "blank"),
+            "status": "draft",
+        }
+        _collection(uid).document(new_id).set(payload)
+        return _hydrate(new_id, uid, payload)
+
+    return await asyncio.to_thread(_duplicate)
 
 
 async def delete_draft(uid: str, draft_id: str) -> bool:

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 from models.resume import ResumeProfile
 
 TemplateStatus = Literal["live", "coming_soon"]
+DraftSourceKind = Literal["blank", "vault_fork"]
 BuilderSectionKind = Literal[
     "identity",
     "summary",
@@ -77,6 +78,7 @@ class ResumeBuilderDraft(BaseModel):
     target_resume_id: Optional[str] = None
     source_resume_id: Optional[str] = None
     source_version_id: Optional[str] = None
+    source_kind: Optional[DraftSourceKind] = None
     status: Literal["draft"] = "draft"
 
     @model_validator(mode="after")
@@ -124,6 +126,7 @@ class DraftPatchRequest(BaseModel):
     section_layout: Optional[list[BuilderSection]] = None
     custom_sections: Optional[list[BuilderCustomSection]] = None
     target_resume_id: Optional[str] = None
+    template_id: Optional[str] = None
 
 
 class DraftResponse(BaseModel):
