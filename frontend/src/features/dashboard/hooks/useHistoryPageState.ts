@@ -24,7 +24,7 @@ export function useHistoryPageState() {
   const navigate = useNavigate();
   const detailRef = useRef<HTMLDivElement>(null);
 
-  const { items, loading, refresh, deleteInterview, deletingId } = useInterviewHistory({ limit: 20 });
+  const { items, loading, isFetching, refresh, deleteInterview, deletingId } = useInterviewHistory({ limit: 20 });
 
   const [filterTab, setFilterTab] = useState<HistoryFilterTab>('all');
   const [dateRange, setDateRange] = useState<HistoryDateRange>('all');
@@ -166,6 +166,7 @@ export function useHistoryPageState() {
     detailRef,
     items,
     loading,
+    isFetching,
     refresh,
     filterTab,
     setFilterTab,

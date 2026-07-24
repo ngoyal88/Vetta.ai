@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
+import { invalidateProfileCaches } from 'shared/query/invalidateCaches';
 import { isTerminalPipelineStatus } from 'shared/services/profileClaimsPoll';
 import { api, type PipelineStatus, type ProfileClaim } from 'shared/services/api';
 
@@ -20,6 +22,8 @@ type UseSessionProfileClaimsResult = {
 };
 
 export function useSessionProfileClaims(sessionId?: string): UseSessionProfileClaimsResult {
+  const queryClient = useQueryClient();
+  const profileInvalidatedRef = useRef(false);
   const [strengthClaims, setStrengthClaims] = useState<ProfileClaim[]>([]);
   const [gapClaims, setGapClaims] = useState<ProfileClaim[]>([]);
   const [loading, setLoading] = useState(Boolean(sessionId));
@@ -56,6 +60,16 @@ export function useSessionProfileClaims(sessionId?: string): UseSessionProfileCl
       cancelled = true;
     };
   }, [sessionId, fetchGeneration, loadClaims]);
+
+  useEffect(() => {
+    profileInvalidatedRef.current = false;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!isTerminalPipelineStatus(pipelineStatus) || profileInvalidatedRef.current) return;
+    profileInvalidatedRef.current = true;
+    void invalidateProfileCaches(queryClient);
+  }, [pipelineStatus, queryClient]);
 
   const refetch = useCallback(() => {
     if (!sessionId) return;

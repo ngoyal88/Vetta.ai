@@ -12,6 +12,7 @@ type TemplateGalleryProps = {
   previewUrls?: Record<string, string>;
   catalogLoading?: boolean;
   previewsLoading?: boolean;
+  variant?: 'landing' | 'workspace';
   onSelect: (templateId: string) => void;
 };
 
@@ -67,12 +68,15 @@ export default function TemplateGallery({
   previewUrls = {},
   catalogLoading = false,
   previewsLoading = false,
+  variant = 'landing',
   onSelect,
 }: TemplateGalleryProps) {
   const placeholderCount =
-    templates.some((template) => template.status === 'live')
-      ? Math.min(2, Math.max(0, 3 - templates.length))
-      : Math.min(3, Math.max(0, 4 - templates.length));
+    variant === 'workspace'
+      ? 0
+      : templates.some((template) => template.status === 'live')
+        ? Math.min(2, Math.max(0, 3 - templates.length))
+        : Math.min(3, Math.max(0, 4 - templates.length));
   const [expandedPreview, setExpandedPreview] = useState<{
     templateName: string;
     previewUrl: string;

@@ -8,6 +8,7 @@ import "./index.css";
 import { AuthProvider } from "shared/context/AuthContext";
 import { BackendHealthProvider } from "shared/context/BackendHealthContext";
 import { ConfirmDialogProvider } from "shared/context/ConfirmDialogContext";
+import QueryProvider from "shared/query/QueryProvider";
 
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
@@ -22,13 +23,15 @@ if (!rootEl) throw new Error("Root element #root not found");
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
     <AuthProvider>
-      <BrowserRouter>
-        <BackendHealthProvider>
-          <ConfirmDialogProvider>
-            <App />
-          </ConfirmDialogProvider>
-        </BackendHealthProvider>
-      </BrowserRouter>
+      <QueryProvider>
+        <BrowserRouter>
+          <BackendHealthProvider>
+            <ConfirmDialogProvider>
+              <App />
+            </ConfirmDialogProvider>
+          </BackendHealthProvider>
+        </BrowserRouter>
+      </QueryProvider>
     </AuthProvider>
   </React.StrictMode>,
 );

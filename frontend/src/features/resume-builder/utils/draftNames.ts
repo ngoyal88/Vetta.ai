@@ -1,5 +1,9 @@
 const RESUME_DRAFT_NAME_RE = /^Resume\((\d+)\)$/i;
 
+export function isAutoDraftName(name: string): boolean {
+  return RESUME_DRAFT_NAME_RE.test(name.trim());
+}
+
 export function nextResumeDraftName(existingNames: string[]): string {
   const usedNumbers = new Set<number>();
 

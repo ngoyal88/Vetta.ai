@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo } from 'react';
 
+import { useVaultEntriesQuery, useVaultVersionQuery } from 'features/vault/queries/useVaultEntriesQuery';
 import type { ResumeProfile, VaultEntry, VaultVersion } from 'features/vault/types';
-import { vaultApi } from 'features/vault/services/vaultApi';
 
 export type ActiveVaultResumeState = {
   profile: ResumeProfile | null;
@@ -12,46 +12,37 @@ export type ActiveVaultResumeState = {
 };
 
 export function useActiveVaultResume(): ActiveVaultResumeState {
-  const [profile, setProfile] = useState<ResumeProfile | null>(null);
-  const [entry, setEntry] = useState<VaultEntry | null>(null);
-  const [version, setVersion] = useState<VaultVersion | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { entries, meta, loading: entriesLoading, refresh: refreshEntries } = useVaultEntriesQuery();
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await vaultApi.listEntries();
-      const entries = data.entries ?? [];
-      const activeId = data.meta?.active_resume_id;
-      const activeEntry =
-        entries.find((item) => item.id === activeId && item.current_version_id) ??
-        entries.find((item) => item.is_active && item.current_version_id) ??
-        entries.find((item) => item.current_version_id) ??
-        null;
+  const activeEntry = useMemo(() => {
+    if (!entries.length) return null;
+    const activeId = meta.active_resume_id;
+    return (
+      entries.find((item) => item.id === activeId && item.current_version_id) ??
+      entries.find((item) => item.is_active && item.current_version_id) ??
+      entries.find((item) => item.current_version_id) ??
+      null
+    );
+  }, [entries, meta.active_resume_id]);
 
-      if (!activeEntry?.current_version_id) {
-        setEntry(null);
-        setVersion(null);
-        setProfile(null);
-        return;
-      }
+  const versionId = activeEntry?.current_version_id ?? undefined;
+  const {
+    version,
+    loading: versionLoading,
+    refresh: refreshVersion,
+  } = useVaultVersionQuery(versionId);
 
-      const activeVersion = await vaultApi.getVersion(activeEntry.current_version_id);
-      setEntry(activeEntry);
-      setVersion(activeVersion);
-      setProfile(activeVersion?.profile_snapshot ?? null);
-    } catch {
-      setEntry(null);
-      setVersion(null);
-      setProfile(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const profile = version?.profile_snapshot ?? null;
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const reload = async () => {
+    await Promise.all([refreshEntries(), refreshVersion()]);
+  };
 
-  return { profile, entry, version, loading, reload };
+  return {
+    profile,
+    entry: activeEntry,
+    version: version ?? null,
+    loading: entriesLoading || (Boolean(versionId) && versionLoading),
+    reload,
+  };
 }

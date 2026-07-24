@@ -76,6 +76,35 @@ Shared primitives: `shared/ui/` (`Modal`, `Chip`, `SectionLabel`, `EmptyState`).
 - Deprecated barrel: `shared/services/api.ts` re-exports interview services — prefer direct feature imports for new code.
 - Auth state: `useAuth()` from `shared/context/AuthContext.tsx`.
 
+## Data fetching (TanStack Query)
+
+Authenticated **read** caching uses TanStack Query as SSOT:
+
+| Layer | Location |
+|-------|----------|
+| Provider + defaults | `shared/query/QueryProvider.tsx`, `queryClient.ts`, `queryPolicies.ts` |
+| Query keys (invalidation SSOT) | `shared/query/queryKeys.ts` |
+| Auth gate | `shared/query/authQuery.ts` — `useAuthQueryEnabled()` |
+| Loading UX helper | `shared/query/queryStatus.ts` — skeleton vs background refresh |
+| Cache invalidation helpers | `shared/query/invalidateCaches.ts` — post-interview + shared profile/history predicates |
+| Feature reads | `features/<domain>/queries/use*Query.ts` |
+| Feature writes | `features/<domain>/mutations/use*Mutations.ts` |
+| Legacy hook facades | e.g. `useVaultLibrary` wraps query + mutations |
+
+**Rules:**
+
+- `*Api.ts` stays transport-only; do not add cache logic there.
+- Use `enabled: useAuthQueryEnabled()` on authenticated queries.
+- Mutations must `invalidateQueries` (or patch cache) — never rely on `staleTime` for user writes.
+- Post-interview: `SessionReportScreen` calls `invalidateAfterInterview()` on mount; `useSessionProfileClaims` re-invalidates profile caches when VPM reaches terminal status.
+- List pages with cached data show `AppIndeterminateBar` during background refetch (`isFetching && hasData`).
+- E2E: `npm run test:e2e` — `VITE_E2E_MOCK_AUTH` + Playwright API mocks in `e2e/fixtures/` (port 5174); replaces manual TanStack QA matrix for vault cache, builder nav, history invalidation.
+- Logout clears cache via `useQueryAuthLifecycle` in `QueryProvider`.
+- **Use Query for:** list/detail GETs (vault, drafts, history, claims, settings).
+- **Keep local state for:** interview room, LiveKit, builder working draft edits, LLM compute flows.
+
+**Cache presets** (`queryPolicies.ts`): `list` 60s, `catalog` 5m, `detail` 30s, `settings` 2m staleTime.
+
 ## Import boundaries
 
 Run `npm run check:imports` before PRs. Rules (enforced by `scripts/check-imports.mjs`):
@@ -112,7 +141,7 @@ Mode-specific setup lives under `features/modes/<mode-slug>/`. Shared mode UI go
 | Unit | `**/__tests__/` beside source | Pure helpers, hooks, reducers |
 | Service contract | `features/*/services/__tests__/` | Mock `httpClient` / `fetch`; assert URL + body |
 | Component smoke | `components/__tests__/` | Render + key interactions |
-| E2E (scaffold) | `frontend/e2e/` | Playwright; set `PLAYWRIGHT_E2E_ENABLED=1` locally |
+| E2E | `frontend/e2e/` | Playwright with `VITE_E2E_MOCK_AUTH` + API route mocks; run `npm run test:e2e` |
 
 Global setup: `src/test/setup.ts`. Vitest include: `src/**/__tests__/**/*.{test,spec}.{ts,tsx}`.
 

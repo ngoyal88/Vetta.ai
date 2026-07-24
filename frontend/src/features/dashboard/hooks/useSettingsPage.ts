@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from 'shared/context/AuthContext';
+import { queryKeys } from 'shared/query/queryKeys';
 import { api } from 'shared/services/api';
 import { getSkipPrecheck, setSkipPrecheck } from 'features/interview/preflight/precheckStorage';
-import { fetchUserSettings, persistUserSettings } from '../services/userSettingsService';
+import { persistUserSettings } from '../services/userSettingsService';
+import { useUserSettingsQuery } from '../queries/useUserSettingsQuery';
 
 export function useSettingsPage() {
   const {
@@ -19,53 +22,38 @@ export function useSettingsPage() {
     reauthenticateWithGoogle,
   } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { settings: settingsDoc, loading: settingsLoading } = useUserSettingsQuery();
 
-  const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [defaultRole, setDefaultRole] = useState('');
   const [defaultYoe, setDefaultYoe] = useState(0);
   const [skipPrecheck, setSkipPrecheckState] = useState(false);
+  const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sendingVerification, setSendingVerification] = useState(false);
   const [sendingReset, setSendingReset] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!currentUser) {
+      setInitialized(true);
+      return;
+    }
+    if (settingsLoading) return;
 
-    (async () => {
-      if (!currentUser) {
-        setLoading(false);
-        return;
-      }
+    setDisplayName(settingsDoc?.name || currentUser.displayName || '');
+    setPhotoUrl(currentUser.photoURL || settingsDoc?.photoURL || '');
+    setDefaultRole(settingsDoc?.defaults?.targetRole || '');
+    setDefaultYoe(
+      typeof settingsDoc?.defaults?.yearsExperience === 'number' ? settingsDoc.defaults.yearsExperience : 0,
+    );
+    setSkipPrecheckState(getSkipPrecheck());
+    setInitialized(true);
+  }, [currentUser, settingsDoc, settingsLoading]);
 
-      try {
-        const doc = await fetchUserSettings(currentUser.uid);
-        if (cancelled) return;
-
-        setDisplayName(doc?.name || currentUser.displayName || '');
-        setPhotoUrl(currentUser.photoURL || doc?.photoURL || '');
-        setDefaultRole(doc?.defaults?.targetRole || '');
-        setDefaultYoe(
-          typeof doc?.defaults?.yearsExperience === 'number' ? doc.defaults.yearsExperience : 0,
-        );
-        setSkipPrecheckState(getSkipPrecheck());
-      } catch {
-        if (!cancelled) {
-          setDisplayName(currentUser.displayName || '');
-          setPhotoUrl(currentUser.photoURL || '');
-          setSkipPrecheckState(getSkipPrecheck());
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser]);
+  const loading = !initialized || settingsLoading;
 
   const setSkipPrecheckPreference = (value: boolean) => {
     setSkipPrecheck(value);
@@ -100,6 +88,7 @@ export function useSettingsPage() {
         },
       });
 
+      await queryClient.invalidateQueries({ queryKey: queryKeys.user.settings(currentUser.uid) });
       await refreshUser();
       toast.success('Settings saved');
     } catch {
@@ -107,7 +96,7 @@ export function useSettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [currentUser, defaultRole, defaultYoe, displayName, photoUrl, refreshUser, updateProfileInfo]);
+  }, [currentUser, defaultRole, defaultYoe, displayName, photoUrl, queryClient, refreshUser, updateProfileInfo]);
 
   const handleSendVerification = useCallback(async () => {
     setSendingVerification(true);

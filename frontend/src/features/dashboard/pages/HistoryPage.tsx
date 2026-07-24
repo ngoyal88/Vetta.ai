@@ -9,6 +9,7 @@ import { HistorySessionList } from '../components/history/HistorySessionList';
 import { HistoryToolbar } from '../components/history/HistoryToolbar';
 import { TranscriptOverlay } from '../components/history/TranscriptOverlay';
 import { useHistoryPageState } from '../hooks/useHistoryPageState';
+import AppIndeterminateBar from 'shared/components/AppIndeterminateBar';
 import PageLoadingState from 'shared/components/PageLoadingState';
 import { PreSessionCheckerWithBrowserCheck } from 'features/interview/preflight/PreSessionChecker';
 import {
@@ -23,6 +24,7 @@ const HistoryPage: React.FC = () => {
 
   return (
     <div className="history-page relative min-h-[calc(100vh-4rem)] overflow-x-hidden pb-16 pt-10">
+      <AppIndeterminateBar active={state.isFetching} />
       {state.showPreCheck && state.preCheckSessionId ? (
         <PreSessionCheckerWithBrowserCheck
           sessionId={state.preCheckSessionId}

@@ -520,17 +520,18 @@ Authorization: Bearer {token}
 Request:
 {
   "user_id": "user123",
-  "interview_type": "dsa",
+  "interview_type": "role_targeted",
   "difficulty": "medium",
-  "custom_role": "Senior Backend Engineer",
-  "resume_data": {...}
+  "target_role": "Senior Backend Engineer",
+  "job_description": "...",
+  "interview_focus": "mixed"
 }
 
 Response:
 {
   "session_id": "uuid-here",
   "question": {...},
-  "interview_type": "dsa",
+  "interview_type": "role_targeted",
   "difficulty": "medium"
 }
 ```

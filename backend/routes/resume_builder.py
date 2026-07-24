@@ -10,7 +10,15 @@ from services.resume_builder.compile_client import (
     compile_preview,
     compile_service_health,
 )
-from services.resume_builder.draft_store import create_draft, delete_draft, get_draft, list_drafts, patch_draft, save_draft
+from services.resume_builder.draft_store import (
+    create_draft,
+    delete_draft,
+    duplicate_draft,
+    get_draft,
+    list_drafts,
+    patch_draft,
+    save_draft,
+)
 from services.resume_builder.models import (
     BuilderValidationError,
     CreateDraftRequest,
@@ -181,7 +189,19 @@ async def resume_builder_patch_draft(
     try:
         if request.profile is not None:
             validate_identity_fields(request.profile)
-        draft = await patch_draft(uid, draft_id, request)
+        patch_payload = request
+        if request.name is not None:
+            patch_payload = request.model_copy(update={"name": validate_draft_name(request.name)})
+        template_version: str | None = None
+        if request.template_id is not None:
+            template = get_template(request.template_id)
+            template_version = template.version
+        draft = await patch_draft(
+            uid,
+            draft_id,
+            patch_payload,
+            template_version=template_version,
+        )
         return DraftResponse(draft=draft)
     except BuilderValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.as_detail()) from exc
@@ -191,6 +211,24 @@ async def resume_builder_patch_draft(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise_internal_error(log, exc, message="Failed to update builder draft")
+
+
+@router.post("/drafts/{draft_id}/duplicate", response_model=DraftResponse)
+async def resume_builder_duplicate_draft(
+    draft_id: str,
+    uid: str = Depends(verify_firebase_token),
+) -> DraftResponse:
+    _ensure_enabled()
+    await check_rate_limit(uid, "resume_builder_draft_save", limit=60, window_seconds=60)
+    try:
+        draft = await duplicate_draft(uid, draft_id)
+        return DraftResponse(draft=draft)
+    except ValueError as exc:
+        if str(exc) == "draft_not_found":
+            raise HTTPException(status_code=404, detail="Draft not found") from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_internal_error(log, exc, message="Failed to duplicate builder draft")
 
 
 @router.delete("/drafts/{draft_id}", status_code=204)

@@ -38,8 +38,12 @@ backend/venv
 backend/.fontconfig-cache/
 backend/.venv/
 
-# --- Node / frontend ---
-node_modules/
+# --- Frontend tests (local only for now) ---
+frontend/e2e/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.cache/
 frontend/node_modules/
 npm-debug.log*
 yarn-debug.log*

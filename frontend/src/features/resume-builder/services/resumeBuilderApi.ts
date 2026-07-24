@@ -1,8 +1,10 @@
 import { auth } from 'firebaseConfig';
+import { getE2EAuthHeaders } from 'shared/e2e/e2eMockAuth';
 
 import type {
   CreateDraftPayload,
   DraftListResponse,
+  DraftPatchPayload,
   DraftResponse,
   LatexResponse,
   PublishDraftPayload,
@@ -66,6 +68,8 @@ const parseJsonResponse = async <T>(response: Response, fallback: string): Promi
 };
 
 const getAuthHeaders = async (): Promise<Record<string, string>> => {
+  const e2eHeaders = await getE2EAuthHeaders();
+  if (e2eHeaders) return e2eHeaders;
   const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
   const token = await user.getIdToken();
@@ -120,6 +124,23 @@ const saveDraft = async (draftId: string, payload: SaveDraftPayload): Promise<Dr
     body: JSON.stringify(payload),
   });
   return parseJsonResponse<DraftResponse>(response, 'Failed to save draft');
+};
+
+const patchDraft = async (draftId: string, payload: DraftPatchPayload): Promise<DraftResponse> => {
+  const response = await fetch(`${API_URL}/resume-builder/drafts/${encodeURIComponent(draftId)}`, {
+    method: 'PATCH',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<DraftResponse>(response, 'Failed to update draft');
+};
+
+const duplicateDraft = async (draftId: string): Promise<DraftResponse> => {
+  const response = await fetch(`${API_URL}/resume-builder/drafts/${encodeURIComponent(draftId)}/duplicate`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  return parseJsonResponse<DraftResponse>(response, 'Failed to duplicate draft');
 };
 
 const deleteDraft = async (draftId: string): Promise<void> => {
@@ -180,6 +201,8 @@ export const resumeBuilderApi = {
   listDrafts,
   getDraft,
   saveDraft,
+  patchDraft,
+  duplicateDraft,
   deleteDraft,
   getLatex,
   previewDraft,

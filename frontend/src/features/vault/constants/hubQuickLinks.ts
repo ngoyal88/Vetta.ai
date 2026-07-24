@@ -15,7 +15,7 @@ export const VAULT_HUB_QUICK_LINKS: VaultHubQuickLink[] = [
     to: '/resume-vault/builder',
     icon: Pencil,
     title: 'Build In Vetta',
-    description: 'Create a polished resume draft, refresh the PDF preview, and publish it straight into Vault.',
+    description: 'Create a polished resume draft, start blank or from Vault, and publish straight into Vault.',
     color: 'primary',
   },
   {

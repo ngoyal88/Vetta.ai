@@ -1,5 +1,8 @@
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Lock } from "lucide-react";
 
+import { invalidateAfterInterview } from "shared/query/invalidateCaches";
 import FeedbackCard from "features/interview/report/FeedbackCard";
 import { ProfileClaimsReview } from "features/interview/report/ProfileClaimsReview";
 import type { FeedbackPayload } from "features/interview/types";
@@ -44,6 +47,12 @@ export default function SessionReportScreen({
   sessionLabel,
   onBack,
 }: Props) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    void invalidateAfterInterview(queryClient);
+  }, [queryClient]);
+
   const normalized = normalizeFeedback(feedback);
   const hasFeedback = Boolean(normalized.text);
   const subtitle = getSessionReportSubtitle(normalized.reason, hasFeedback);

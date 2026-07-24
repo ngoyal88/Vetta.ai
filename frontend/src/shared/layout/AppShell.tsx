@@ -16,6 +16,7 @@ import {
 
 import { useAuth } from 'shared/context/AuthContext';
 import UserAccountMenu from 'shared/components/UserAccountMenu';
+import { prefetchForNavPath } from 'shared/query/prefetchQueries';
 
 type NavItem = {
   label: string;
@@ -70,6 +71,7 @@ const AppShell = ({ children }: AppShellProps) => {
               to={href}
               end={end}
               aria-label={label}
+              onMouseEnter={() => prefetchForNavPath(href)}
               className={({ isActive }) =>
                 [
                   'dashboard-nav-link',
@@ -132,6 +134,7 @@ const AppShell = ({ children }: AppShellProps) => {
                   key={href}
                   to={href}
                   end={end}
+                  onMouseEnter={() => prefetchForNavPath(href)}
                   className={({ isActive }) =>
                     [
                       'dashboard-nav-link',

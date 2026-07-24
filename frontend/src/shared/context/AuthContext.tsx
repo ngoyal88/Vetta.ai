@@ -18,6 +18,7 @@ import {
 } from "firebase/auth";
 import { auth } from "firebaseConfig";
 import AppIndeterminateBar from "shared/components/AppIndeterminateBar";
+import { createE2EMockUser, isE2EMockAuthEnabled } from "shared/e2e/e2eMockAuth";
 
 type UpdateProfileInput = {
   displayName?: string | null;
@@ -54,10 +55,18 @@ export const useAuth = (): AuthContextValue => {
 };
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => auth.currentUser);
-  const [authReady, setAuthReady] = useState(() => Boolean(auth.currentUser));
+  const e2eMock = isE2EMockAuthEnabled();
+  const [currentUser, setCurrentUser] = useState<User | null>(() =>
+    e2eMock ? createE2EMockUser() : auth.currentUser,
+  );
+  const [authReady, setAuthReady] = useState(() => (e2eMock ? true : Boolean(auth.currentUser)));
 
   useEffect(() => {
+    if (isE2EMockAuthEnabled()) {
+      setCurrentUser(createE2EMockUser());
+      setAuthReady(true);
+      return undefined;
+    }
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setAuthReady(true);

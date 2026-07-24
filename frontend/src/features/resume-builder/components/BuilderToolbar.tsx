@@ -27,6 +27,7 @@ interface BuilderToolbarProps {
   onRefreshLatex: () => void | Promise<void>;
   onOpenPublish: () => void | Promise<void>;
   onDeleteDraft: () => void | Promise<void>;
+  onOpenTemplateTab?: () => void;
 }
 
 const actionButtonClass =
@@ -104,6 +105,7 @@ export default function BuilderToolbar({
   onRefreshLatex,
   onOpenPublish,
   onDeleteDraft,
+  onOpenTemplateTab,
 }: BuilderToolbarProps) {
   const pageHint = pageCount > 0 ? `${pageCount} page preview` : null;
   const isSaving = saving || saveState === 'saving';
@@ -138,10 +140,21 @@ export default function BuilderToolbar({
                 )}
             </span>
             {templateLabel ? (
-              <span className="rb-template-chip">
-                <LayoutTemplate className="h-3.5 w-3.5" aria-hidden />
-                {templateLabel}
-              </span>
+              onOpenTemplateTab ? (
+                <button
+                  type="button"
+                  onClick={onOpenTemplateTab}
+                  className="rb-template-chip focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+                >
+                  <LayoutTemplate className="h-3.5 w-3.5" aria-hidden />
+                  {templateLabel}
+                </button>
+              ) : (
+                <span className="rb-template-chip">
+                  <LayoutTemplate className="h-3.5 w-3.5" aria-hidden />
+                  {templateLabel}
+                </span>
+              )
             ) : null}
             {pageHint ? (
               <span className="type-label-sm text-[var(--color-on-surface-variant)]">{pageHint}</span>
