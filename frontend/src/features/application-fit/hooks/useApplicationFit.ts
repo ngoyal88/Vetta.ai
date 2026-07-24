@@ -9,6 +9,7 @@ import {
   extractJdTargetHints,
 } from 'shared/utils/jdInputUtils';
 
+import { useApplicationFitSnapshotQuery } from '../queries/useApplicationFitQueries';
 import { applicationFitApi } from '../services/applicationFitApi';
 import type { ApplicationFitView, ComputeResponse } from '../types/applicationFitTypes';
 import { canAnalyzeApplicationFit, JD_MAX_CHARS } from '../types/applicationFitTypes';
@@ -59,30 +60,26 @@ export function useApplicationFit() {
     if (state.targetCompany) setTargetCompany(state.targetCompany);
   }, [location.state]);
 
+  const snapshotId = searchParams.get('snapshot_id');
+  const { snapshot, loading: snapshotLoading, error: snapshotError } = useApplicationFitSnapshotQuery(snapshotId);
+
   useEffect(() => {
-    const snapshotId = searchParams.get('snapshot_id');
     if (!snapshotId) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        setView('loading');
-        const data = await applicationFitApi.getSnapshot(snapshotId);
-        if (!cancelled) {
-          setReport(data);
-          setView('report');
-        }
-      } catch (err) {
-        if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : 'Failed to load snapshot');
-          setView('input');
-          setSearchParams({}, { replace: true });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [searchParams, setSearchParams]);
+    if (snapshotLoading) {
+      setView('loading');
+      return;
+    }
+    if (snapshot) {
+      setReport(snapshot);
+      setView('report');
+      return;
+    }
+    if (snapshotError) {
+      toast.error(snapshotError instanceof Error ? snapshotError.message : 'Failed to load snapshot');
+      setView('input');
+      setSearchParams({}, { replace: true });
+    }
+  }, [snapshot, snapshotError, snapshotId, snapshotLoading, setSearchParams]);
 
   const canAnalyze = useMemo(
     () =>

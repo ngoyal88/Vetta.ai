@@ -27,7 +27,7 @@ function getUpdatedTimestamp(entry: VaultEntry): number {
 
 export function useLibraryPage() {
   const navigate = useNavigate();
-  const { entries, meta, loading, error, refresh, setActive, deleteEntry } = useVaultLibraryContext();
+  const { entries, meta, loading, isFetching, error, refresh, setActive, deleteEntry } = useVaultLibraryContext();
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterMode, setFilterMode] = useState<LibraryFilterMode>('all');
@@ -129,6 +129,7 @@ export function useLibraryPage() {
   return {
     visibleEntries,
     loading,
+    isFetching,
     error,
     filterOpen,
     filterMode,

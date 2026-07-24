@@ -20,7 +20,7 @@ import {
   getInterviewId,
   getInterviewStartedAt,
 } from '../utils/interviewHistoryUtils';
-import { useVaultLibrary } from 'features/vault/hooks/useVaultLibrary';
+import { useVaultEntriesQuery } from 'features/vault/queries/useVaultEntriesQuery';
 
 import {
   getModeByApiType,
@@ -228,7 +228,7 @@ const Dashboard: React.FC = () => {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const reduceMotion = useReducedMotion();
-  const { entries, meta, loading: vaultLoading, error: vaultError } = useVaultLibrary();
+  const { entries, meta, loading: vaultLoading, error: vaultError } = useVaultEntriesQuery();
   const {
     items: historyItems,
     loading: historyLoading,

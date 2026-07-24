@@ -24,6 +24,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.includes("node_modules/@tanstack/react-query")) {
+            return "react-query";
+          }
           if (id.includes("node_modules/framer-motion")) {
             return "framer-motion";
           }

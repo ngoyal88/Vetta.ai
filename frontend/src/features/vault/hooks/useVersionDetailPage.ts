@@ -3,8 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 import { useVaultLibraryContext } from '../context/VaultLibraryContext';
-import { vaultApi } from '../services/vaultApi';
-import type { VaultScorecard, VaultVersion } from '../types';
+import { useVaultVersionQuery } from '../queries/useVaultEntriesQuery';
+import type { VaultScorecard } from '../types';
 import {
   buildCoverageBars,
   buildSuggestionCards,
@@ -18,10 +18,14 @@ export function useVersionDetailPage() {
   const navigate = useNavigate();
   const { entries, setActive, restoreVersion, reanalyze } = useVaultLibraryContext();
 
-  const [version, setVersion] = useState<VaultVersion | null>(null);
+  const {
+    version: loadedVersion,
+    loading,
+    error: queryError,
+    refresh,
+  } = useVaultVersionQuery(versionId);
+
   const [versionScorecard, setVersionScorecard] = useState<VaultScorecard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [mobileTab, setMobileTab] = useState<'insights' | 'document'>('document');
   const [pendingRestore, setPendingRestore] = useState(false);
   const [pendingActive, setPendingActive] = useState(false);
@@ -32,43 +36,26 @@ export function useVersionDetailPage() {
     [entries, resumeId],
   );
 
-  const loadVersion = useCallback(async () => {
-    if (!versionId) return;
-    const loaded = await vaultApi.getVersion(versionId);
-    if (resumeId && loaded.resume_id !== resumeId) {
-      throw new Error('Version not found');
-    }
-    setVersion(loaded);
-    return loaded;
-  }, [resumeId, versionId]);
+  const routeError =
+    loadedVersion && resumeId && loadedVersion.resume_id !== resumeId
+      ? 'Version not found'
+      : '';
+
+  const error = routeError || queryError;
+
+  const version = routeError ? null : loadedVersion;
 
   useEffect(() => {
-    if (!versionId) return;
-    let cancelled = false;
-
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError('');
-        const loaded = await loadVersion();
-        if (cancelled || !loaded) return;
-        if (entry?.current_version_id === loaded.id && entry.scorecard) {
-          setVersionScorecard(entry.scorecard);
-        } else {
-          setVersionScorecard(null);
-        }
-      } catch (err) {
-        if (!cancelled) setError(getErrorMessage(err, 'Failed to load version'));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [versionId, loadVersion, entry?.current_version_id, entry?.scorecard]);
+    if (!version || !entry) {
+      setVersionScorecard(null);
+      return;
+    }
+    if (entry.current_version_id === version.id && entry.scorecard) {
+      setVersionScorecard(entry.scorecard);
+    } else {
+      setVersionScorecard(null);
+    }
+  }, [entry, version]);
 
   const activeScorecard = versionScorecard ?? (entry?.current_version_id === version?.id ? entry?.scorecard : null);
 
@@ -94,30 +81,28 @@ export function useVersionDetailPage() {
       setReanalyzing(true);
       const res = await reanalyze(entry.id, versionId);
       setVersionScorecard(res.scorecard);
-      const refreshed = await vaultApi.getVersion(versionId);
-      setVersion(refreshed);
+      await refresh();
       toast.success('Re-analyzed');
     } catch (err) {
       toast.error(getErrorMessage(err, 'Re-analysis failed'));
     } finally {
       setReanalyzing(false);
     }
-  }, [entry, reanalyze, versionId]);
+  }, [entry, reanalyze, refresh, versionId]);
 
   const handleRestore = useCallback(async () => {
     if (!versionId) return;
     try {
       setPendingRestore(true);
       await restoreVersion(versionId);
-      const refreshed = await loadVersion();
-      if (refreshed) setVersion(refreshed);
+      await refresh();
       toast.success('Version restored to head');
     } catch (err) {
       toast.error(getErrorMessage(err, 'Restore failed'));
     } finally {
       setPendingRestore(false);
     }
-  }, [loadVersion, restoreVersion, versionId]);
+  }, [refresh, restoreVersion, versionId]);
 
   const handleSetActive = useCallback(async () => {
     if (!entry) return;

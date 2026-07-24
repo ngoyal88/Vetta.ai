@@ -1,4 +1,5 @@
 import { auth } from 'firebaseConfig';
+import { getE2EAuthHeaders } from 'shared/e2e/e2eMockAuth';
 
 import type {
   ResumeProfile,
@@ -74,6 +75,8 @@ const parseJsonResponse = async <T>(response: Response, fallback: string): Promi
 };
 
 const getAuthHeaders = async (isForm = false): Promise<Record<string, string>> => {
+  const e2eHeaders = await getE2EAuthHeaders(isForm);
+  if (e2eHeaders) return e2eHeaders;
   const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
   const token = await user.getIdToken();

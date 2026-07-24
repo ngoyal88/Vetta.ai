@@ -1,10 +1,13 @@
 import { auth } from "firebaseConfig";
+import { getE2EAuthHeaders } from "shared/e2e/e2eMockAuth";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export type AuthHeaders = Record<string, string>;
 
 export async function getAuthHeaders(isForm = false): Promise<AuthHeaders> {
+  const e2eHeaders = await getE2EAuthHeaders(isForm);
+  if (e2eHeaders) return e2eHeaders;
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
   const token = await user.getIdToken();
@@ -56,6 +59,8 @@ export async function authenticatedJson<T>(
 }
 
 export async function getFreshAuthHeaders(): Promise<AuthHeaders> {
+  const e2eHeaders = await getE2EAuthHeaders();
+  if (e2eHeaders) return e2eHeaders;
   const user = auth.currentUser;
   if (!user) throw new Error("Not authenticated");
   const token = await user.getIdToken(true);
