@@ -9,12 +9,14 @@ import {
 } from 'features/vault/components/library';
 import { VAULT_LIBRARY_COPY } from 'features/vault/constants/libraryContent';
 import { useLibraryPage } from 'features/vault/hooks/useLibraryPage';
+import AppIndeterminateBar from 'shared/components/AppIndeterminateBar';
 import PageLoadingState from 'shared/components/PageLoadingState';
 
 export default function VaultLibraryPage() {
   const {
     visibleEntries,
     loading,
+    isFetching,
     error,
     filterOpen,
     filterMode,
@@ -33,7 +35,8 @@ export default function VaultLibraryPage() {
   } = useLibraryPage();
 
   return (
-    <div className="app-container">
+    <div className="vault-library-page">
+      <AppIndeterminateBar active={isFetching} />
         <VaultLibraryHeader
           filterMode={filterMode}
           sortMode={sortMode}

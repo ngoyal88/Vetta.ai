@@ -2,27 +2,33 @@ import { Outlet, useLocation } from 'react-router-dom';
 
 import '../vault.css';
 import VaultBreadcrumb from '../components/VaultBreadcrumb';
+import VaultShellChrome from '../components/shell/VaultShellChrome';
 import { VaultLibraryProvider } from '../context/VaultLibraryContext';
 
-const VAULT_SHELL_PATHS = new Set(['/resume-vault', '/resume-vault/library']);
+const VAULT_SHELL_PREFIXES = [
+  '/resume-vault/builder',
+  '/resume-vault/library',
+  '/resume-vault/compare',
+];
+
+function isVaultShellRoute(pathname: string): boolean {
+  if (pathname === '/resume-vault') return true;
+  return VAULT_SHELL_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
 
 export default function VaultLayout() {
   const { pathname } = useLocation();
-  const isBuilderPage = pathname.startsWith('/resume-vault/builder');
-  const isShellPage = VAULT_SHELL_PATHS.has(pathname) || isBuilderPage;
+  const isShellPage = isVaultShellRoute(pathname);
 
   return (
     <VaultLibraryProvider>
       <div className="relative min-h-screen overflow-x-hidden bg-[var(--bg-0)] text-[var(--cream-1)]">
-        <div className={`vault-shell-page pb-14 ${isBuilderPage ? 'pt-4 md:pt-5' : 'pt-10'}`}>
+        <div className={`vault-shell-page ${isShellPage ? 'vault-shell-page--framed pt-4 md:pt-5' : 'pt-10'} pb-14`}>
           {isShellPage ? (
-            isBuilderPage ? (
-              <div className="mx-auto w-full max-w-[1440px] px-3 md:px-5 xl:px-6">
-                <Outlet />
-              </div>
-            ) : (
+            <div className="vault-shell-frame">
+              <VaultShellChrome />
               <Outlet />
-            )
+            </div>
           ) : (
             <div className="app-container">
               <VaultBreadcrumb />

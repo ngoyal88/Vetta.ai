@@ -12,28 +12,18 @@ export default function VaultHubHeader({ resumeCount }: VaultHubHeaderProps) {
   const atCapacity = resumeCount >= MAX_RESUMES;
 
   return (
-    <header className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-      <div className="max-w-3xl min-w-0">
-        <p className="type-label-sm uppercase tracking-[0.24em] text-[var(--color-secondary)]">
-          {VAULT_HUB_COPY.eyebrow}
-        </p>
-        <h1 className="type-display-lg mt-2 text-[var(--color-on-surface)]">{VAULT_HUB_COPY.title}</h1>
-        <p className="type-body-lg mt-4 text-[var(--color-on-surface-variant)]">
-          {VAULT_HUB_COPY.subtitle}
-        </p>
+    <header className="vault-hub-header">
+      <div className="vault-hub-header__copy min-w-0">
+        <h1 className="vault-hub-header__title">{VAULT_HUB_COPY.title}</h1>
+        <p className="vault-hub-header__subtitle">{VAULT_HUB_COPY.subtitle}</p>
       </div>
 
-      <div
-        className="vault-hub-capacity shrink-0"
-        aria-label={`${resumeCount} of ${MAX_RESUMES} resumes used`}
-      >
+      <div className="vault-hub-capacity shrink-0" aria-label={`${resumeCount} of ${MAX_RESUMES} resumes used`}>
         <div className="vault-hub-capacity__icon" aria-hidden>
           <FileText className="h-4 w-4" />
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] font-semibold uppercase leading-none tracking-[0.14em] text-[var(--color-outline)]">
-            Vault Capacity
-          </span>
+          <span className="vault-hub-capacity__label">Vault Capacity</span>
           <span className="type-label-md text-[var(--color-on-surface)]">
             <span className={atCapacity ? 'text-[var(--color-warning)]' : 'text-[var(--color-primary)]'}>
               {resumeCount}

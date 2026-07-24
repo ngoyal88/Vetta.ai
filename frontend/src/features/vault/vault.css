@@ -123,6 +123,467 @@
   color: var(--color-tertiary);
 }
 
+.vault-hub-capacity__label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-outline);
+}
+
+/* ===== Vault shell chrome (sub-nav + breadcrumb) ===== */
+.vault-shell-frame {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding-inline: 0.75rem;
+}
+
+@media (min-width: 768px) {
+  .vault-shell-frame {
+    padding-inline: 1.25rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .vault-shell-frame {
+    padding-inline: 1.5rem;
+  }
+}
+
+.vault-shell-chrome {
+  margin-bottom: 1.75rem;
+}
+
+.vault-shell-chrome__top {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (min-width: 1024px) {
+  .vault-shell-chrome__top {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+  }
+}
+
+.vault-shell-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  color: var(--color-on-surface-variant);
+}
+
+.vault-shell-breadcrumb__link {
+  transition: color var(--transition);
+}
+
+.vault-shell-breadcrumb__link:hover {
+  color: var(--color-on-surface);
+}
+
+.vault-shell-breadcrumb__sep {
+  opacity: 0.45;
+}
+
+.vault-shell-breadcrumb__current {
+  color: var(--color-on-surface);
+}
+
+.vault-sub-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1.25rem;
+}
+
+.vault-sub-nav__link {
+  position: relative;
+  padding: 0.35rem 0.15rem 0.65rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  color: var(--color-on-surface-variant);
+  transition: color var(--transition);
+}
+
+.vault-sub-nav__link:hover {
+  color: var(--color-on-surface);
+}
+
+.vault-sub-nav__link--active {
+  color: var(--color-on-surface);
+}
+
+.vault-sub-nav__link--active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--color-secondary);
+}
+
+/* ===== Vault hub redesign ===== */
+.vault-hub-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  padding-bottom: 1rem;
+}
+
+.vault-hub-header {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+@media (min-width: 1024px) {
+  .vault-hub-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 2rem;
+  }
+}
+
+.vault-hub-header__title {
+  font-family: var(--font-display, 'Plus Jakarta Sans', sans-serif);
+  font-size: clamp(2rem, 3vw, 3rem);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  color: var(--color-on-surface);
+}
+
+.vault-hub-header__subtitle {
+  margin-top: 0.75rem;
+  max-width: 42rem;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--color-on-surface-variant);
+}
+
+.vault-hub-primary-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 900px) {
+  .vault-hub-primary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+  }
+
+  .vault-hub-primary-grid:has(> :only-child) {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 36rem;
+  }
+}
+
+.vault-hub-primary-card {
+  display: flex;
+  min-height: 15.5rem;
+  flex-direction: column;
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+}
+
+.vault-hub-primary-card__icon {
+  display: inline-flex;
+  height: 3rem;
+  width: 3rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--color-secondary) 30%, transparent);
+  background: color-mix(in srgb, var(--color-secondary) 12%, transparent);
+  color: var(--color-secondary);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--color-secondary) 16%, transparent);
+}
+
+.vault-hub-primary-card__title {
+  margin-top: 1.25rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-on-surface);
+}
+
+.vault-hub-primary-card__description {
+  margin-top: 0.65rem;
+  flex: 1;
+  max-width: 34rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--color-on-surface-variant);
+}
+
+.vault-hub-cta {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1.35rem;
+  border-radius: 0.85rem;
+  padding: 0.85rem 1rem;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  transition:
+    transform 150ms ease,
+    opacity 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.vault-hub-cta:hover {
+  transform: translateY(-1px);
+}
+
+.vault-hub-cta--primary {
+  background: var(--color-primary-fixed, var(--color-primary));
+  color: var(--on-primary-fixed, var(--color-on-primary));
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+
+.vault-hub-cta--secondary {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--color-on-surface);
+}
+
+.vault-hub-cta--secondary:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-high) 55%, transparent);
+}
+
+.vault-hub-secondary-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 1024px) {
+  .vault-hub-secondary-grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.1fr) minmax(0, 0.95fr);
+    gap: 1.25rem;
+    align-items: stretch;
+  }
+}
+
+.vault-hub-activity {
+  border-radius: 1.25rem;
+  padding: 1.25rem;
+}
+
+.vault-hub-activity__title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+}
+
+.vault-hub-activity__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.vault-hub-activity__item {
+  border-radius: 0.95rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--color-surface-container-low) 70%, transparent);
+  padding: 0.9rem 1rem;
+}
+
+.vault-hub-activity__item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.vault-hub-activity__badge {
+  display: inline-flex;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-0) 70%, transparent);
+  padding: 0.15rem 0.55rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+}
+
+.vault-hub-activity__badge--active {
+  border-color: color-mix(in srgb, var(--color-secondary) 30%, transparent);
+  background: color-mix(in srgb, var(--color-secondary) 10%, transparent);
+  color: var(--color-secondary);
+}
+
+.vault-hub-activity__link {
+  display: block;
+  margin-top: 0.55rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-on-surface);
+  transition: color var(--transition);
+}
+
+.vault-hub-activity__link:hover {
+  color: var(--color-primary);
+}
+
+.vault-hub-activity__empty {
+  margin-top: 0.55rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--color-on-surface-variant);
+}
+
+.vault-hub-quick-upload {
+  border-radius: 1.25rem;
+  padding: 0.35rem;
+}
+
+.vault-hub-quick-upload__dropzone {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  border: 1.5px dashed var(--border-strong);
+  background: color-mix(in srgb, var(--color-surface-container-low) 55%, transparent);
+  padding: 1.5rem 1.25rem;
+  text-align: center;
+  transition:
+    border-color var(--transition),
+    background-color var(--transition);
+}
+
+.vault-hub-quick-upload__dropzone--active,
+.vault-hub-quick-upload__dropzone:hover {
+  border-color: color-mix(in srgb, var(--color-secondary) 42%, transparent);
+  background: color-mix(in srgb, var(--color-secondary) 6%, transparent);
+}
+
+.vault-hub-quick-upload__icon {
+  display: flex;
+  height: 3.5rem;
+  width: 3.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-secondary) 28%, transparent);
+  background: color-mix(in srgb, var(--color-secondary) 10%, transparent);
+  color: var(--color-secondary);
+}
+
+.vault-hub-quick-upload__title {
+  margin-top: 1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.vault-hub-quick-upload__hint {
+  margin-top: 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--color-on-surface-variant);
+}
+
+.vault-hub-quick-upload__browse {
+  margin-top: 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--bg-0) 76%, transparent);
+  padding: 0.45rem 0.95rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-on-surface);
+  transition:
+    border-color var(--transition),
+    background-color var(--transition);
+}
+
+.vault-hub-quick-upload__browse:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--color-surface-container-high) 70%, transparent);
+}
+
+.vault-hub-quick-upload__browse:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.vault-hub-compare-card {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  border-radius: 1.25rem;
+  padding: 1.25rem;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition);
+}
+
+.vault-hub-compare-card:hover {
+  background: color-mix(in srgb, var(--color-surface-container-high) 72%, transparent);
+}
+
+.vault-hub-compare-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.vault-hub-compare-card__icon {
+  display: inline-flex;
+  height: 2.5rem;
+  width: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-secondary) 28%, transparent);
+  background: color-mix(in srgb, var(--color-secondary) 10%, transparent);
+  color: var(--color-secondary);
+}
+
+.vault-hub-compare-card__title {
+  margin-top: 1rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.vault-hub-compare-card__description {
+  margin-top: 0.55rem;
+  flex: 1;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--color-on-surface-variant);
+}
+
+.vault-library-page,
+.vault-hub-page {
+  width: 100%;
+}
+
 /* ===== Vault library (/resume-vault/library) ===== */
 .vault-library-action-btn {
   display: inline-flex;
@@ -207,13 +668,13 @@
 
 .vault-library-row__active-strip {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 0.25rem;
-  border-top-left-radius: var(--radius-xl);
-  border-bottom-left-radius: var(--radius-xl);
+  top: 50%;
+  left: 0.625rem;
+  width: 0.1875rem;
+  height: 2.75rem;
+  border-radius: 999px;
   background: var(--color-primary);
+  transform: translateY(-50%);
 }
 
 .vault-library-row__grid {
@@ -1110,6 +1571,30 @@
 
 .vault-version-detail__document-viewer--parsed {
   overflow-y: auto;
+}
+
+.vault-version-detail__document-viewer--tabs {
+  position: relative;
+}
+
+.vault-version-detail__document-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.vault-version-detail__document-panel[hidden] {
+  display: none !important;
+}
+
+.vault-version-detail__document-panel--parsed {
+  overflow-y: auto;
+}
+
+.vault-version-detail__document-panel--pdf .vault-document-viewer--embedded {
+  flex: 1;
+  min-height: 0;
 }
 
 .vault-version-detail__parsed-resume {
