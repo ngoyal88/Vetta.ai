@@ -1,317 +1,460 @@
-# 🎯 Vetta.ai — AI Interview Platform
+# Vetta.ai
 
-Vetta.ai is a full-stack interview preparation platform with a React + Vite frontend and a FastAPI backend. It combines AI-powered interview sessions, resume analysis, application-fit scoring, a resume vault/builder, and optional job discovery features into one product for candidates preparing for technical roles.
+Vetta.ai is a full-stack interview preparation and career-intelligence application built with a **FastAPI backend** and **React + Vite frontend**. It combines live AI interview sessions, resume version management, fit analysis against job descriptions, and profile/readiness intelligence into one authenticated user workflow.
 
-## What this project does
+> **Scope note:** this README documents what is implemented in the repository today. For broader product vision and future direction, see `product.md` (aspirational context, not source-of-truth for current behavior).
 
-Vetta.ai helps candidates:
+---
 
-- practice interviews in multiple modes such as role-targeted, pressure mode, resume deep dive, blind mode, and pair programming
-- upload and manage resumes in a vault with versioning and comparison tools
-- evaluate their fit for a job description with application-fit scoring and history
-- explore job discovery and saved jobs when enabled
-- manage profile, account, and career preference data
-- use authentication-protected pages, realtime interview flows, and backend health checks
+## Detailed overview
 
-The app is designed as a modular product: the frontend routes expose different candidate workflows, while the backend coordinates interview sessions, AI providers, auth, storage, and optional services like LiveKit and resume compilation.
+Vetta.ai is designed for candidates who want to improve interview performance and iterate on their job-application materials with measurable feedback.
 
-## Tech stack
+In practice, the main user loop is:
 
-### Frontend
-- **React 19**
-- **TypeScript**
-- **Vite**
-- **React Router DOM 7**
-- **React Query**
-- **Firebase client SDK**
-- **Framer Motion**
-- **React Hot Toast**
-- **Sentry React**
-- **Monaco Editor**
-- **Tailwind CSS**
-- **Playwright** for end-to-end tests
-- **Vitest** for unit/integration testing
+1. Sign in and maintain profile/career preferences.
+2. Upload resumes into Resume Vault (with versions and metadata).
+3. Run **Application Fit** and **Signal Intelligence** against target roles/JDs.
+4. Start mode-specific interview sessions (role-targeted, resume deep-dive, pair-programming).
+5. Review history, feedback, and extracted profile claims to improve future sessions.
 
-### Backend
-- **Python 3.11**
-- **FastAPI**
-- **Uvicorn**
-- **Pydantic / Pydantic Settings**
-- **Redis**
-- **Firebase Admin SDK**
-- **Supabase**
-- **Meilisearch**
-- **LiveKit Agents**
-- **Google Generative AI / Groq**
-- **Deepgram**
-- **ElevenLabs**
-- **Edge TTS**
-- **Judge0** integration
-- **Sentry SDK**
-- **PyMuPDF / PyPDF2 / python-docx** for resume parsing
-- **pytest** / **pytest-asyncio** for tests
+The app supports both voice interview transport modes:
+- **LiveKit path** (when configured), and
+- **WebSocket fallback path** (`/ws/interview/...`) when fallback is enabled and LiveKit is unavailable.
 
-### Infrastructure and tooling
-- **Docker**
-- **Docker Compose**
-- **Firebase**
-- **Typst** for the resume compile service
-- **Apify** support for LinkedIn/job discovery ingestion
+Some areas are intentionally feature-gated (disabled by default in example envs), especially **Job Discovery** and **Resume Builder**.
 
-## Repository layout
+---
 
-```text
-backend/                 FastAPI API, services, routes, auth, storage, AI integrations
-frontend/                React app, feature modules, route definitions, UI and tests
-docker-compose.yml       Local multi-service orchestration
-.env.example             Root backend/runtime environment template
-frontend/.env.example    Vite frontend environment template
-firebase.json            Firebase hosting / project configuration
-firestore.indexes.json   Firestore index definitions
-product.md               Product brief and aspirational roadmap
+## Tech stack (implemented)
+
+### Frontend (`frontend/`)
+- React 19 + TypeScript
+- Vite 7
+- React Router 7
+- TanStack React Query
+- Firebase client SDK
+- Framer Motion
+- react-hot-toast
+- Sentry (`@sentry/react`)
+- Monaco editor (pair-programming coding UI)
+- Vitest + Testing Library + Playwright
+
+### Backend (`backend/`)
+- Python 3.11
+- FastAPI + Uvicorn
+- Pydantic + pydantic-settings
+- Redis
+- Firebase Admin
+- Supabase SDK
+- Meilisearch SDK
+- LiveKit agents stack
+- Groq and Google Generative AI clients
+- Deepgram (STT), ElevenLabs + Edge TTS (TTS)
+- Judge0 integration (coding interview execution)
+- PyMuPDF / PyPDF2 / python-docx (resume/JD parsing)
+- Sentry SDK
+- pytest / pytest-asyncio / fakeredis
+
+---
+
+## System architecture
+
+### Runtime architecture (high-level)
+
+```mermaid
+flowchart LR
+  U[User Browser] --> FE[React + Vite Frontend]
+  FE --> API[FastAPI Backend]
+
+  API --> R[(Redis)]
+  API --> FB[(Firebase Auth/Admin + Firestore)]
+  API --> SB[(Supabase Storage)]
+  API --> LK[LiveKit Cloud/Server]
+  API --> DG[Deepgram]
+  API --> EL[ElevenLabs]
+  API --> J0[Judge0]
+  API --> MS[(Meilisearch)]
+  API --> LLM[Groq / Gemini]
+
+  subgraph Optional Workers
+    AG[run_livekit_agent.py]
+    CS[run_compile_service.py]
+  end
+
+  API -. dispatch/attach .-> AG
+  API -. resume builder compile .-> CS
 ```
 
-### Backend structure
+### Frontend provider tree
+
+From `frontend/src/index.tsx`:
 
 ```text
-backend/
-  main.py                FastAPI app, CORS, lifespan, health checks, router wiring
-  config.py              Pydantic settings and env handling
-  Dockerfile             Python container image
-  requirements.txt       Python dependencies
-  run_livekit_agent.py   LiveKit agent worker entrypoint
-  run_compile_service.py Resume compile service entrypoint (Typst)
-  firebase_config.py     Firebase initialization
-  routes/                API routers for app features
-  services/              Business logic and integrations
-  utils/                 Logging, Redis, auth, error helpers, CORS utilities
-  models/                Pydantic models
-  templates/             Resume builder templates and LaTeX assets
-  data/                  Runtime/local data storage
-  bin/                   Supporting scripts/utilities
+React.StrictMode
+└─ AuthProvider
+   └─ QueryProvider
+      └─ BrowserRouter
+         └─ BackendHealthProvider
+            └─ ConfirmDialogProvider
+               └─ App
 ```
 
-### Frontend structure
+- Sentry initializes only when `VITE_SENTRY_DSN` is set.
+- `App.tsx` mounts website/auth/app/legacy route groups and global toast/error boundaries.
 
-```text
-frontend/
-  src/
-    index.tsx            React root, providers, Sentry init
-    App.tsx              App shell, route composition, toast host
-    firebaseConfig.ts    Firebase client config
-    routes/              Route definitions and legacy redirects
-    features/            Product areas organized by domain
-    shared/              Shared UI, hooks, layout, services, styles, utils
-    test/                Frontend test utilities
-  vite.config.ts         Vite config, aliases, build chunking
-  tsconfig.json          TypeScript configuration and path aliases
-  package.json           Frontend scripts and dependencies
-```
+### Frontend route organization
 
-## Main product areas
+- `frontend/src/routes/websiteRoutes.tsx`: `/`, `/contact`, `/pricing`, plus hash redirects (`/docs`, `/privacy`, `/terminal`).
+- `frontend/src/routes/authRoutes.tsx`: `/signin`, `/signup`, `/verify-email`.
+- `frontend/src/routes/appRoutes.tsx`: authenticated app surface:
+  - dashboard, profile preferences/account
+  - application fit + fit history
+  - signal intelligence
+  - AI interview hub + mode setup routes
+  - interview room `/interview/:sessionId`
+  - resume vault hub/library/compare/version detail
+  - feature-gated `/jobs`, `/jobs/saved`, `/resume-vault/builder`
 
-### Website and marketing pages
-The public site is defined in `frontend/src/routes/websiteRoutes.tsx` and includes:
-- `/` home page
-- `/contact`
-- `/pricing`
-- redirects for `/docs`, `/privacy`, and `/terminal`
+### Backend startup and router wiring
 
-### Authentication
-`frontend/src/routes/authRoutes.tsx` defines:
-- `/signin`
-- `/signup`
-- `/verify-email`
+`backend/main.py`:
+- loads settings from `backend/config.py`
+- configures CORS + exception handlers + access logging
+- validates Redis connectivity on startup
+- logs configured service status (LLM/STT/TTS/Judge0/LiveKit)
+- optionally embeds LiveKit agent when `LIVEKIT_AGENT_EMBEDDED=true`
+- mounts websocket fallback router when `INTERVIEW_WEBSOCKET_FALLBACK_ENABLED=true`
+- registers routers:
+  - `vault`, `application_fit`, `signal`, `job_discovery`, `career_preferences`, `user_account`, `livekit`, `resume_builder`, `contact`, `interview`
+- exposes `/` and `/health`
 
-These routes are wrapped with guest/auth guards from shared components.
+### How external services fit the system
 
-### Authenticated app experience
-`frontend/src/routes/appRoutes.tsx` defines the main app shell and protected routes:
-- `/dashboard`
-- `/profile/preferences`
-- `/profile/account`
-- `/application-fit`
-- `/application-fit/history`
-- `/signal-intelligence`
-- `/ai-interview`
-- `/ai-interview/analytics`
-- `/ai-interview/history`
-- `/ai-interview/role-targeted`
-- `/ai-interview/pressure-mode`
-- `/ai-interview/resume-deep-dive`
-- `/ai-interview/blind-mode`
-- `/ai-interview/pair-programming`
-- `/resume-vault`
-- `/resume-vault/compare`
-- `/resume-vault/library`
-- resume version/detail routes
-- optional `/jobs` and `/jobs/saved` when job discovery is enabled
-- optional `/resume-vault/builder` when the resume builder is enabled
-- `/interview/:sessionId` for the live interview room
+- **Redis**: interview session state/TTL and rate limiting.
+- **Firebase**: identity token verification and user-scoped data paths.
+- **LiveKit**: real-time interview transport; token minting and worker dispatch via `/livekit/*`.
+- **Deepgram**: speech-to-text for live interview flow/fallback path.
+- **ElevenLabs / Edge TTS**: AI voice output providers.
+- **Judge0**: executes submitted coding answers in pair-programming mode.
+- **Supabase**: optional vault file storage backend (fallback local storage exists).
+- **Meilisearch**: job discovery search index backend when job discovery is enabled.
 
-### Backend responsibilities
-`backend/main.py` wires together:
-- CORS
-- exception handling
-- access logging
-- Redis connection testing
-- service status logging
-- router registration for:
-  - interview
-  - career preferences
-  - contact
-  - application fit
-  - job discovery
-  - livekit
-  - resume builder
-  - signal
-  - user account
-  - vault
-- optional websocket fallback router
-- `/health` and `/` endpoints
+### Optional services/workers
 
-## Configuration
+- **LiveKit agent worker**: `backend/run_livekit_agent.py` (recommended separate process in dev; embedded mode is optional).
+- **Resume compile service**: `backend/run_compile_service.py` serves `services.resume_builder.compile_app:app` on port 8001 for Resume Builder preview/publish.
 
-### Root environment variables
-Copy `.env.example` to `.env` and fill in backend/runtime values.
+---
 
-Important variables include:
-- `JWT_SECRET_KEY`
-- `ALLOWED_ORIGINS`
-- `API_TOKEN`
-- `LLM_PROVIDER`
-- `LLM_API_KEY` or `GROQ_API_KEY`
-- `GROQ_MODEL`
-- `LLM_MODEL`
-- `LIVEKIT_URL`
-- `LIVEKIT_API_KEY`
-- `LIVEKIT_API_SECRET`
-- `LIVEKIT_AGENT_EMBEDDED`
-- `INTERVIEW_WEBSOCKET_FALLBACK_ENABLED`
-- `DEEPGRAM_API_KEY`
-- `ELEVENLABS_API_KEY`
-- `TTS_PROVIDER`
-- `JUDGE0_API_KEY`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_PASSWORD`
-- `FIREBASE_PROJECT_ID`
-- `FIREBASE_CREDENTIALS_PATH`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `SUPABASE_VAULT_BUCKET`
-- `VAULT_STORAGE_DIR`
-- `APPLICATION_FIT_ENABLED`
-- `JD_FIT_SEMANTIC_ALIGNMENT_ENABLED`
-- `VPM_ENABLED`
-- `JOB_DISCOVERY_ENABLED`
-- `FANTASTIC_JOBS_API_KEY`
-- `MEILISEARCH_URL`
-- `RESUME_BUILDER_ENABLED`
-- `COMPILE_SERVICE_URL`
-- `COMPILE_SERVICE_TOKEN`
-- `TYPST_BIN`
-- `EXPOSE_API_ERRORS`
-- `REQUIRE_EMAIL_VERIFIED`
-- `RATE_LIMIT_FAIL_OPEN`
-- `TRUST_PROXY_HEADERS`
-- `TRUSTED_PROXY_IPS`
+## Features (implemented product areas)
 
-### Frontend environment variables
-Copy `frontend/.env.example` to `frontend/.env`.
+### 1) AI Interview modes and session flow
 
-Important values:
-- `VITE_API_URL`
-- `VITE_WS_URL`
-- Firebase web config values
-- `VITE_USE_LIVEKIT`
-- `VITE_LIVEKIT_URL`
-- `VITE_SENTRY_DSN`
-- `VITE_REQUIRE_EMAIL_VERIFICATION`
-- `VITE_RESUME_BUILDER_ENABLED`
-- `VITE_JOB_DISCOVERY_ENABLED`
+Implemented API/session flow:
+- Start: `POST /interview/start`
+- Live room: `/interview/:sessionId` (frontend) with LiveKit or WebSocket transport
+- Code execution (coding sessions): `POST /interview/submit-code`
+- Complete + feedback: `POST /interview/complete`
+- History/session retrieval/deletion: `/interview/history`, `/interview/session/{id}`
 
-## Run locally
+Implemented mode catalog (`features/interview/domain/modeContract.ts`):
+- **Role-Targeted** (live)
+- **Resume Deep-Dive** (live)
+- **Pair Programming** (live, coding-capable)
+- **Pressure Mode** (UI route exists, marked coming-soon / not live-startable)
+- **Blind Mode** (UI route exists, marked coming-soon / not live-startable)
 
-### Docker Compose
+### 2) Resume Vault
+
+Implemented vault capabilities:
+- upload resumes (`/vault/upload`) with metadata
+- list/edit/delete entries (`/vault`, `/vault/{resume_id}`)
+- set active resume (`/vault/{resume_id}/set-active`)
+- version listing/detail (`/versions`, `/versions/{version_id}`)
+- file retrieval (`/vault/files/{version_id}`)
+- restore old version into active flow (`/restore/{version_id}`)
+- analyze a version (`/analyze`)
+- compare two resumes/versions (`/compare`) with report-oriented UI
+
+Frontend includes:
+- hub (`/resume-vault`)
+- library (`/resume-vault/library`)
+- version list/detail (`/resume-vault/r/:resumeId`, `/resume-vault/r/:resumeId/:versionId`)
+- compare workspace/result (`/resume-vault/compare`, `/resume-vault/compare/result`)
+
+### 3) Application Fit + history
+
+- Compute fit: `POST /application-fit/compute`
+- Role-scoped history: `GET /application-fit/history`
+- Snapshot retrieval: `GET /application-fit/snapshots/{snapshot_id}`
+- JD text extraction upload: `POST /application-fit/extract-text`
+
+Frontend surfaces a setup/report flow and a dedicated history page.
+
+### 4) Signal Intelligence
+
+- Readiness scoring: `POST /signal/readiness/compute`
+- Readiness history: `GET /signal/readiness/history`
+- Profile claims APIs (under interview router):
+  - list, per-session view
+  - accept/reject/bulk actions
+  - profile-memory summary timeline
+
+Frontend page combines:
+- readiness panel
+- claims inbox moderation
+- profile-memory timeline view
+
+### 5) Profile, career preferences, account management
+
+- Career preferences read/update: `GET/PATCH /career-preferences`
+- Account deletion/purge: `DELETE /user/account` (explicit confirmation required)
+- Frontend account settings include display/profile controls, verification/reset helpers, interview behavior preference, and destructive account actions.
+
+### 6) Contact form
+
+- Public endpoint: `POST /contact`
+- Optional authenticated context (if bearer token present)
+- Rate-limited and resilient to unauthenticated submissions from website contact page.
+
+### 7) Feature-flagged / gated areas
+
+Disabled by default in `.env.example` and `frontend/.env.example`:
+
+- **Job Discovery**
+  - frontend routes: `/jobs`, `/jobs/saved` (rendered only when `VITE_JOB_DISCOVERY_ENABLED=true`)
+  - backend router: `/jobs/*` (requires backend enablement and Meilisearch/config)
+
+- **Resume Builder**
+  - frontend route: `/resume-vault/builder` (rendered only when `VITE_RESUME_BUILDER_ENABLED=true`)
+  - backend router: `/resume-builder/*` (returns disabled/not-found behavior when off)
+  - requires compile service for preview/publish operations
+
+---
+
+## Local setup and run guide
+
+## 1) Root env setup
+
+From repo root:
+
 ```bash
 cp .env.example .env
 cp frontend/.env.example frontend/.env
-# fill in the required API keys and service settings
-
-docker compose up --build
 ```
 
-Services exposed by the compose file:
-- backend: `http://localhost:8000`
-- frontend: `http://localhost:3000`
-- redis: `localhost:6379`
+Then fill credentials and service URLs needed for the features you plan to run.
 
-### Backend manually
+## 2) Backend setup
+
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Optional helper processes:
+Alternative entrypoint:
+
 ```bash
-cd backend
-python run_livekit_agent.py dev
-python run_compile_service.py
+python main.py
 ```
 
-### Frontend manually
+## 3) Frontend setup
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-## Useful scripts
+Useful frontend scripts (`frontend/package.json`):
+- `npm run dev`
+- `npm run build`
+- `npm run preview`
+- `npm run test`
+- `npm run test:watch`
+- `npm run test:e2e`
+- `npm run check:no-js`
+- `npm run check:imports`
+- `npm run check:structure`
 
-### Frontend
-From `frontend/package.json`:
-- `npm run dev` — start Vite dev server
-- `npm run build` — production build
-- `npm run preview` — preview production build
-- `npm run test` — run Vitest once
-- `npm run test:watch` — watch mode
-- `npm run test:e2e` — Playwright tests
-- `npm run check:no-js` — codebase consistency check
-- `npm run check:imports` — import/path check
-- `npm run check:structure` — run both structure checks
+## 4) Optional: LiveKit agent worker
 
-### Backend
-Backend is started with Uvicorn and supports separate workers for:
-- `python main.py` or `uvicorn main:app --reload --host 0.0.0.0 --port 8000`
-- `python run_livekit_agent.py dev`
-- `python run_compile_service.py`
+Run separately from `backend/`:
 
-## How the app is organized
+```bash
+python run_livekit_agent.py dev
+```
 
-The frontend uses a feature-based architecture:
-- `features/auth` — sign-in, sign-up, verification
-- `features/dashboard` — dashboard and analytics/history
-- `features/interview` — live interview session UI
-- `features/application-fit` — score and history views
-- `features/job-discovery` — jobs and saved jobs
-- `features/modes` — interview mode entry points
-- `features/resume-builder` — resume drafting/building
-- `features/signal` — signal intelligence area
-- `features/user` — profile, preferences, account
-- `features/vault` — resume vault, compare, versions, library
-- `features/website` — marketing/public pages
-- `shared/` — reusable layout, UI, context, query client, hooks, services, utilities
+Use this when LiveKit is configured and `LIVEKIT_AGENT_EMBEDDED=false` (default in env example).
 
-The frontend boots in `frontend/src/index.tsx`, initializes Sentry if configured, and composes providers for auth, backend health, query caching, and confirmation dialogs before rendering `App.tsx`.
+## 5) Optional: Resume compile service
 
-The backend boots in `backend/main.py`, loads settings from `backend/config.py`, connects middleware and routers, and conditionally exposes websocket fallback or embedded LiveKit agent behavior based on environment flags.
+Run from `backend/`:
 
-## Notes
+```bash
+python run_compile_service.py
+```
 
-- `product.md` is a product brief and includes aspirational ideas; it should not be treated as the authoritative source for what is currently implemented.
-- The current codebase is more feature-rich than the old README suggested, especially around resume vaulting, application-fit scoring, job discovery, and interview mode routing.
-- If you enable optional features like LiveKit, resume builder, or job discovery, you must also configure the corresponding external services.
+This starts the compile app on `:8001` for Resume Builder preview/publish operations.
+
+## 6) Docker Compose usage and caveats
+
+```bash
+docker compose up --build
+```
+
+Current `docker-compose.yml` defines:
+- `backend` on `8000`
+- `redis` on `6379`
+- `frontend` on `3000`
+
+Important caveats:
+- frontend service references `frontend/Dockerfile`; verify/add that file in your branch/environment before relying on compose frontend build.
+- Compose file does not include Meilisearch or compile-service containers; run those separately if enabling dependent features.
+- Env values still come from `.env`/`frontend/.env`; compose does not remove external API credential requirements.
+
+---
+
+## Configuration reference
+
+Copy templates:
+- backend/runtime: `.env.example` → `.env`
+- frontend runtime: `frontend/.env.example` → `frontend/.env`
+
+### A) Core required (minimum app boot + auth + interview APIs)
+
+Backend (typical minimum):
+- `JWT_SECRET_KEY`
+- `ALLOWED_ORIGINS` (and optional `ALLOWED_ORIGIN_REGEX`)
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_CREDENTIALS_PATH`
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
+- LLM credentials (`LLM_PROVIDER` + corresponding key such as `GROQ_API_KEY` or `LLM_API_KEY`)
+- `DEEPGRAM_API_KEY` (needed for websocket fallback interview path)
+
+Frontend:
+- `VITE_API_URL`
+- Firebase web config (`VITE_FIREBASE_*`)
+
+### B) Core behavior toggles
+
+Backend:
+- `INTERVIEW_WEBSOCKET_FALLBACK_ENABLED`
+- `REQUIRE_EMAIL_VERIFIED`
+- `EXPOSE_API_ERRORS`
+- `RATE_LIMIT_FAIL_OPEN`
+- `TRUST_PROXY_HEADERS`, `TRUSTED_PROXY_IPS`
+
+Frontend:
+- `VITE_WS_URL`
+- `VITE_REQUIRE_EMAIL_VERIFICATION`
+
+### C) Live interview transport options
+
+Backend:
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
+- `LIVEKIT_AGENT_EMBEDDED`
+
+Frontend:
+- `VITE_USE_LIVEKIT`
+- `VITE_LIVEKIT_URL`
+
+### D) Resume Vault and storage
+
+Backend:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_VAULT_BUCKET`
+- `VAULT_STORAGE_DIR` (local fallback path)
+
+### E) Application Fit / Signal / profile intelligence
+
+Backend:
+- `APPLICATION_FIT_ENABLED`
+- `JD_FIT_SEMANTIC_ALIGNMENT_ENABLED`
+- `VPM_ENABLED`
+
+### F) Job Discovery (optional, gated)
+
+Backend:
+- `JOB_DISCOVERY_ENABLED`
+- `FANTASTIC_JOBS_API_KEY`, `FANTASTIC_JOBS_BASE_URL`
+- `JOB_DISCOVERY_INGEST_PROVIDER`
+- `MEILISEARCH_URL`, `MEILISEARCH_MASTER_KEY`
+
+Frontend:
+- `VITE_JOB_DISCOVERY_ENABLED`
+
+### G) Resume Builder (optional, gated)
+
+Backend:
+- `RESUME_BUILDER_ENABLED`
+- `COMPILE_SERVICE_URL`, `COMPILE_SERVICE_TOKEN`
+- `TYPST_BIN`
+- `APIFY_API_TOKEN` (for LinkedIn import path)
+
+Frontend:
+- `VITE_RESUME_BUILDER_ENABLED`
+
+### H) Speech + coding integrations (optional but implemented)
+
+Backend:
+- `ELEVENLABS_API_KEY`
+- `TTS_PROVIDER` (+ Edge TTS voice/rate/pitch vars)
+- `JUDGE0_API_KEY`, `JUDGE0_HOST`
+
+### I) Observability
+
+Backend:
+- `SENTRY_DSN`
+
+Frontend:
+- `VITE_SENTRY_DSN`
+
+---
+
+## Repository structure map
+
+```text
+Vetta.ai/
+├─ backend/
+│  ├─ main.py                       # FastAPI app startup, lifespan, middleware, router wiring
+│  ├─ config.py                     # Pydantic settings / env model
+│  ├─ requirements.txt              # Backend dependency set
+│  ├─ run_livekit_agent.py          # LiveKit worker entrypoint
+│  ├─ run_compile_service.py        # Resume compile-service entrypoint
+│  ├─ routes/                       # API routers (interview, vault, fit, signal, jobs, etc.)
+│  ├─ services/                     # Domain services and provider integrations
+│  ├─ utils/                        # Auth, logging, redis, rate-limit, error utilities
+│  ├─ models/                       # Shared backend API/data models
+│  ├─ templates/                    # Resume-builder templates/assets
+│  └─ data/                         # Local runtime storage fallback paths
+├─ frontend/
+│  ├─ src/index.tsx                 # App bootstrap + provider composition + optional Sentry init
+│  ├─ src/App.tsx                   # Route composition + app shell wrappers + global toaster
+│  ├─ src/routes/*.tsx              # Website/auth/app route groups + redirects
+│  ├─ src/features/                 # Feature domains (modes, interview, vault, fit, signal, user, ...)
+│  ├─ src/shared/                   # Shared contexts, query layer, UI, HTTP service helpers
+│  ├─ package.json                  # Frontend scripts and dependencies
+│  └─ vite.config.ts                # Vite plugins, aliases, chunk strategy
+├─ .env.example                     # Backend/runtime env template
+├─ frontend/.env.example            # Frontend env template
+├─ docker-compose.yml               # Local multi-service orchestration
+└─ product.md                       # Product vision (aspirational), not implementation truth
+```
+
+---
+
+## Product brief vs implementation truth
+
+- `product.md` describes long-range product vision and market narrative.
+- For implemented behavior, treat code and this README as source of truth.
+- When in doubt, verify against:
+  - backend router files under `backend/routes/`
+  - frontend route composition in `frontend/src/routes/`
+  - environment templates (`.env.example`, `frontend/.env.example`)
+
